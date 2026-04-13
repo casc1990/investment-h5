@@ -162,26 +162,38 @@ const handleDelete = async (account) => {
 }
 
 const handleSubmit = async () => {
+  // 前端检查
+  if (!formData.value.accountName?.trim()) {
+    showToast('请输入账户名称')
+    return
+  }
+  if (!formData.value.channel) {
+    showToast('请选择渠道')
+    return
+  }
+
   try {
     if (editingAccount.value) {
       await accountApi.update(editingAccount.value.id, {
-        accountName: formData.value.accountName,
+        accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
-        remark: formData.value.remark,
+        remark: formData.value.remark?.trim() || '',
       })
       showSuccessToast('更新成功')
     } else {
       await accountApi.create({
-        accountName: formData.value.accountName,
+        accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
-        remark: formData.value.remark,
+        remark: formData.value.remark?.trim() || '',
       })
       showSuccessToast('添加成功')
     }
     closeModal()
     fetchAccounts()
   } catch (error) {
-    showToast(editingAccount.value ? '更新失败' : '添加失败')
+    console.error('提交失败:', error)
+    const msg = error?.response?.data?.message || error?.message || '网络错误'
+    showToast(editingAccount.value ? `更新失败: ${msg}` : `添加失败: ${msg}`)
   }
 }
 
