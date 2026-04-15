@@ -492,7 +492,8 @@ export async function onRequest(context) {
       });
     }
 
-    return jsonResponse({ code: 404, message: 'Not Found' }, 404);
+    // 非 API 路径交给静态文件处理
+    return context.next();
   } catch (error) {
     return jsonResponse({ code: 500, message: error.message }, 500);
   }
