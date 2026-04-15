@@ -1,6 +1,22 @@
 export async function onRequest(context) {
   const url = new URL(context.request.url);
   
+  // iOS Chrome 测试端点
+  if (url.pathname === '/api/test') {
+    return new Response(JSON.stringify({
+      success: true,
+      message: 'Proxy works!',
+      timestamp: Date.now()
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+  
   // Proxy /api/* requests to the backend API
   if (url.pathname.startsWith('/api/')) {
     const backendUrl = 'https://investment-api.962549206.workers.dev' + url.pathname + (url.search || '');
