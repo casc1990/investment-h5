@@ -28,11 +28,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Copy Functions for Cloudflare Pages
+        run: cp -r functions dist/ && cp public/_redirects dist/ 2>/dev/null || true
+
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: investment-h5
-          directory: dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        run: npx wrangler pages deploy dist --project-name=investment-h5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

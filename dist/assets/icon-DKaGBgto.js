@@ -1,0 +1,1 @@
+import{Dt as e}from"./base-CAmZxyQe.js";var t={to:[String,Object],url:String,replace:Boolean};function n({to:e,url:t,replace:n,$router:r}){e&&r?r[n?`replace`:`push`](e):t&&(n?location.replace(t):location.href=t)}function r(){let t=e().proxy;return()=>n(t)}export{t as n,r,n as t};

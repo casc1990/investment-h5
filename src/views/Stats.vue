@@ -131,8 +131,8 @@ const fetchData = async () => {
     overview.value = overviewData
 
     // 获取持仓列表
-    const positionData = await positionApi.list()
-    positions.value = positionData?.positions || []
+    const positionsData = await positionApi.list()
+    positions.value = positionsData?.positions || []
 
     // 获取行情
     const fundCodes = [...new Set(positions.value.map(p => p['基金代码']).filter(Boolean))]

@@ -16,6 +16,10 @@
         <div class="account-remark" v-if="account['备注']">
           📝 {{ account['备注'] }}
         </div>
+        <!-- 成员标签 -->
+        <div class="account-member" v-if="account.member">
+          <span class="member-tag">{{ account.member.emoji }} {{ account.member.name }}</span>
+        </div>
         <div class="account-actions">
           <van-button size="small" type="primary" @click="handleEdit(account)">编辑</van-button>
           <van-button size="small" type="danger" @click="handleDelete(account)">删除</van-button>
@@ -30,7 +34,7 @@
 
     <!-- 添加按钮 -->
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="showAddModal = true">
+      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">
         ➕ 添加账户
       </van-button>
     </div>
@@ -39,7 +43,7 @@
     <van-popup v-model:show="showAddModal" position="bottom" round>
       <div class="modal-content">
         <div class="modal-title">{{ editingAccount ? '✏️ 编辑账户' : '➕ 添加账户' }}</div>
-        
+
         <van-form @submit="handleSubmit">
           <van-cell-group inset>
             <van-field
@@ -56,6 +60,15 @@
               placeholder="选择渠道"
               @click="showChannelPicker = true"
               :rules="[{ required: true, message: '请选择渠道' }]"
+            />
+            <van-field
+              v-model="formData.memberName"
+              is-link
+              readonly
+              label="归属成员"
+              placeholder="选择成员"
+              @click="showMemberPicker = true"
+              :rules="[{ required: true, message: '请选择成员' }]"
             />
             <van-field
               v-model="formData.remark"
@@ -83,23 +96,37 @@
         @cancel="showChannelPicker = false"
       />
     </van-popup>
+
+    <!-- 成员选择器 -->
+    <van-popup v-model:show="showMemberPicker" position="bottom">
+      <van-picker
+        :columns="memberOptions"
+        @confirm="onMemberConfirm"
+        @cancel="showMemberPicker = false"
+      />
+    </van-popup>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
-import { accountApi } from '../api'
+import { accountApi, memberApi } from '../api'
 
 const loading = ref(false)
 const accounts = ref([])
+const members = ref([])
 const showAddModal = ref(false)
 const showChannelPicker = ref(false)
+const showMemberPicker = ref(false)
 const editingAccount = ref(null)
+const editingAccountMemberId = ref(null)
 
 const formData = ref({
   accountName: '',
   channel: '',
+  memberId: '',
+  memberName: '',
   remark: '',
 })
 
@@ -111,6 +138,13 @@ const channelOptions = [
   { text: '其他', value: '其他' },
 ]
 
+const memberOptions = computed(() => {
+  return members.value.map(m => ({
+    text: `${m.emoji} ${m.name}`,
+    value: m.id,
+  }))
+})
+
 const getChannelIcon = (channel) => {
   const icons = {
     '支付宝': '💙',
@@ -120,6 +154,15 @@ const getChannelIcon = (channel) => {
     '其他': '📦',
   }
   return icons[channel] || '📦'
+}
+
+const fetchMembers = async () => {
+  try {
+    const data = await memberApi.list()
+    members.value = data?.members || []
+  } catch (error) {
+    console.error('Failed to fetch members:', error)
+  }
 }
 
 const fetchAccounts = async () => {
@@ -135,11 +178,27 @@ const fetchAccounts = async () => {
   }
 }
 
+const openAddModal = () => {
+  editingAccount.value = null
+  editingAccountMemberId.value = null
+  formData.value = {
+    accountName: '',
+    channel: '',
+    memberId: '',
+    memberName: '',
+    remark: '',
+  }
+  showAddModal.value = true
+}
+
 const handleEdit = (account) => {
   editingAccount.value = account
+  editingAccountMemberId.value = account.member_id || null
   formData.value = {
     accountName: account['账户名称'],
     channel: account['渠道'],
+    memberId: account.member_id || '',
+    memberName: account.member ? `${account.member.emoji} ${account.member.name}` : '',
     remark: account['备注'] || '',
   }
   showAddModal.value = true
@@ -171,6 +230,10 @@ const handleSubmit = async () => {
     showToast('请选择渠道')
     return
   }
+  if (!formData.value.memberId) {
+    showToast('请选择归属成员')
+    return
+  }
 
   try {
     if (editingAccount.value) {
@@ -178,6 +241,7 @@ const handleSubmit = async () => {
         accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
+        member_id: formData.value.memberId,
       })
       showSuccessToast('更新成功')
     } else {
@@ -185,6 +249,7 @@ const handleSubmit = async () => {
         accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
+        member_id: formData.value.memberId,
       })
       showSuccessToast('添加成功')
     }
@@ -202,13 +267,21 @@ const onChannelConfirm = ({ selectedOptions }) => {
   showChannelPicker.value = false
 }
 
+const onMemberConfirm = ({ selectedOptions }) => {
+  formData.value.memberId = selectedOptions[0].value
+  formData.value.memberName = selectedOptions[0].text
+  showMemberPicker.value = false
+}
+
 const closeModal = () => {
   showAddModal.value = false
   editingAccount.value = null
-  formData.value = { accountName: '', channel: '', remark: '' }
+  editingAccountMemberId.value = null
+  formData.value = { accountName: '', channel: '', memberId: '', memberName: '', remark: '' }
 }
 
 onMounted(() => {
+  fetchMembers()
   fetchAccounts()
 })
 </script>
@@ -280,6 +353,20 @@ onMounted(() => {
   font-size: 13px;
   color: #666;
   padding-left: 48px;
+}
+
+.account-member {
+  margin-top: 8px;
+  padding-left: 48px;
+}
+
+.member-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .account-actions {

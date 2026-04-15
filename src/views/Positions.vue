@@ -185,7 +185,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { positionApi, accountApi } from '../api'
 
@@ -274,8 +274,7 @@ const fetchAccounts = async () => {
 const fetchPositions = async () => {
   loading.value = true
   try {
-    const params = selectedAccountId.value ? { accountId: selectedAccountId.value } : {}
-    const data = await positionApi.list(params)
+    const data = await positionApi.list()
     positions.value = data?.positions || []
   } catch (error) {
     console.error('Failed to fetch positions:', error)

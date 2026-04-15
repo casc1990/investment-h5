@@ -53,7 +53,7 @@ export const accountApi = {
 // ============ 持仓 API ============
 
 export const positionApi = {
-  list: (accountId) => apiClient.get('/positions', { params: { accountId } }),
+  list: () => apiClient.get('/positions'),
   get: (id) => apiClient.get(`/positions/${id}`),
   create: (data) => apiClient.post('/positions', data),
   update: (id, data) => apiClient.put(`/positions/${id}`, data),
@@ -76,10 +76,20 @@ export const marketApi = {
   sync: () => apiClient.post('/market/sync'),
 }
 
+// ============ 成员 API ============
+
+export const memberApi = {
+  list: () => apiClient.get('/members'),
+  get: (id) => apiClient.get(`/members/${id}`),
+  create: (data) => apiClient.post('/members', data),
+  update: (id, data) => apiClient.put(`/members/${id}`, data),
+  delete: (id) => apiClient.delete(`/members/${id}`),
+}
+
 // ============ 统计 API ============
 
 export const statsApi = {
-  overview: (accountId) => apiClient.get('/stats/overview', { params: { accountId } }),
+  overview: () => apiClient.get('/stats/overview'),
   positionDetail: (id) => apiClient.get(`/stats/position/${id}`),
   history: (params) => apiClient.get('/stats/history', { params }),
 }
