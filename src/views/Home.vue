@@ -116,7 +116,7 @@ const fetchData = async () => {
     overview.value = data
   } catch (error) {
     console.error('Failed to fetch overview:', error)
-    showToast('数据加载失败')
+    showToast('数据加载失败: ' + (error.message || '网络错误'))
   } finally {
     loading.value = false
   }
