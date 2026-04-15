@@ -29,13 +29,14 @@ apiClient.interceptors.request.use(
 // 响应拦截
 apiClient.interceptors.response.use(
   response => {
+    console.log('[API Response]', response.config.url, 'status:', response.status, 'data:', JSON.stringify(response.data)?.slice(0, 200))
     if (response.data?.code === 0) {
       return response.data.data
     }
     return response.data
   },
   error => {
-    console.error('[API Error]', error.message)
+    console.error('[API Error]', error.config?.url, error.message, 'status:', error.response?.status, 'data:', JSON.stringify(error.response?.data)?.slice(0, 200))
     return Promise.reject(error)
   }
 )
