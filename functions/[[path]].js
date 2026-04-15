@@ -72,13 +72,12 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const id = generateId();
       const name = body.name || '未命名';
-      const remark = body.remark || '';
 
       await env.DB.prepare(
-        'INSERT INTO members (id, name, remark) VALUES (?, ?, ?)'
-      ).bind(id, name, remark).run();
+        'INSERT INTO members (id, name) VALUES (?, ?)'
+      ).bind(id, name).run();
 
-      return jsonResponse({ code: 0, data: { id, name, remark } });
+      return jsonResponse({ code: 0, data: { id, name } });
     }
 
     // 更新成员

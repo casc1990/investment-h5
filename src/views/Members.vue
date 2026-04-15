@@ -4,7 +4,7 @@
     <div class="member-list">
       <div v-for="member in members" :key="member.id" class="member-card">
         <div class="member-main">
-          <div class="member-avatar">{{ member.emoji }}</div>
+          <div class="member-avatar">👤</div>
           <div class="member-info">
             <div class="member-name">{{ member.name }}</div>
             <div class="member-meta">
@@ -15,10 +15,6 @@
             <div class="stat-item">
               <div class="stat-value">{{ memberStats[member.id]?.accountCount || 0 }}</div>
               <div class="stat-label">账户</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ formatMoney(memberStats[member.id]?.totalAssets || 0) }}</div>
-              <div class="stat-label">总资产</div>
             </div>
           </div>
         </div>
@@ -54,29 +50,7 @@
               placeholder="如：媳妇、本人"
               :rules="[{ required: true, message: '请输入成员名称' }]"
             />
-            <van-field
-              v-model="formData.emoji"
-              label="头像 emoji"
-              placeholder="选择一个头像，如：👤"
-              :rules="[{ required: true, message: '请输入头像emoji' }]"
-            />
           </van-cell-group>
-
-          <!-- 常用头像快捷选择 -->
-          <div class="emoji-picker">
-            <div class="emoji-picker-title">快捷选择</div>
-            <div class="emoji-grid">
-              <span
-                v-for="emoji in quickEmojis"
-                :key="emoji"
-                class="emoji-option"
-                :class="{ selected: formData.emoji === emoji }"
-                @click="formData.emoji = emoji"
-              >
-                {{ emoji }}
-              </span>
-            </div>
-          </div>
 
           <div class="modal-actions">
             <van-button round @click="closeModal">取消</van-button>
@@ -101,10 +75,7 @@ const editingMember = ref(null)
 
 const formData = ref({
   name: '',
-  emoji: '',
 })
-
-const quickEmojis = ['👤', '👨', '👩', '🧑', '👴', '👵', '🧒', '👶', '🐶', '🐱']
 
 const formatDate = (timestamp) => {
   if (!timestamp) return '-'
@@ -112,32 +83,21 @@ const formatDate = (timestamp) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-const formatMoney = (value) => {
-  if (value === null || value === undefined) return '0'
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value)
-}
-
 const fetchMembers = async () => {
   loading.value = true
   try {
     const data = await memberApi.list()
     members.value = data?.members || []
-    
+
     // 获取每个成员的账户统计
     const accountsData = await accountApi.list()
     const accounts = accountsData?.accounts || []
-    
+
     const stats = {}
     members.value.forEach(m => {
       const memberAccounts = accounts.filter(a => a.member_id === m.id)
       stats[m.id] = {
         accountCount: memberAccounts.length,
-        totalAssets: memberAccounts.reduce((sum, a) => sum + (a['总资产'] || 0), 0),
       }
     })
     memberStats.value = stats
@@ -151,7 +111,7 @@ const fetchMembers = async () => {
 
 const openAddModal = () => {
   editingMember.value = null
-  formData.value = { name: '', emoji: '' }
+  formData.value = { name: '' }
   showModal.value = true
 }
 
@@ -159,7 +119,6 @@ const handleEdit = (member) => {
   editingMember.value = member
   formData.value = {
     name: member.name,
-    emoji: member.emoji,
   }
   showModal.value = true
 }
@@ -170,7 +129,7 @@ const handleDelete = async (member) => {
   if (memberAccounts > 0) {
     message += ` 该成员有 ${memberAccounts} 个关联账户，删除后账户将变为"未分配"状态。`
   }
-  
+
   try {
     await showConfirmDialog({
       title: '确认删除',
@@ -191,22 +150,16 @@ const handleSubmit = async () => {
     showToast('请输入成员名称')
     return
   }
-  if (!formData.value.emoji?.trim()) {
-    showToast('请选择头像emoji')
-    return
-  }
 
   try {
     if (editingMember.value) {
       await memberApi.update(editingMember.value.id, {
         name: formData.value.name.trim(),
-        emoji: formData.value.emoji.trim(),
       })
       showSuccessToast('更新成功')
     } else {
       await memberApi.create({
         name: formData.value.name.trim(),
-        emoji: formData.value.emoji.trim(),
       })
       showSuccessToast('添加成功')
     }
@@ -221,7 +174,7 @@ const handleSubmit = async () => {
 const closeModal = () => {
   showModal.value = false
   editingMember.value = null
-  formData.value = { name: '', emoji: '' }
+  formData.value = { name: '' }
 }
 
 onMounted(() => {
@@ -337,40 +290,5 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   justify-content: center;
-}
-
-.emoji-picker {
-  margin-top: 16px;
-  padding: 0 16px;
-}
-
-.emoji-picker-title {
-  font-size: 13px;
-  color: #999;
-  margin-bottom: 8px;
-}
-
-.emoji-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.emoji-option {
-  font-size: 24px;
-  padding: 6px 10px;
-  background: #f5f5f5;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.emoji-option:hover {
-  background: #e8f0fe;
-}
-
-.emoji-option.selected {
-  background: #e8f0fe;
-  box-shadow: 0 0 0 2px #1a73e8;
 }
 </style>

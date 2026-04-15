@@ -17,8 +17,8 @@
           📝 {{ account['备注'] }}
         </div>
         <!-- 成员标签 -->
-        <div class="account-member" v-if="account.member">
-          <span class="member-tag">{{ account.member.emoji }} {{ account.member.name }}</span>
+        <div class="account-member" v-if="account.member_name">
+          <span class="member-tag">👤 {{ account.member_name }}</span>
         </div>
         <div class="account-actions">
           <van-button size="small" type="primary" @click="handleEdit(account)">编辑</van-button>
@@ -66,9 +66,8 @@
               is-link
               readonly
               label="归属成员"
-              placeholder="选择成员"
+              placeholder="选择成员（可选）"
               @click="showMemberPicker = true"
-              :rules="[{ required: true, message: '请选择成员' }]"
             />
             <van-field
               v-model="formData.remark"
@@ -140,7 +139,7 @@ const channelOptions = [
 
 const memberOptions = computed(() => {
   return members.value.map(m => ({
-    text: `${m.emoji} ${m.name}`,
+    text: m.name,
     value: m.id,
   }))
 })
@@ -198,7 +197,7 @@ const handleEdit = (account) => {
     accountName: account['账户名称'],
     channel: account['渠道'],
     memberId: account.member_id || '',
-    memberName: account.member ? `${account.member.emoji} ${account.member.name}` : '',
+    memberName: account.member_name || '',
     remark: account['备注'] || '',
   }
   showAddModal.value = true
@@ -221,17 +220,12 @@ const handleDelete = async (account) => {
 }
 
 const handleSubmit = async () => {
-  // 前端检查
   if (!formData.value.accountName?.trim()) {
     showToast('请输入账户名称')
     return
   }
   if (!formData.value.channel) {
     showToast('请选择渠道')
-    return
-  }
-  if (!formData.value.memberId) {
-    showToast('请选择归属成员')
     return
   }
 
@@ -241,7 +235,7 @@ const handleSubmit = async () => {
         accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
-        member_id: formData.value.memberId,
+        member_id: formData.value.memberId || null,
       })
       showSuccessToast('更新成功')
     } else {
@@ -249,7 +243,7 @@ const handleSubmit = async () => {
         accountName: formData.value.accountName.trim(),
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
-        member_id: formData.value.memberId,
+        member_id: formData.value.memberId || null,
       })
       showSuccessToast('添加成功')
     }
