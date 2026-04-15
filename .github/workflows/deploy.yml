@@ -29,7 +29,9 @@ jobs:
         run: npm run build
 
       - name: Copy Functions for Cloudflare Pages
-        run: cp -r functions dist/ && cp public/_redirects dist/ 2>/dev/null || true
+        run: |
+          cp -r functions dist/_functions
+          cp public/_redirects dist/ 2>/dev/null || true
 
       - name: Deploy to Cloudflare Pages
         run: npx wrangler pages deploy dist --project-name=investment-h5
