@@ -21,8 +21,8 @@
               <span class="account-tag">{{ position.account_name }}</span>
             </div>
           </div>
-          <div class="fund-profit" :class="{ positive: position.profit_rate >= 0, negative: position.profit_rate < 0 }">
-            <div class="profit-rate">{{ position.profit_rate >= 0 ? '+' : '' }}{{ position.profit_rate }}%</div>
+          <div class="fund-profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+            <div class="profit-rate">{{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%</div>
           </div>
         </div>
 
@@ -38,14 +38,14 @@
           </div>
           <div class="data-item">
             <span class="data-label">持有收益</span>
-            <span class="data-value profit" :class="{ positive: position.current_profit >= 0, negative: position.current_profit < 0 }">
-              {{ position.current_profit >= 0 ? '+' : '' }}¥{{ formatNumber(position.current_profit) }}
+            <span class="data-value profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
+              {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.current_profit) }}
             </span>
           </div>
           <div class="data-item">
             <span class="data-label">持有收益率</span>
-            <span class="data-value profit" :class="{ positive: position.profit_rate >= 0, negative: position.profit_rate < 0 }">
-              {{ position.profit_rate >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+            <span class="data-value profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+              {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
             </span>
           </div>
         </div>
@@ -248,17 +248,14 @@ const accountPickerOptions = computed(() => {
 })
 
 const formatNumber = (num) => {
-  return parseFloat(num || 0).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
+  return parseFloat(num || 0).toFixed(4)
 }
 
 // 计算收益率：持有收益 / (持有金额 - 持有收益)
 const calcProfitRate = (amount, profit) => {
   const cost = parseFloat(amount || 0) - parseFloat(profit || 0)
-  if (cost <= 0) return '0.00'
-  return ((parseFloat(profit || 0) / cost) * 100).toFixed(2)
+  if (cost <= 0) return '0.0000'
+  return ((parseFloat(profit || 0) / cost) * 100).toFixed(4)
 }
 
 const onMemberChange = (memberId) => {
