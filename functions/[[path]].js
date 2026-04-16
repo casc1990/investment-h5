@@ -646,7 +646,7 @@ export async function onRequest(context) {
               if (allPoints.length > 0) {
                 const last = allPoints[allPoints.length - 1];
                 const currentNAV = parseFloat(last[2]);
-                const currentDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
+                const currentDate = new Date(parseInt(last[1]) + 8 * 3600 * 1000).toISOString().split('T')[0];
                 // 用最近两个数据点计算日涨跌幅
                 if (allPoints.length >= 2) {
                   const prev = allPoints[allPoints.length - 2];
