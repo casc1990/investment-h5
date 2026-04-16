@@ -618,7 +618,7 @@ export async function onRequest(context) {
           const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
           if (allPoints.length > 0) {
             const last = allPoints[allPoints.length - 1];
-            const navDate = new Date(parseInt(last[1]) / 1000).toISOString().split('T')[0];
+            const navDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
             return jsonResponse({
               code: 0,
               data: {
@@ -659,7 +659,7 @@ export async function onRequest(context) {
             const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
             if (allPoints.length > 0) {
               const last = allPoints[allPoints.length - 1];
-              const navDate = new Date(parseInt(last[1]) / 1000).toISOString().split('T')[0];
+              const navDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
               results[code] = { nav: parseFloat(last[2]), navDate };
               return;
             }
