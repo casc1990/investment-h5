@@ -54,7 +54,7 @@ export const accountApi = {
 // ============ 持仓 API ============
 
 export const positionApi = {
-  list: () => apiClient.get('/positions'),
+  list: (params) => apiClient.get('/positions', { params }),
   get: (id) => apiClient.get(`/positions/${id}`),
   create: (data) => apiClient.post('/positions', data),
   update: (id, data) => apiClient.put(`/positions/${id}`, data),

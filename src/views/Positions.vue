@@ -1,9 +1,10 @@
 <template>
   <div class="positions-page">
-    <!-- 账户筛选 -->
+    <!-- 筛选栏 -->
     <div class="filter-bar">
       <van-dropdown-menu>
-        <van-dropdown-item v-model="selectedAccountId" :options="accountOptions" @change="fetchPositions" />
+        <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
+        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="fetchPositions" />
       </van-dropdown-menu>
     </div>
 
@@ -13,16 +14,15 @@
         <!-- 基金信息头部 -->
         <div class="fund-header">
           <div class="fund-basic">
-            <div class="fund-name">{{ position['基金名称'] || '未知基金' }}</div>
-            <div class="fund-code">{{ position['基金代码'] }}</div>
+            <div class="fund-name">{{ position.fund_name || '未知基金' }}</div>
+            <div class="fund-meta">
+              <span class="fund-code">{{ position.fund_code }}</span>
+              <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
+              <span class="account-tag">{{ position.account_name }}</span>
+            </div>
           </div>
-          <div class="fund-profit" :class="{ positive: getProfit(position) >= 0, negative: getProfit(position) < 0 }">
-            <div class="profit-amount">
-              {{ getProfit(position) >= 0 ? '+' : '' }}{{ formatNumber(getProfit(position)) }}
-            </div>
-            <div class="profit-rate">
-              {{ getProfitRate(position) >= 0 ? '+' : '' }}{{ getProfitRate(position) }}%
-            </div>
+          <div class="fund-profit" :class="{ positive: position.profit_rate >= 0, negative: position.profit_rate < 0 }">
+            <div class="profit-rate">{{ position.profit_rate >= 0 ? '+' : '' }}{{ position.profit_rate }}%</div>
           </div>
         </div>
 
@@ -30,50 +30,30 @@
         <div class="fund-data-grid">
           <div class="data-item">
             <span class="data-label">持有份额</span>
-            <span class="data-value">{{ formatNumber(position['持有份额']) }} 份</span>
+            <span class="data-value">{{ formatNumber(position.shares) }} 份</span>
           </div>
           <div class="data-item">
-            <span class="data-label">昨日净值</span>
-            <span class="data-value">{{ formatNav(position['昨日净值']) }}</span>
+            <span class="data-label">持有金额</span>
+            <span class="data-value">¥{{ formatNumber(position.amount) }}</span>
           </div>
           <div class="data-item">
-            <span class="data-label">累计净值</span>
-            <span class="data-value">{{ formatNav(position['累计净值']) }}</span>
-          </div>
-          <div class="data-item">
-            <span class="data-label">单位净值</span>
-            <span class="data-value">{{ formatNav(position['单位净值']) }}</span>
-          </div>
-        </div>
-
-        <!-- 收益数据 -->
-        <div class="profit-data-grid">
-          <div class="data-item">
-            <span class="data-label">日涨跌幅</span>
-            <span class="data-value" :class="{ positive: getDailyChange(position) >= 0, negative: getDailyChange(position) < 0 }">
-              {{ getDailyChange(position) >= 0 ? '+' : '' }}{{ getDailyChange(position) }}%
+            <span class="data-label">持有收益</span>
+            <span class="data-value profit" :class="{ positive: position.current_profit >= 0, negative: position.current_profit < 0 }">
+              {{ position.current_profit >= 0 ? '+' : '' }}¥{{ formatNumber(position.current_profit) }}
             </span>
-          </div>
-          <div class="data-item">
-            <span class="data-label">当日市值</span>
-            <span class="data-value">¥{{ formatNumber(getMarketValue(position)) }}</span>
           </div>
           <div class="data-item">
             <span class="data-label">持有收益率</span>
-            <span class="data-value" :class="{ positive: getProfitRate(position) >= 0, negative: getProfitRate(position) < 0 }">
-              {{ getProfitRate(position) >= 0 ? '+' : '' }}{{ getProfitRate(position) }}%
+            <span class="data-value profit" :class="{ positive: position.profit_rate >= 0, negative: position.profit_rate < 0 }">
+              {{ position.profit_rate >= 0 ? '+' : '' }}{{ position.profit_rate }}%
             </span>
-          </div>
-          <div class="data-item">
-            <span class="data-label">持仓成本价</span>
-            <span class="data-value">¥{{ formatNav(position['成本价']) }}</span>
           </div>
         </div>
 
         <!-- 分红方式 -->
-        <div class="dividend-info" v-if="position['分红方式']">
+        <div class="dividend-info" v-if="position.dividend_method">
           <span class="dividend-label">分红方式：</span>
-          <span class="dividend-value">{{ position['分红方式'] }}</span>
+          <span class="dividend-value">{{ position.dividend_method }}</span>
         </div>
 
         <!-- 操作按钮 -->
@@ -91,7 +71,7 @@
 
     <!-- 添加按钮 -->
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="showAddModal = true">
+      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">
         ➕ 添加持仓
       </van-button>
     </div>
@@ -104,13 +84,22 @@
         <van-form @submit="handleSubmit">
           <van-cell-group inset>
             <van-field
+              v-model="formData.memberName"
+              is-link
+              readonly
+              label="成员"
+              placeholder="选择成员"
+              @click="showMemberPicker = true"
+              :rules="[{ required: true, message: '请选择成员' }]"
+            />
+            <van-field
               v-model="formData.accountName"
               is-link
               readonly
-              label="所属账户"
+              label="账户"
               placeholder="选择账户"
               @click="showAccountPicker = true"
-              :rules="[{ required: true, message: '请选择所属账户' }]"
+              :rules="[{ required: true, message: '请选择账户' }]"
             />
             <van-field
               v-model="formData.fundCode"
@@ -135,15 +124,15 @@
               v-model.number="formData.amount"
               label="持有金额"
               type="number"
-              placeholder="持有金额"
+              placeholder="持有金额（成本）"
               :rules="[{ required: true, message: '请输入持有金额' }]"
             />
             <van-field
               v-model.number="formData.currentProfit"
-              label="当前收益"
+              label="持有收益"
               type="number"
-              placeholder="当前收益金额"
-              :rules="[{ required: true, message: '请输入当前收益' }]"
+              placeholder="当前收益金额（可正可负）"
+              :rules="[{ required: true, message: '请输入持有收益' }]"
             />
             <van-field
               v-model="formData.dividendMethod"
@@ -164,10 +153,19 @@
       </div>
     </van-popup>
 
+    <!-- 成员选择器 -->
+    <van-popup v-model:show="showMemberPicker" position="bottom">
+      <van-picker
+        :columns="memberPickerOptions"
+        @confirm="onMemberConfirm"
+        @cancel="showMemberPicker = false"
+      />
+    </van-popup>
+
     <!-- 账户选择器 -->
     <van-popup v-model:show="showAccountPicker" position="bottom">
       <van-picker
-        :columns="accountOptions"
+        :columns="accountPickerOptions"
         @confirm="onAccountConfirm"
         @cancel="showAccountPicker = false"
       />
@@ -185,15 +183,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
-import { positionApi, accountApi } from '../api'
+import { positionApi, accountApi, memberApi } from '../api'
 
 const loading = ref(false)
 const positions = ref([])
 const accounts = ref([])
+const members = ref([])
+const selectedMemberId = ref(null)
 const selectedAccountId = ref(null)
 const showAddModal = ref(false)
+const showMemberPicker = ref(false)
 const showAccountPicker = ref(false)
 const showDividendPicker = ref(false)
 const editingPosition = ref(null)
@@ -204,6 +205,8 @@ const dividendOptions = [
 ]
 
 const formData = ref({
+  memberName: '',
+  memberId: '',
   accountName: '',
   accountId: '',
   fundCode: '',
@@ -211,13 +214,38 @@ const formData = ref({
   shares: null,
   amount: null,
   currentProfit: null,
-  dividendMethod: '',
+  dividendMethod: '红利再投',
 })
 
-const accountOptions = computed(() => [
-  { text: '全部账户', value: null },
-  ...accounts.value.map(a => ({ text: a['账户名称'], value: a.id, channel: a['渠道'] })),
+// 成员选项（筛选栏）
+const memberOptions = computed(() => [
+  { text: '全部成员', value: null },
+  ...members.value.map(m => ({ text: `${m.emoji || '👤'} ${m.name}`, value: m.id }))
 ])
+
+// 筛选后的账户选项（受成员筛选影响）
+const filteredAccountOptions = computed(() => {
+  const filtered = selectedMemberId.value
+    ? accounts.value.filter(a => a.member_id === selectedMemberId.value)
+    : accounts.value
+  return [
+    { text: '全部账户', value: null },
+    ...filtered.map(a => ({ text: a['账户名称'], value: a.id }))
+  ]
+})
+
+// 成员选择器选项
+const memberPickerOptions = computed(() =>
+  members.value.map(m => ({ text: `${m.emoji || '👤'} ${m.name}`, value: m.id }))
+)
+
+// 账户选择器选项（受成员筛选影响）
+const accountPickerOptions = computed(() => {
+  const filtered = formData.value.memberId
+    ? accounts.value.filter(a => a.member_id === formData.value.memberId)
+    : accounts.value
+  return filtered.map(a => ({ text: a['账户名称'], value: a.id }))
+})
 
 const formatNumber = (num) => {
   return parseFloat(num || 0).toLocaleString('zh-CN', {
@@ -226,40 +254,27 @@ const formatNumber = (num) => {
   })
 }
 
-const formatNav = (num) => {
-  return parseFloat(num || 0).toFixed(4)
+// 计算收益率：持有收益 / (持有金额 - 持有收益)
+const calcProfitRate = (amount, profit) => {
+  const cost = parseFloat(amount || 0) - parseFloat(profit || 0)
+  if (cost <= 0) return '0.00'
+  return ((parseFloat(profit || 0) / cost) * 100).toFixed(2)
 }
 
-const getMarketValue = (position) => {
-  const shares = parseFloat(position['持有份额']) || 0
-  const nav = parseFloat(position['单位净值']) || 0
-  return shares * nav
+const onMemberChange = (memberId) => {
+  selectedMemberId.value = memberId
+  // 成员变化时，重置账户筛选
+  selectedAccountId.value = null
+  fetchPositions()
 }
 
-const getDailyChange = (position) => {
-  const yesterdayNav = parseFloat(position['昨日净值']) || 0
-  const currentNav = parseFloat(position['单位净值']) || 0
-  if (yesterdayNav === 0) return '0.00'
-  return ((currentNav - yesterdayNav) / yesterdayNav * 100).toFixed(2)
-}
-
-const getCostPrice = (position) => {
-  return parseFloat(position['成本价']) || parseFloat(position['买入净值']) || 0
-}
-
-const getProfit = (position) => {
-  const shares = parseFloat(position['持有份额']) || 0
-  const currentNav = parseFloat(position['单位净值']) || 0
-  const costPrice = getCostPrice(position)
-  if (costPrice === 0) return 0
-  return (currentNav - costPrice) * shares
-}
-
-const getProfitRate = (position) => {
-  const costPrice = getCostPrice(position)
-  const currentNav = parseFloat(position['单位净值']) || 0
-  if (costPrice === 0) return '0.00'
-  return ((currentNav - costPrice) / costPrice * 100).toFixed(2)
+const fetchMembers = async () => {
+  try {
+    const data = await memberApi.list()
+    members.value = data?.members || []
+  } catch (error) {
+    console.error('Failed to fetch members:', error)
+  }
 }
 
 const fetchAccounts = async () => {
@@ -274,8 +289,12 @@ const fetchAccounts = async () => {
 const fetchPositions = async () => {
   loading.value = true
   try {
-    const data = await positionApi.list()
-    positions.value = data?.positions || []
+    const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
+    // 计算收益率
+    positions.value = (data?.positions || []).map(p => ({
+      ...p,
+      profit_rate: calcProfitRate(p.amount, p.current_profit)
+    }))
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     showToast('加载失败')
@@ -285,14 +304,39 @@ const fetchPositions = async () => {
 }
 
 const handleSubmit = async () => {
+  if (!formData.value.accountId) {
+    showToast('请选择账户')
+    return
+  }
+  if (!formData.value.fundCode?.trim()) {
+    showToast('请输入基金代码')
+    return
+  }
+  if (!formData.value.fundName?.trim()) {
+    showToast('请输入基金名称')
+    return
+  }
+  if (formData.value.shares === null || formData.value.shares === '') {
+    showToast('请输入持有份额')
+    return
+  }
+  if (formData.value.amount === null || formData.value.amount === '') {
+    showToast('请输入持有金额')
+    return
+  }
+  if (formData.value.currentProfit === null || formData.value.currentProfit === '') {
+    showToast('请输入持有收益')
+    return
+  }
+
   try {
     const payload = {
       accountId: formData.value.accountId,
-      fundCode: formData.value.fundCode,
-      fundName: formData.value.fundName,
-      shares: formData.value.shares,
-      amount: formData.value.amount,
-      currentProfit: formData.value.currentProfit,
+      fundCode: formData.value.fundCode.trim(),
+      fundName: formData.value.fundName.trim(),
+      shares: parseFloat(formData.value.shares),
+      amount: parseFloat(formData.value.amount),
+      currentProfit: parseFloat(formData.value.currentProfit),
       dividendMethod: formData.value.dividendMethod,
     }
     
@@ -306,6 +350,7 @@ const handleSubmit = async () => {
     closeModal()
     fetchPositions()
   } catch (error) {
+    console.error('提交失败:', error)
     showToast(editingPosition.value ? '更新失败' : '添加失败')
   }
 }
@@ -313,14 +358,23 @@ const handleSubmit = async () => {
 const handleEdit = (position) => {
   editingPosition.value = position
   formData.value = {
-    accountName: position['所属账户'] || position['账户'],
-    accountId: position['账户ID'] || position['accountId'],
-    fundCode: position['基金代码'],
-    fundName: position['基金名称'],
-    shares: position['持有份额'],
-    amount: position['持有金额'],
-    currentProfit: position['当前收益'],
-    dividendMethod: position['分红方式'] || '红利再投',
+    memberId: position.member_id || '',
+    memberName: position.member_name || '',
+    accountId: position.account_id,
+    accountName: position.account_name || '',
+    fundCode: position.fund_code,
+    fundName: position.fund_name,
+    shares: position.quantity || position.shares,
+    amount: position.amount,
+    currentProfit: position.current_profit,
+    dividendMethod: position.dividend_method || '红利再投',
+  }
+  // 设置成员信息
+  if (position.member_id) {
+    const member = members.value.find(m => m.id === position.member_id)
+    if (member) {
+      formData.value.memberName = `${member.emoji || '👤'} ${member.name}`
+    }
   }
   showAddModal.value = true
 }
@@ -329,7 +383,7 @@ const handleDelete = async (position) => {
   try {
     await showConfirmDialog({
       title: '确认删除',
-      message: `确定要删除 "${position['基金名称']}" 持仓吗？`,
+      message: `确定要删除 "${position.fund_name}" 持仓吗？`,
     })
     await positionApi.delete(position.id)
     showSuccessToast('删除成功')
@@ -341,9 +395,20 @@ const handleDelete = async (position) => {
   }
 }
 
+const onMemberConfirm = ({ selectedOptions }) => {
+  const memberId = selectedOptions[0].value
+  formData.value.memberId = memberId
+  const member = members.value.find(m => m.id === memberId)
+  formData.value.memberName = member ? `${member.emoji || '👤'} ${member.name}` : ''
+  // 重置账户选择
+  formData.value.accountId = ''
+  formData.value.accountName = ''
+  showMemberPicker.value = false
+}
+
 const onAccountConfirm = ({ selectedOptions }) => {
-  formData.value.accountName = selectedOptions[0].text
   formData.value.accountId = selectedOptions[0].value
+  formData.value.accountName = selectedOptions[0].text
   showAccountPicker.value = false
 }
 
@@ -352,10 +417,29 @@ const onDividendConfirm = ({ selectedOptions }) => {
   showDividendPicker.value = false
 }
 
+const openAddModal = () => {
+  editingPosition.value = null
+  formData.value = {
+    memberName: '',
+    memberId: '',
+    accountName: '',
+    accountId: '',
+    fundCode: '',
+    fundName: '',
+    shares: null,
+    amount: null,
+    currentProfit: 0,
+    dividendMethod: '红利再投',
+  }
+  showAddModal.value = true
+}
+
 const closeModal = () => {
   showAddModal.value = false
   editingPosition.value = null
   formData.value = {
+    memberName: '',
+    memberId: '',
     accountName: '',
     accountId: '',
     fundCode: '',
@@ -363,11 +447,12 @@ const closeModal = () => {
     shares: null,
     amount: null,
     currentProfit: null,
-    dividendMethod: '',
+    dividendMethod: '红利再投',
   }
 }
 
 onMounted(() => {
+  fetchMembers()
   fetchAccounts()
   fetchPositions()
 })
@@ -415,11 +500,34 @@ onMounted(() => {
   color: #333;
 }
 
+.fund-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
 .fund-code {
-  font-size: 13px;
+  font-size: 12px;
   color: #999;
-  margin-top: 2px;
   font-family: 'Courier New', monospace;
+}
+
+.member-tag {
+  font-size: 12px;
+  color: #1a73e8;
+  background: #e8f0fe;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.account-tag {
+  font-size: 12px;
+  color: #666;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .fund-profit {
@@ -434,31 +542,18 @@ onMounted(() => {
   color: #ee0a24;
 }
 
-.profit-amount {
-  font-weight: 600;
-  font-size: 16px;
-  font-family: 'Courier New', monospace;
-}
-
 .profit-rate {
-  font-size: 13px;
-  margin-top: 2px;
+  font-weight: 600;
+  font-size: 18px;
 }
 
 .fund-data-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 12px;
   padding: 12px 0;
   border-top: 1px solid #f5f5f5;
   border-bottom: 1px solid #f5f5f5;
-}
-
-.profit-data-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  padding: 12px 0;
 }
 
 .data-item {
@@ -479,11 +574,11 @@ onMounted(() => {
   font-family: 'Courier New', monospace;
 }
 
-.data-value.positive {
+.data-value.profit.positive {
   color: #07c160;
 }
 
-.data-value.negative {
+.data-value.profit.negative {
   color: #ee0a24;
 }
 
@@ -495,10 +590,6 @@ onMounted(() => {
 
 .dividend-label {
   color: #999;
-}
-
-.dividend-value {
-  color: #333;
 }
 
 .position-actions {

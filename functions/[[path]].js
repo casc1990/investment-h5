@@ -239,23 +239,48 @@ export async function onRequest(context) {
     // 获取持仓列表
     if (path === '/api/positions' && method === 'GET') {
       const accountId = url.searchParams.get('account_id');
-      let stmt;
+      const memberId = url.searchParams.get('member_id');
+      
+      let query = `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
+                   FROM positions p 
+                   LEFT JOIN accounts a ON p.account_id = a.id 
+                   LEFT JOIN members m ON a.member_id = m.id`;
+      const conditions = [];
+      const params = [];
+      
       if (accountId) {
-        stmt = env.DB.prepare('SELECT * FROM positions WHERE account_id = ? ORDER BY created_at DESC').bind(accountId);
-      } else {
-        stmt = env.DB.prepare('SELECT * FROM positions ORDER BY created_at DESC');
+        conditions.push('p.account_id = ?');
+        params.push(accountId);
+      }
+      if (memberId) {
+        conditions.push('a.member_id = ?');
+        params.push(memberId);
+      }
+      
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY p.created_at DESC';
+      
+      let stmt = env.DB.prepare(query);
+      if (params.length > 0) {
+        stmt = stmt.bind(...params);
       }
       const { results } = await stmt.all();
+      
       const positions = results.map(r => ({
         id: r.id,
-        '账户ID': r.account_id,
-        '所属账户': r.account_name || '',
-        '基金代码': r.fund_code,
-        '基金名称': r.fund_name,
-        '持有份额': r.quantity,
-        '持有金额': r.amount || 0,
-        '当前收益': r.current_profit || 0,
-        '分红方式': r.dividend_method || '红利再投',
+        account_id: r.account_id,
+        account_name: r.account_name || '',
+        member_id: r.member_id,
+        member_name: r.member_name || '',
+        member_emoji: r.member_emoji || '👤',
+        fund_code: r.fund_code,
+        fund_name: r.fund_name,
+        shares: r.quantity,
+        amount: r.amount || 0,
+        current_profit: r.current_profit || 0,
+        dividend_method: r.dividend_method || '红利再投',
         created_at: r.created_at,
       }));
       return jsonResponse({ code: 0, data: { total: positions.length, positions } });
@@ -277,16 +302,29 @@ export async function onRequest(context) {
         'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, amount, current_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       ).bind(id, account_id, fund_code, fund_name || '', shares, amount, current_profit, dividend_method).run();
 
+      // 查询关联的账户和成员信息
+      const { results: posResults } = await env.DB.prepare(
+        `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
+         FROM positions p 
+         LEFT JOIN accounts a ON p.account_id = a.id 
+         LEFT JOIN members m ON a.member_id = m.id 
+         WHERE p.id = ?`
+      ).bind(id).all();
+      
+      const r = posResults[0];
       return jsonResponse({ code: 0, data: {
-        id,
-        '账户ID': account_id,
-        '所属账户': '',
-        '基金代码': fund_code,
-        '基金名称': fund_name || '',
-        '持有份额': shares,
-        '持有金额': amount,
-        '当前收益': current_profit,
-        '分红方式': dividend_method,
+        id: r.id,
+        account_id: r.account_id,
+        account_name: r.account_name || '',
+        member_id: r.member_id,
+        member_name: r.member_name || '',
+        member_emoji: r.member_emoji || '👤',
+        fund_code: r.fund_code,
+        fund_name: r.fund_name,
+        shares: r.quantity,
+        amount: r.amount || 0,
+        current_profit: r.current_profit || 0,
+        dividend_method: r.dividend_method,
       }});
     }
 
@@ -314,21 +352,33 @@ export async function onRequest(context) {
         await env.DB.prepare(`UPDATE positions SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
       }
 
-      const { results } = await env.DB.prepare('SELECT * FROM positions WHERE id = ?').bind(id).all();
-      if (results.length === 0) {
+      // 查询关联的账户和成员信息
+      const { results: posResults } = await env.DB.prepare(
+        `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
+         FROM positions p 
+         LEFT JOIN accounts a ON p.account_id = a.id 
+         LEFT JOIN members m ON a.member_id = m.id 
+         WHERE p.id = ?`
+      ).bind(id).all();
+      
+      if (posResults.length === 0) {
         return jsonResponse({ code: 404, message: 'Position not found' }, 404);
       }
-      const r = results[0];
+      
+      const r = posResults[0];
       return jsonResponse({ code: 0, data: {
         id: r.id,
-        '账户ID': r.account_id,
-        '所属账户': '',
-        '基金代码': r.fund_code,
-        '基金名称': r.fund_name,
-        '持有份额': r.quantity,
-        '持有金额': r.amount,
-        '当前收益': r.current_profit,
-        '分红方式': r.dividend_method,
+        account_id: r.account_id,
+        account_name: r.account_name || '',
+        member_id: r.member_id,
+        member_name: r.member_name || '',
+        member_emoji: r.member_emoji || '👤',
+        fund_code: r.fund_code,
+        fund_name: r.fund_name,
+        shares: r.quantity,
+        amount: r.amount || 0,
+        current_profit: r.current_profit || 0,
+        dividend_method: r.dividend_method,
       }});
     }
 
