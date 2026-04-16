@@ -516,6 +516,23 @@ export async function onRequest(context) {
       });
     }
 
+    // 数据库迁移接口（确保表结构完整）
+    if (path === '/api/migrate' && method === 'POST') {
+      try {
+        // 检查 members 表是否有 emoji 列
+        const tableInfo = await env.DB.prepare('PRAGMA table_info(members)').all();
+        const hasEmoji = tableInfo.results.some(col => col.name === 'emoji');
+
+        if (!hasEmoji) {
+          await env.DB.prepare('ALTER TABLE members ADD COLUMN emoji TEXT DEFAULT "👤"').run();
+        }
+
+        return jsonResponse({ code: 0, message: 'Migration completed', emojiAdded: !hasEmoji });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
     // 非 API 路径交给静态文件处理
     return context.next();
   } catch (error) {

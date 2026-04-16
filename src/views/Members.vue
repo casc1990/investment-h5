@@ -78,7 +78,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
-import { memberApi, accountApi } from '../api'
+import { memberApi, accountApi, default as apiClient } from '../api'
 
 const loading = ref(false)
 const members = ref([])
@@ -127,7 +127,7 @@ const fetchMembers = async () => {
 
 const openAddModal = () => {
   editingMember.value = null
-  formData.value = { name: '' }
+  formData.value = { name: '', emoji: '👤' }
   showModal.value = true
 }
 
@@ -197,6 +197,8 @@ const closeModal = () => {
 }
 
 onMounted(() => {
+  // 确保数据库结构是最新的
+  apiClient.post('/migrate').catch(() => {})
   fetchMembers()
 })
 </script>
