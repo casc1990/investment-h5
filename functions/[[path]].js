@@ -667,9 +667,19 @@ export async function onRequest(context) {
                 const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
                 if (allPoints.length > 0) {
                   const last = allPoints[allPoints.length - 1];
-                  nav = parseFloat(last[2]);
-                  navDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
-                  gsz = nav; // 历史净值当作估算净值存
+                  const currentNAV = parseFloat(last[2]);
+                  const currentDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
+                  // 用最近两个数据点计算日涨跌幅
+                  if (allPoints.length >= 2) {
+                    const prev = allPoints[allPoints.length - 2];
+                    const prevNAV = parseFloat(prev[2]);
+                    if (prevNAV > 0) {
+                      gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
+                    }
+                  }
+                  nav = currentNAV;      // 最新单位净值（上一交易日收盘）
+                  gsz = currentNAV;       // 历史净值当作估算净值存
+                  navDate = currentDate;
                 }
               }
             }
