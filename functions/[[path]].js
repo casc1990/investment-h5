@@ -61,6 +61,7 @@ export async function onRequest(context) {
       const members = results.map(r => ({
         id: r.id,
         name: r.name,
+        emoji: r.emoji || '👤',
         remark: r.remark || '',
         created_at: r.created_at,
       }));
@@ -72,12 +73,13 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const id = generateId();
       const name = body.name || '未命名';
+      const emoji = body.emoji || '👤';
 
       await env.DB.prepare(
-        'INSERT INTO members (id, name) VALUES (?, ?)'
-      ).bind(id, name).run();
+        'INSERT INTO members (id, name, emoji) VALUES (?, ?, ?)'
+      ).bind(id, name, emoji).run();
 
-      return jsonResponse({ code: 0, data: { id, name } });
+      return jsonResponse({ code: 0, data: { id, name, emoji } });
     }
 
     // 更新成员
@@ -86,11 +88,13 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const name = body.name;
       const remark = body.remark;
+      const emoji = body.emoji;
 
       const fields = [];
       const values = [];
       if (name !== undefined) { fields.push('name = ?'); values.push(name); }
       if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
+      if (emoji !== undefined) { fields.push('emoji = ?'); values.push(emoji); }
 
       if (fields.length > 0) {
         values.push(id);
@@ -102,7 +106,7 @@ export async function onRequest(context) {
         return jsonResponse({ code: 404, message: 'Member not found' }, 404);
       }
       const r = results[0];
-      return jsonResponse({ code: 0, data: { id: r.id, name: r.name, remark: r.remark || '' } });
+      return jsonResponse({ code: 0, data: { id: r.id, name: r.name, emoji: r.emoji || '👤', remark: r.remark || '' } });
     }
 
     // 删除成员

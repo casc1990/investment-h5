@@ -4,7 +4,7 @@
     <div class="member-list">
       <div v-for="member in members" :key="member.id" class="member-card">
         <div class="member-main">
-          <div class="member-avatar">👤</div>
+          <div class="member-avatar">{{ member.emoji || '👤' }}</div>
           <div class="member-info">
             <div class="member-name">{{ member.name }}</div>
             <div class="member-meta">
@@ -50,6 +50,19 @@
               placeholder="如：媳妇、本人"
               :rules="[{ required: true, message: '请输入成员名称' }]"
             />
+            <van-cell title="选择头像">
+              <template #value>
+                <div class="emoji-picker">
+                  <span
+                    v-for="emoji in emojiList"
+                    :key="emoji"
+                    class="emoji-option"
+                    :class="{ selected: formData.emoji === emoji }"
+                    @click="formData.emoji = emoji"
+                  >{{ emoji }}</span>
+                </div>
+              </template>
+            </van-cell>
           </van-cell-group>
 
           <div class="modal-actions">
@@ -75,7 +88,10 @@ const editingMember = ref(null)
 
 const formData = ref({
   name: '',
+  emoji: '👤',
 })
+
+const emojiList = ['👤', '👨', '👩', '👴', '👵', '👦', '👧', '🧑', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '🐱', '🐶', '🦊', '🐼']
 
 const formatDate = (timestamp) => {
   if (!timestamp) return '-'
@@ -119,6 +135,7 @@ const handleEdit = (member) => {
   editingMember.value = member
   formData.value = {
     name: member.name,
+    emoji: member.emoji || '👤',
   }
   showModal.value = true
 }
@@ -155,11 +172,13 @@ const handleSubmit = async () => {
     if (editingMember.value) {
       await memberApi.update(editingMember.value.id, {
         name: formData.value.name.trim(),
+        emoji: formData.value.emoji,
       })
       showSuccessToast('更新成功')
     } else {
       await memberApi.create({
         name: formData.value.name.trim(),
+        emoji: formData.value.emoji,
       })
       showSuccessToast('添加成功')
     }
@@ -283,6 +302,30 @@ onMounted(() => {
   font-weight: 600;
   margin-bottom: 20px;
   text-align: center;
+}
+
+.emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.emoji-option {
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.emoji-option:hover {
+  background: #f5f5f5;
+}
+
+.emoji-option.selected {
+  background: #e6f4ff;
+  box-shadow: 0 0 0 2px #1677ff;
 }
 
 .modal-actions {
