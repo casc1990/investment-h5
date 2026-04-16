@@ -54,13 +54,14 @@
         <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
           <div class="nav-item">
             <span class="nav-label">最新净值</span>
-            <span class="nav-value">{{ position.nav_gsz || position.nav_dwjz }}</span>
+            <span class="nav-value">{{ Number(position.nav_gsz || position.nav_dwjz || 0).toFixed(4) }}</span>
           </div>
           <div class="nav-item">
             <span class="nav-label">日涨幅</span>
-            <span class="nav-value profit" :class="{ positive: Number(position.nav_gszzl) >= 0, negative: Number(position.nav_gszzl) < 0 }">
-              {{ Number(position.nav_gszzl) >= 0 ? '+' : '' }}{{ position.nav_gszzl }}%
+            <span v-if="position.nav_gszzl !== null && position.nav_gszzl !== undefined" class="nav-value profit" :class="{ positive: Number(position.nav_gszzl) >= 0, negative: Number(position.nav_gszzl) < 0 }">
+              {{ Number(position.nav_gszzl) >= 0 ? '+' : '' }}{{ Number(position.nav_gszzl).toFixed(2) }}%
             </span>
+            <span v-else class="nav-value">--</span>
           </div>
           <div class="nav-item" v-if="position.nav_jzrq">
             <span class="nav-label">净值日期</span>
