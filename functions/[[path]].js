@@ -460,15 +460,13 @@ export async function onRequest(context) {
       const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all();
       // 查询所有持仓
       const { results: positions } = await env.DB.prepare('SELECT * FROM positions').all();
-      // 查询所有行情
-      const { results: markets } = await env.DB.prepare('SELECT * FROM market ORDER BY date DESC').all();
+      // 查询最新净值快照
+      const { results: snapshots } = await env.DB.prepare('SELECT * FROM market_snapshot').all();
 
-      // 建立基金最新行情映射
-      const marketMap = {};
-      markets.forEach(m => {
-        if (!marketMap[m.fund_code] || m.date > marketMap[m.fund_code].date) {
-          marketMap[m.fund_code] = m;
-        }
+      // 建立基金最新净值快照映射
+      const snapshotMap = {};
+      snapshots.forEach(m => {
+        snapshotMap[m.fund_code] = m;
       });
 
       // 计算每个账户的统计数据
@@ -483,9 +481,11 @@ export async function onRequest(context) {
 
         accPositions.forEach(pos => {
           invested += pos.amount || 0;
-          const marketData = marketMap[pos.fund_code];
-          if (marketData && marketData.nav && pos.quantity) {
-            marketValue += pos.quantity * marketData.nav;
+          const snap = snapshotMap[pos.fund_code];
+          // 优先用估算净值 gsz，盘中用这个；没有则用单位净值 dwjz；都没有则 fallback 到 amount
+          const nav = (snap && snap.gsz) ? snap.gsz : (snap && snap.dwjz) ? snap.dwjz : null;
+          if (nav && pos.quantity) {
+            marketValue += pos.quantity * nav;
           } else {
             marketValue += pos.amount || 0;
           }
@@ -577,7 +577,94 @@ export async function onRequest(context) {
           await env.DB.prepare('ALTER TABLE members ADD COLUMN emoji TEXT DEFAULT "👤"').run();
         }
 
-        return jsonResponse({ code: 0, message: 'Migration completed', emojiAdded: !hasEmoji });
+        // 检查 market_snapshot 表是否存在，不存在则创建
+        const marketTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='market_snapshot'").all();
+        if (marketTableInfo.results.length === 0) {
+          await env.DB.prepare(`
+            CREATE TABLE market_snapshot (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              fund_code TEXT UNIQUE NOT NULL,
+              name TEXT,
+              dwjz REAL,
+              gsz REAL,
+              gszzl REAL,
+              jzrq TEXT,
+              gztime TEXT,
+              updated_at INTEGER
+            )
+          `).run();
+        }
+
+        return jsonResponse({ code: 0, message: 'Migration completed', emojiAdded: !hasEmoji, marketSnapshotCreated: marketTableInfo.results.length === 0 });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
+    // 净值同步接口：获取所有持仓基金，调 fundgz 批量查净值，upsert 到 market_snapshot 表
+    // 支持 GET（手动触发）和 POST（cron 触发，校验 CLOUDFLARE_CRON_TRIGGER）
+    if (path === '/api/fund/sync' && (method === 'GET' || method === 'POST')) {
+      // Cron 触发器只能 POST，手动触发 GET/POST 都行
+      if (method === 'POST' && !env.CLOUDFLARE_CRON_TRIGGER) {
+        return jsonResponse({ code: 403, message: 'Forbidden: cron trigger only' }, 403);
+      }
+
+      try {
+        // 1. 从 positions 表获取所有不重复的基金代码
+        const { results: positions } = await env.DB.prepare('SELECT DISTINCT fund_code, fund_name FROM positions').all();
+        if (positions.length === 0) {
+          return jsonResponse({ code: 0, message: 'No positions found, nothing to sync', synced: 0 });
+        }
+
+        const fundCodes = positions.map(p => p.fund_code).filter(Boolean);
+        const fundNameMap = {};
+        positions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
+
+        // 2. 批量调 fundgz（实时估值）
+        const syncResults = {};
+        await Promise.all(fundCodes.map(async (code) => {
+          try {
+            const url = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+            const res = await fetch(url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://fund.eastmoney.com/',
+              }
+            });
+            const text = await res.text();
+            const match = text.match(/jsonpgz\((.+)\)/);
+            if (match) {
+              const d = JSON.parse(match[1]);
+              // upsert 到 market_snapshot
+              await env.DB.prepare(`
+                INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+                ON CONFLICT(fund_code) DO UPDATE SET
+                  name = excluded.name,
+                  dwjz = excluded.dwjz,
+                  gsz = excluded.gsz,
+                  gszzl = excluded.gszzl,
+                  jzrq = excluded.jzrq,
+                  gztime = excluded.gztime,
+                  updated_at = unixepoch()
+              `).bind(code, d.name || fundNameMap[code], d.dwjz || null, d.gsz || null, d.gszzl || null, d.jzrq || null, d.gztime || null).run();
+              syncResults[code] = { ok: true, gsz: d.gsz, jzrq: d.jzrq };
+            } else {
+              syncResults[code] = { ok: false, reason: 'fundgz returned empty' };
+            }
+          } catch (e) {
+            syncResults[code] = { ok: false, reason: e.message };
+          }
+        }));
+
+        const successCount = Object.values(syncResults).filter(r => r.ok).length;
+        return jsonResponse({
+          code: 0,
+          message: `Synced ${successCount}/${fundCodes.length} funds`,
+          synced: successCount,
+          total: fundCodes.length,
+          results: syncResults,
+        });
       } catch (error) {
         return jsonResponse({ code: 500, message: error.message }, 500);
       }
