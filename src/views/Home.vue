@@ -22,7 +22,7 @@
             <span class="member-name">{{ member.member_name }}</span>
             <span class="member-count">{{ member.accounts?.length || 0 }}个账户</span>
           </div>
-          <div class="member-stats">
+          <div v-if="member.accounts?.length" class="member-stats">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
               <span class="stat-value">¥{{ formatNumber(member.marketValue || 0) }}</span>
@@ -34,6 +34,9 @@
                 <span class="rate">({{ member.profitRate || 0 }}%)</span>
               </span>
             </div>
+          </div>
+          <div v-else class="member-empty">
+            <span>暂无账户或持仓</span>
           </div>
         </div>
         <van-empty v-if="!overview?.members?.length" description="暂无成员数据" />
@@ -258,6 +261,13 @@ onMounted(() => {
   font-size: 11px;
   color: #999;
   font-weight: normal;
+}
+
+.member-empty {
+  font-size: 12px;
+  color: #999;
+  text-align: center;
+  padding: 4px 0;
 }
 
 /* 未分配账户列表 */
