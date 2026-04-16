@@ -400,20 +400,13 @@ export async function onRequest(context) {
     if (path === '/api/stats/overview' && method === 'GET') {
       const memberId = url.searchParams.get('member_id');
 
-      // 构建账户查询
-      let accountsQuery = 'SELECT * FROM accounts';
-      let positionsQuery = 'SELECT * FROM positions';
-      if (memberId) {
-        accountsQuery += ' WHERE member_id = ?';
-        positionsQuery += ' WHERE account_id IN (SELECT id FROM accounts WHERE member_id = ?)';
-      }
-
-      const { results: accounts } = memberId
-        ? await env.DB.prepare(accountsQuery).bind(memberId).all()
-        : await env.DB.prepare(accountsQuery).all();
-      const { results: positions } = memberId
-        ? await env.DB.prepare(positionsQuery).bind(memberId).all()
-        : await env.DB.prepare(positionsQuery).all();
+      // 查询所有成员
+      const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY created_at DESC').all();
+      // 查询所有账户
+      const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all();
+      // 查询所有持仓
+      const { results: positions } = await env.DB.prepare('SELECT * FROM positions').all();
+      // 查询所有行情
       const { results: markets } = await env.DB.prepare('SELECT * FROM market ORDER BY date DESC').all();
 
       // 建立基金最新行情映射
@@ -424,10 +417,12 @@ export async function onRequest(context) {
         }
       });
 
+      // 计算每个账户的统计数据
+      const accountStatsMap = {};
       let totalInvested = 0;
       let totalMarketValue = 0;
 
-      const accountStats = accounts.map(acc => {
+      accounts.forEach(acc => {
         const accPositions = positions.filter(p => p.account_id === acc.id);
         let invested = 0;
         let marketValue = 0;
@@ -447,16 +442,40 @@ export async function onRequest(context) {
         totalInvested += invested;
         totalMarketValue += marketValue;
 
-        return {
+        accountStatsMap[acc.id] = {
           accountId: acc.id,
           accountName: acc.name,
           channel: acc.channel,
+          member_id: acc.member_id,
           invested: Number(invested.toFixed(2)),
           marketValue: Number(marketValue.toFixed(2)),
           profit: Number(profit.toFixed(2)),
           profitRate: Number(profitRate.toFixed(2)),
         };
       });
+
+      // 按成员分组计算成员统计数据
+      const memberStats = members.map(member => {
+        const memberAccounts = Object.values(accountStatsMap).filter(a => a.member_id === member.id);
+        const memberMarketValue = memberAccounts.reduce((sum, a) => sum + a.marketValue, 0);
+        const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
+        const memberProfit = memberMarketValue - memberInvested;
+        const memberProfitRate = memberInvested > 0 ? (memberProfit / memberInvested * 100) : 0;
+
+        return {
+          member_id: member.id,
+          member_name: member.name,
+          emoji: member.emoji || '👤',
+          accounts: memberAccounts,
+          marketValue: Number(memberMarketValue.toFixed(2)),
+          invested: Number(memberInvested.toFixed(2)),
+          profit: Number(memberProfit.toFixed(2)),
+          profitRate: Number(memberProfitRate.toFixed(2)),
+        };
+      });
+
+      // 未分配账户（member_id 为 NULL 或空）
+      const unassignedAccounts = Object.values(accountStatsMap).filter(a => !a.member_id);
 
       const totalProfit = totalMarketValue - totalInvested;
       const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
@@ -470,7 +489,9 @@ export async function onRequest(context) {
             totalProfit: Number(totalProfit.toFixed(2)),
             totalProfitRate: Number(totalProfitRate.toFixed(2)),
           },
-          accounts: accountStats,
+          members: memberStats,
+          accounts: Object.values(accountStatsMap),
+          unassignedAccounts,
         },
       });
     }

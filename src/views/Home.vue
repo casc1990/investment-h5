@@ -82,15 +82,6 @@
       </div>
     </div>
 
-    <!-- 测试按钮（排查用） -->
-    <div class="section" style="margin-top:16px">
-      <div class="section-title">🔧 排查测试</div>
-      <div style="padding:12px">
-        <van-button type="primary" size="small" @click="testApi">测试API直连</van-button>
-        <span style="margin-left:12px;font-size:12px;color:#999">{{ testResult }}</span>
-      </div>
-    </div>
-
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-overlay">
       <van-loading size="24px">加载中...</van-loading>
@@ -105,18 +96,6 @@ import { showToast } from 'vant'
 
 const loading = ref(false)
 const overview = ref(null)
-const testResult = ref('')
-
-const testApi = async () => {
-  testResult.value = '测试中...'
-  try {
-    const res = await fetch('/api/test')
-    const text = await res.text()
-    testResult.value = '成功: ' + text.slice(0, 50)
-  } catch (e) {
-    testResult.value = '失败: ' + e.message
-  }
-}
 
 const formatNumber = (num) => {
   return parseFloat(num || 0).toLocaleString('zh-CN', {
