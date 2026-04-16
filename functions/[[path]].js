@@ -583,6 +583,74 @@ export async function onRequest(context) {
       }
     }
 
+    // 获取基金当前净值（从东方财富API）
+    if (path === '/api/fund/nav' && method === 'GET') {
+      const fundCode = url.searchParams.get('code');
+      if (!fundCode) {
+        return jsonResponse({ code: 400, message: '缺少基金代码' }, 400);
+      }
+
+      try {
+        const url2 = `https://fundgz.1234567.com.cn/js/${fundCode}.js?rt=${Date.now()}`;
+        const res = await fetch(url2, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://fund.eastmoney.com/',
+          }
+        });
+        const text = await res.text();
+        // 返回格式: jsonpgz({"name":"...","nav":"1.2345","navDate":"2025-01-01","...})
+        const match = text.match(/jsonpgz\((.+)\)/);
+        if (match) {
+          const data = JSON.parse(match[1]);
+          return jsonResponse({ code: 0, data });
+        }
+        return jsonResponse({ code: 404, message: '未找到该基金数据' }, 404);
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
+    // 批量获取基金净值（从东方财富pingzhongdata页面解析）
+    if (path === '/api/fund/batch-nav' && method === 'GET') {
+      const codes = url.searchParams.get('codes');
+      if (!codes) {
+        return jsonResponse({ code: 400, message: '缺少基金代码列表' }, 400);
+      }
+
+      const fundCodes = codes.split(',').map(c => c.trim()).filter(Boolean);
+      const results = {};
+
+      // 并行获取每个基金的最新净值
+      await Promise.all(fundCodes.map(async (code) => {
+        try {
+          const res = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)' }
+          });
+          const text = await res.text();
+          // 提取 Data_netWorthTrend 最后一条数据
+          const match = text.match(/var Data_netWorthTrend\s*=\s*\[([^\]]+)\]/);
+          if (match) {
+            const points = match[1];
+            const lastPointMatch = points.match(/\[\d+,\s*([\d.]+)\]/g);
+            if (lastPointMatch) {
+              const last = lastPointMatch[lastPointMatch.length - 1].match(/\[(\d+),\s*([\d.]+)\]/);
+              if (last) {
+                const timestamp = parseInt(last[1]);
+                const nav = parseFloat(last[2]);
+                const navDate = new Date(timestamp).toISOString().split('T')[0];
+                results[code] = { nav, navDate };
+              }
+            }
+          }
+        } catch (e) {
+          results[code] = { nav: null, navDate: null, error: e.message };
+        }
+      }));
+
+      return jsonResponse({ code: 0, data: results });
+    }
+
     // 非 API 路径交给静态文件处理
     return context.next();
   } catch (error) {
