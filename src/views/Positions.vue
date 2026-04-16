@@ -532,11 +532,11 @@ onMounted(() => {
 }
 
 .fund-profit.positive {
-  color: #07c160;
+  color: #ee0a24;
 }
 
 .fund-profit.negative {
-  color: #ee0a24;
+  color: #07c160;
 }
 
 .profit-rate {
@@ -572,11 +572,11 @@ onMounted(() => {
 }
 
 .data-value.profit.positive {
-  color: #07c160;
+  color: #ee0a24;
 }
 
 .data-value.profit.negative {
-  color: #ee0a24;
+  color: #07c160;
 }
 
 .dividend-info {

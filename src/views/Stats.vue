@@ -197,11 +197,11 @@ onMounted(() => {
 }
 
 .profit-section.positive .profit-value {
-  color: #4ade80;
+  color: #f87171;
 }
 
 .profit-section.negative .profit-value {
-  color: #f87171;
+  color: #4ade80;
 }
 
 .profit-value {
@@ -309,11 +309,11 @@ onMounted(() => {
 }
 
 .rank-profit.positive {
-  color: #07c160;
+  color: #ee0a24;
 }
 
 .rank-profit.negative {
-  color: #ee0a24;
+  color: #07c160;
 }
 
 .rank-profit .profit {
@@ -363,11 +363,11 @@ onMounted(() => {
 }
 
 .position-profit.positive {
-  color: #07c160;
+  color: #ee0a24;
 }
 
 .position-profit.negative {
-  color: #ee0a24;
+  color: #07c160;
 }
 
 .position-profit .profit {

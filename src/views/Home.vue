@@ -162,11 +162,11 @@ onMounted(() => {
 }
 
 .total-info .profit.positive {
-  color: #4ade80;
+  color: #f87171;
 }
 
 .total-info .profit.negative {
-  color: #f87171;
+  color: #4ade80;
 }
 
 .total-info .rate {
@@ -247,11 +247,11 @@ onMounted(() => {
 }
 
 .stat-value.profit.positive {
-  color: #4ade80;
+  color: #f87171;
 }
 
 .stat-value.profit.negative {
-  color: #f87171;
+  color: #4ade80;
 }
 
 .stat-value .rate {
