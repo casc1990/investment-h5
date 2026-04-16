@@ -147,13 +147,6 @@
               :rules="[{ required: true, message: '请输入持有金额' }]"
             />
             <van-field
-              v-model.number="formData.currentProfit"
-              label="持有收益"
-              type="number"
-              placeholder="当前收益金额（可正可负）"
-              :rules="[{ required: true, message: '请输入持有收益' }]"
-            />
-            <van-field
               v-model="formData.dividendMethod"
               label="分红方式"
               placeholder="选择分红方式"
@@ -232,7 +225,6 @@ const formData = ref({
   fundName: '',
   shares: null,
   amount: null,
-  currentProfit: null,
   dividendMethod: '红利再投',
 })
 
@@ -270,13 +262,6 @@ const formatNumber = (num) => {
   return parseFloat(num || 0).toFixed(4)
 }
 
-// 计算收益率：持有收益 / (持有金额 - 持有收益)
-const calcProfitRate = (amount, profit) => {
-  const cost = parseFloat(amount || 0) - parseFloat(profit || 0)
-  if (cost <= 0) return '0.0000'
-  return ((parseFloat(profit || 0) / cost) * 100).toFixed(4)
-}
-
 const onMemberChange = (memberId) => {
   selectedMemberId.value = memberId
   // 成员变化时，重置账户筛选
@@ -306,11 +291,7 @@ const fetchPositions = async () => {
   loading.value = true
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
-    // 计算收益率
-    positions.value = (data?.positions || []).map(p => ({
-      ...p,
-      profit_rate: calcProfitRate(p.amount, p.current_profit)
-    }))
+    positions.value = data?.positions || []
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     showToast('加载失败')
@@ -340,10 +321,6 @@ const handleSubmit = async () => {
     showToast('请输入持有金额')
     return
   }
-  if (formData.value.currentProfit === null || formData.value.currentProfit === '') {
-    showToast('请输入持有收益')
-    return
-  }
 
   try {
     const payload = {
@@ -352,7 +329,6 @@ const handleSubmit = async () => {
       fundName: formData.value.fundName.trim(),
       shares: parseFloat(formData.value.shares),
       amount: parseFloat(formData.value.amount),
-      currentProfit: parseFloat(formData.value.currentProfit),
       dividendMethod: formData.value.dividendMethod,
     }
     
@@ -382,7 +358,6 @@ const handleEdit = (position) => {
     fundName: position.fund_name,
     shares: position.shares,
     amount: position.cost,
-    currentProfit: position.current_profit,
     dividendMethod: position.dividend_method || '红利再投',
   }
   // 设置成员信息
@@ -444,7 +419,6 @@ const openAddModal = () => {
     fundName: '',
     shares: null,
     amount: null,
-    currentProfit: 0,
     dividendMethod: '红利再投',
   }
   showAddModal.value = true
@@ -462,7 +436,6 @@ const closeModal = () => {
     fundName: '',
     shares: null,
     amount: null,
-    currentProfit: null,
     dividendMethod: '红利再投',
   }
 }
