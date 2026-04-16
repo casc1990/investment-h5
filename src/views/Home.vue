@@ -104,9 +104,9 @@ const formatNumber = (num) => {
   })
 }
 
-// 未分配到成员的账户
+// 未分配到成员的账户（直接使用后端返回的 unassignedAccounts）
 const unassignedAccounts = computed(() => {
-  return overview.value?.accounts?.filter(a => !a.member_id) || []
+  return overview.value?.unassignedAccounts || []
 })
 
 const fetchData = async () => {
