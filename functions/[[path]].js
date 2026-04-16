@@ -673,7 +673,7 @@ export async function onRequest(context) {
                 gztime = excluded.gztime,
                 updated_at = unixepoch()
             `).bind(code, name, nav, gsz, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null).run();
-            syncResults[code] = { ok: !!nav, gsz, dwjz: nav, jzrq: navDate };
+            syncResults[code] = { ok: !!nav, gsz, dwjz: nav, gszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
           }
