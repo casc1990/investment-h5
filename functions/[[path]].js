@@ -627,60 +627,37 @@ export async function onRequest(context) {
         const fundNameMap = {};
         positions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
 
-        // 2. 批量调 fundgz（实时估值）
+        // 2. 批量调 pingzhongdata 获取最新确认净值
         const syncResults = {};
         await Promise.all(fundCodes.map(async (code) => {
           try {
-            // 优先用 fundgz 实时估值接口
             let nav = null, navDate = null, gsz = null, gszzl = null, name = fundNameMap[code] || '';
-            const url = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
-            const res = await fetch(url, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://fund.eastmoney.com/',
-              }
+            const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
             });
-            const text = await res.text();
-            const match = text.match(/jsonpgz\((.+)\)/);
-            if (match) {
-              const d = JSON.parse(match[1]);
-              gsz = d.gsz ? parseFloat(d.gsz) : null;
-              const dwjzRaw = d.dwjz ? parseFloat(d.dwjz) : null;
-              nav = dwjzRaw;
-              navDate = d.jzrq || null;
-              name = d.name || name;
-              // 日涨跌幅 = (当日最新净值 − 上一交易日净值) ÷ 上一交易日净值
-              if (gsz && dwjzRaw) {
-                gszzl = parseFloat(((gsz - dwjzRaw) / dwjzRaw * 100).toFixed(4));
-              } else {
-                gszzl = null;
-              }
-            } else {
-              // fundgz 无数据，fallback 到 pingzhongdata 历史净值
-              const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-              });
-              const text2 = await res2.text();
-              const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
-              if (navMatch) {
-                const points = navMatch[1];
-                const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
-                if (allPoints.length > 0) {
-                  const last = allPoints[allPoints.length - 1];
-                  const currentNAV = parseFloat(last[2]);
-                  const currentDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
-                  // 用最近两个数据点计算日涨跌幅
-                  if (allPoints.length >= 2) {
-                    const prev = allPoints[allPoints.length - 2];
-                    const prevNAV = parseFloat(prev[2]);
-                    if (prevNAV > 0) {
-                      gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
-                    }
+            const text2 = await res2.text();
+            // 提取基金名称
+            const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
+            if (nameMatch) name = nameMatch[1];
+            const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
+            if (navMatch) {
+              const points = navMatch[1];
+              const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
+              if (allPoints.length > 0) {
+                const last = allPoints[allPoints.length - 1];
+                const currentNAV = parseFloat(last[2]);
+                const currentDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
+                // 用最近两个数据点计算日涨跌幅
+                if (allPoints.length >= 2) {
+                  const prev = allPoints[allPoints.length - 2];
+                  const prevNAV = parseFloat(prev[2]);
+                  if (prevNAV > 0) {
+                    gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
                   }
-                  nav = currentNAV;      // 最新单位净值（上一交易日收盘）
-                  gsz = currentNAV;       // 历史净值当作估算净值存
-                  navDate = currentDate;
                 }
+                nav = currentNAV;
+                gsz = currentNAV;
+                navDate = currentDate;
               }
             }
             // upsert 到 market_snapshot
