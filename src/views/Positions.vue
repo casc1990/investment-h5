@@ -50,6 +50,24 @@
           </div>
         </div>
 
+        <!-- 基金行情 -->
+        <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
+          <div class="nav-item">
+            <span class="nav-label">最新净值</span>
+            <span class="nav-value">{{ position.nav_gsz || position.nav_dwjz }}</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-label">日涨幅</span>
+            <span class="nav-value profit" :class="{ positive: Number(position.nav_gszzl) >= 0, negative: Number(position.nav_gszzl) < 0 }">
+              {{ Number(position.nav_gszzl) >= 0 ? '+' : '' }}{{ position.nav_gszzl }}%
+            </span>
+          </div>
+          <div class="nav-item" v-if="position.nav_jzrq">
+            <span class="nav-label">净值日期</span>
+            <span class="nav-value">{{ position.nav_jzrq }}</span>
+          </div>
+        </div>
+
         <!-- 分红方式 -->
         <div class="dividend-info" v-if="position.dividend_method">
           <span class="dividend-label">分红方式：</span>
@@ -587,6 +605,41 @@ onMounted(() => {
 
 .dividend-label {
   color: #999;
+}
+
+.nav-info {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid #f5f5f5;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-label {
+  font-size: 11px;
+  color: #999;
+}
+
+.nav-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  font-family: 'Courier New', monospace;
+}
+
+.nav-value.profit.positive {
+  color: #ee0a24;
+}
+
+.nav-value.profit.negative {
+  color: #07c160;
 }
 
 .position-actions {

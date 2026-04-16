@@ -241,10 +241,12 @@ export async function onRequest(context) {
       const accountId = url.searchParams.get('account_id');
       const memberId = url.searchParams.get('member_id');
       
-      let query = `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
-                   FROM positions p 
-                   LEFT JOIN accounts a ON p.account_id = a.id 
-                   LEFT JOIN members m ON a.member_id = m.id`;
+      let query = `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji,
+                   s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq
+                   FROM positions p
+                   LEFT JOIN accounts a ON p.account_id = a.id
+                   LEFT JOIN members m ON a.member_id = m.id
+                   LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code`;
       const conditions = [];
       const params = [];
       
@@ -282,6 +284,11 @@ export async function onRequest(context) {
         current_profit: r.current_profit || 0,
         dividend_method: r.dividend_method || '红利再投',
         created_at: r.created_at,
+        // 基金行情
+        nav_gsz: r.nav_gsz || null,       // 估算净值
+        nav_gszzl: r.nav_gszzl || null,   // 估算涨跌幅（%）
+        nav_dwjz: r.nav_dwjz || null,      // 单位净值
+        nav_jzrq: r.nav_jzrq || null,      // 净值日期
       }));
       return jsonResponse({ code: 0, data: { total: positions.length, positions } });
     }
