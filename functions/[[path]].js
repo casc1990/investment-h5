@@ -624,6 +624,8 @@ export async function onRequest(context) {
         const syncResults = {};
         await Promise.all(fundCodes.map(async (code) => {
           try {
+            // 优先用 fundgz 实时估值接口
+            let nav = null, navDate = null, gsz = null, gszzl = null, name = fundNameMap[code] || '';
             const url = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
             const res = await fetch(url, {
               headers: {
@@ -635,23 +637,43 @@ export async function onRequest(context) {
             const match = text.match(/jsonpgz\((.+)\)/);
             if (match) {
               const d = JSON.parse(match[1]);
-              // upsert 到 market_snapshot
-              await env.DB.prepare(`
-                INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
-                ON CONFLICT(fund_code) DO UPDATE SET
-                  name = excluded.name,
-                  dwjz = excluded.dwjz,
-                  gsz = excluded.gsz,
-                  gszzl = excluded.gszzl,
-                  jzrq = excluded.jzrq,
-                  gztime = excluded.gztime,
-                  updated_at = unixepoch()
-              `).bind(code, d.name || fundNameMap[code], d.dwjz || null, d.gsz || null, d.gszzl || null, d.jzrq || null, d.gztime || null).run();
-              syncResults[code] = { ok: true, gsz: d.gsz, jzrq: d.jzrq };
+              gsz = d.gsz ? parseFloat(d.gsz) : null;
+              gszzl = d.gszzl ? parseFloat(d.gszzl) : null;
+              nav = d.dwjz ? parseFloat(d.dwjz) : null;
+              navDate = d.jzrq || null;
+              name = d.name || name;
             } else {
-              syncResults[code] = { ok: false, reason: 'fundgz returned empty' };
+              // fundgz 无数据，fallback 到 pingzhongdata 历史净值
+              const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+              });
+              const text2 = await res2.text();
+              const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
+              if (navMatch) {
+                const points = navMatch[1];
+                const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
+                if (allPoints.length > 0) {
+                  const last = allPoints[allPoints.length - 1];
+                  nav = parseFloat(last[2]);
+                  navDate = new Date(parseInt(last[1])).toISOString().split('T')[0];
+                  gsz = nav; // 历史净值当作估算净值存
+                }
+              }
             }
+            // upsert 到 market_snapshot
+            await env.DB.prepare(`
+              INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+              ON CONFLICT(fund_code) DO UPDATE SET
+                name = excluded.name,
+                dwjz = excluded.dwjz,
+                gsz = excluded.gsz,
+                gszzl = excluded.gszzl,
+                jzrq = excluded.jzrq,
+                gztime = excluded.gztime,
+                updated_at = unixepoch()
+            `).bind(code, name, nav, gsz, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null).run();
+            syncResults[code] = { ok: !!nav, gsz, dwjz: nav, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
           }
