@@ -34,7 +34,7 @@
           </div>
           <div class="data-item">
             <span class="data-label">持有金额</span>
-            <span class="data-value">¥{{ formatNumber(position.amount) }}</span>
+            <span class="data-value">¥{{ formatNumber(position.cost) }}</span>
           </div>
           <div class="data-item">
             <span class="data-label">持有收益</span>
@@ -380,8 +380,8 @@ const handleEdit = (position) => {
     accountName: position.account_name || '',
     fundCode: position.fund_code,
     fundName: position.fund_name,
-    shares: position.quantity || position.shares,
-    amount: position.amount,
+    shares: position.shares,
+    amount: position.cost,
     currentProfit: position.current_profit,
     dividendMethod: position.dividend_method || '红利再投',
   }
