@@ -48,6 +48,12 @@
               {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
             </span>
           </div>
+          <div class="data-item">
+            <span class="data-label">昨日收益</span>
+            <span class="data-value profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
+              {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
+            </span>
+          </div>
         </div>
 
         <!-- 基金行情 -->
@@ -147,6 +153,12 @@
               :rules="[{ required: true, message: '请输入持有金额' }]"
             />
             <van-field
+              v-model.number="formData.initialProfit"
+              label="历史累计收益"
+              type="number"
+              placeholder="买入至今的累计收益"
+            />
+            <van-field
               v-model="formData.dividendMethod"
               label="分红方式"
               placeholder="选择分红方式"
@@ -225,6 +237,7 @@ const formData = ref({
   fundName: '',
   shares: null,
   amount: null,
+  initialProfit: null,
   dividendMethod: '红利再投',
 })
 
@@ -329,6 +342,7 @@ const handleSubmit = async () => {
       fundName: formData.value.fundName.trim(),
       shares: parseFloat(formData.value.shares),
       amount: parseFloat(formData.value.amount),
+      initialProfit: parseFloat(formData.value.initialProfit) || 0,
       dividendMethod: formData.value.dividendMethod,
     }
     
@@ -358,6 +372,7 @@ const handleEdit = (position) => {
     fundName: position.fund_name,
     shares: position.shares,
     amount: position.cost,
+    initialProfit: position.initial_profit || 0,
     dividendMethod: position.dividend_method || '红利再投',
   }
   // 设置成员信息
@@ -419,6 +434,7 @@ const openAddModal = () => {
     fundName: '',
     shares: null,
     amount: null,
+    initialProfit: null,
     dividendMethod: '红利再投',
   }
   showAddModal.value = true
@@ -436,6 +452,7 @@ const closeModal = () => {
     fundName: '',
     shares: null,
     amount: null,
+    initialProfit: null,
     dividendMethod: '红利再投',
   }
 }

@@ -275,8 +275,12 @@ export async function onRequest(context) {
           const cost = r.amount || 0;
           const nav = r.nav_gsz || r.nav_dwjz || 0;
           const currentMarketValue = shares > 0 && nav > 0 ? parseFloat((shares * nav).toFixed(4)) : 0;
-          const currentProfit = cost > 0 ? parseFloat((currentMarketValue - cost).toFixed(4)) : 0;
-          const profitRate = cost > 0 ? parseFloat(((currentProfit / cost) * 100).toFixed(4)) : 0;
+          const initialProfit = r.initial_profit || 0;
+          const accumulatedProfit = r.total_profit || 0;
+          const yesterdayProfit = r.yesterday_profit || 0;
+          // 持有收益 = 历史录入收益 + 每日增量累加
+          const totalProfit = parseFloat((initialProfit + accumulatedProfit).toFixed(4));
+          const profitRate = cost > 0 ? parseFloat(((totalProfit / cost) * 100).toFixed(4)) : 0;
           return {
             id: r.id,
             account_id: r.account_id,
@@ -289,8 +293,10 @@ export async function onRequest(context) {
             shares,
             cost,
             current_market_value: currentMarketValue,
-            current_profit: currentProfit,
+            current_profit: totalProfit,
             profit_rate: profitRate,
+            yesterday_profit: yesterdayProfit,
+            initial_profit: initialProfit,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
             nav_gsz: r.nav_gsz || null,
@@ -311,12 +317,12 @@ export async function onRequest(context) {
       const fund_name = body.fundName || body.fund_name;
       const shares = body.shares || body.quantity || 0;
       const amount = body.amount || 0;
-      const current_profit = body.currentProfit || body.current_profit || 0;
+      const initial_profit = body.initialProfit || body.initial_profit || 0;
       const dividend_method = body.dividendMethod || body.dividend_method || '红利再投';
 
       await env.DB.prepare(
-        'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, amount, current_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, fund_code, fund_name || '', shares, amount, current_profit, dividend_method).run();
+        'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, amount, initial_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, account_id, fund_code, fund_name || '', shares, amount, initial_profit, dividend_method).run();
 
       // 查询关联的账户和成员信息
       const { results: posResults } = await env.DB.prepare(
@@ -352,7 +358,7 @@ export async function onRequest(context) {
       const fund_name = body.fundName || body.fund_name;
       const shares = body.shares || body.quantity;
       const amount = body.amount;
-      const current_profit = body.currentProfit || body.current_profit;
+      const initial_profit = body.initialProfit || body.initial_profit;
       const dividend_method = body.dividendMethod || body.dividend_method;
 
       const fields = [];
@@ -360,7 +366,7 @@ export async function onRequest(context) {
       if (fund_name !== undefined) { fields.push('fund_name = ?'); values.push(fund_name); }
       if (shares !== undefined) { fields.push('quantity = ?'); values.push(shares); }
       if (amount !== undefined) { fields.push('amount = ?'); values.push(amount); }
-      if (current_profit !== undefined) { fields.push('current_profit = ?'); values.push(current_profit); }
+      if (initial_profit !== undefined) { fields.push('initial_profit = ?'); values.push(initial_profit); }
       if (dividend_method !== undefined) { fields.push('dividend_method = ?'); values.push(dividend_method); }
 
       if (fields.length > 0) {
@@ -593,7 +599,7 @@ export async function onRequest(context) {
           await env.DB.prepare('ALTER TABLE members ADD COLUMN emoji TEXT DEFAULT "👤"').run();
         }
 
-        // 检查 market_snapshot 表是否存在，不存在则创建
+        // market_snapshot 表：加 prev_nav（前日净值）、last_nav（上次同步时的净值）、last_gszzl（上次同步时的涨跌幅）
         const marketTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='market_snapshot'").all();
         if (marketTableInfo.results.length === 0) {
           await env.DB.prepare(`
@@ -606,73 +612,101 @@ export async function onRequest(context) {
               gszzl REAL,
               jzrq TEXT,
               gztime TEXT,
+              prev_nav REAL,
+              last_nav REAL,
+              last_gszzl REAL,
               updated_at INTEGER
             )
           `).run();
+        } else {
+          const msInfo = await env.DB.prepare('PRAGMA table_info(market_snapshot)').all();
+          const colNames = msInfo.results.map(c => c.name);
+          if (!colNames.includes('prev_nav')) {
+            await env.DB.prepare('ALTER TABLE market_snapshot ADD COLUMN prev_nav REAL').run();
+          }
+          if (!colNames.includes('last_nav')) {
+            await env.DB.prepare('ALTER TABLE market_snapshot ADD COLUMN last_nav REAL').run();
+          }
+          if (!colNames.includes('last_gszzl')) {
+            await env.DB.prepare('ALTER TABLE market_snapshot ADD COLUMN last_gszzl REAL').run();
+          }
         }
 
-        return jsonResponse({ code: 0, message: 'Migration completed', emojiAdded: !hasEmoji, marketSnapshotCreated: marketTableInfo.results.length === 0 });
+        // positions 表：total_profit（累计持有收益）、yesterday_profit（昨日收益）、initial_profit（录入时的历史收益）
+        const posInfo = await env.DB.prepare('PRAGMA table_info(positions)').all();
+        if (!posInfo.results.some(col => col.name === 'total_profit')) {
+          await env.DB.prepare('ALTER TABLE positions ADD COLUMN total_profit REAL DEFAULT 0').run();
+        }
+        if (!posInfo.results.some(col => col.name === 'yesterday_profit')) {
+          await env.DB.prepare('ALTER TABLE positions ADD COLUMN yesterday_profit REAL DEFAULT 0').run();
+        }
+        if (!posInfo.results.some(col => col.name === 'initial_profit')) {
+          await env.DB.prepare('ALTER TABLE positions ADD COLUMN initial_profit REAL DEFAULT 0').run();
+        }
+
+        return jsonResponse({ code: 0, message: 'Migration completed' });
       } catch (error) {
         return jsonResponse({ code: 500, message: error.message }, 500);
       }
     }
 
-    // 净值同步接口：获取所有持仓基金，调 fundgz 批量查净值，upsert 到 market_snapshot 表
+    // 净值同步接口
     // 支持 GET（手动触发）和 POST（cron 触发，校验 CLOUDFLARE_CRON_TRIGGER）
     if (path === '/api/fund/sync' && (method === 'GET' || method === 'POST')) {
-      // Cron 触发器只能 POST，手动触发 GET/POST 都行
       if (method === 'POST' && !env.CLOUDFLARE_CRON_TRIGGER) {
         return jsonResponse({ code: 403, message: 'Forbidden: cron trigger only' }, 403);
       }
 
       try {
-        // 1. 从 positions 表获取所有不重复的基金代码
-        const { results: positions } = await env.DB.prepare('SELECT DISTINCT fund_code, fund_name FROM positions').all();
-        if (positions.length === 0) {
-          return jsonResponse({ code: 0, message: 'No positions found, nothing to sync', synced: 0 });
+        // 1. 获取所有持仓（带份额）
+        const { results: allPositions } = await env.DB.prepare(
+          'SELECT id, fund_code, fund_name, quantity FROM positions'
+        ).all();
+        if (allPositions.length === 0) {
+          return jsonResponse({ code: 0, message: 'No positions found', synced: 0 });
         }
 
-        const fundCodes = positions.map(p => p.fund_code).filter(Boolean);
+        const fundCodes = [...new Set(allPositions.map(p => p.fund_code).filter(Boolean))];
         const fundNameMap = {};
-        positions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
+        allPositions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
 
-        // 2. 批量调 pingzhongdata 获取最新确认净值
+        // 2. 批量调 pingzhongdata
         const syncResults = {};
         await Promise.all(fundCodes.map(async (code) => {
           try {
-            let nav = null, navDate = null, gsz = null, gszzl = null, name = fundNameMap[code] || '';
+            let nav = null, navDate = null, gszzl = null, prev_nav = null, name = fundNameMap[code] || '';
             const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
               headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
             });
             const text2 = await res2.text();
-            // 提取基金名称
             const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
             if (nameMatch) name = nameMatch[1];
             const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
             if (navMatch) {
-              const points = navMatch[1];
-              const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
-              if (allPoints.length > 0) {
+              const allPoints = [...navMatch[1].matchAll(/"x":(\d+),\s*"y":([\d.]+)/g)];
+              if (allPoints.length >= 2) {
                 const last = allPoints[allPoints.length - 1];
+                const prev = allPoints[allPoints.length - 2];
                 const currentNAV = parseFloat(last[2]);
                 const currentDate = new Date(parseInt(last[1]) + 8 * 3600 * 1000).toISOString().split('T')[0];
-                // 用最近两个数据点计算日涨跌幅
-                if (allPoints.length >= 2) {
-                  const prev = allPoints[allPoints.length - 2];
-                  const prevNAV = parseFloat(prev[2]);
-                  if (prevNAV > 0) {
-                    gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
-                  }
+                const prevNAV = parseFloat(prev[2]);
+                if (prevNAV > 0) {
+                  gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
                 }
                 nav = currentNAV;
-                gsz = currentNAV;
-                navDate = currentDate;
+                prev_nav = prevNAV;  // 前日净值（用于算昨日收益）
               }
             }
-            // upsert 到 market_snapshot
+            // upsert market_snapshot（含 prev_nav）
+            const { results: oldSnap } = await env.DB.prepare(
+              'SELECT last_nav, last_gszzl FROM market_snapshot WHERE fund_code = ?'
+            ).bind(code).all();
+            const oldLastNav = oldSnap.length > 0 ? oldSnap[0].last_nav : null;
+            const oldLastGszzl = oldSnap.length > 0 ? oldSnap[0].last_gszzl : null;
+
             await env.DB.prepare(`
-              INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+              INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, prev_nav, last_nav, last_gszzl, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
               ON CONFLICT(fund_code) DO UPDATE SET
                 name = excluded.name,
                 dwjz = excluded.dwjz,
@@ -680,13 +714,40 @@ export async function onRequest(context) {
                 gszzl = excluded.gszzl,
                 jzrq = excluded.jzrq,
                 gztime = excluded.gztime,
+                prev_nav = excluded.prev_nav,
+                last_nav = excluded.last_nav,
+                last_gszzl = excluded.last_gszzl,
                 updated_at = unixepoch()
-            `).bind(code, name, nav, gsz, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null).run();
-            syncResults[code] = { ok: !!nav, gsz, dwjz: nav, gszzl, jzrq: navDate };
+            `).bind(code, name, nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+            syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
           }
         }));
+
+        // 3. 计算并更新每个持仓的昨日收益和累计收益
+        // 昨日收益 = (本次 prev_nav − 上次 last_nav) × 份额（两个 sync 点之间的净值差 × 份额）
+        // 今日增量 = (本次 NAV − prev_nav) × 份额（当日涨跌幅 × 份额）
+        for (const pos of allPositions) {
+          const snap = syncResults[pos.fund_code];
+          if (!snap || !snap.ok) continue;
+          const shares = pos.quantity || 0;
+          if (shares <= 0) continue;
+
+          let yesterdayProfit = 0;
+          if (snap.last_nav && snap.prev_nav) {
+            yesterdayProfit = parseFloat(((snap.prev_nav - snap.last_nav) * shares).toFixed(4));
+          }
+          const todayProfit = parseFloat(((snap.gsz - snap.prev_nav) * shares).toFixed(4));
+
+          await env.DB.prepare(`
+            UPDATE positions SET
+              yesterday_profit = ?,
+              total_profit = COALESCE(total_profit, 0) + ?,
+              updated_at = unixepoch()
+            WHERE id = ?
+          `).bind(yesterdayProfit, todayProfit, pos.id).run();
+        }
 
         const successCount = Object.values(syncResults).filter(r => r.ok).length;
         return jsonResponse({
