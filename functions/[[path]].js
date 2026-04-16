@@ -492,7 +492,7 @@ export async function onRequest(context) {
         });
 
         const profit = marketValue - invested;
-        const profitRate = invested > 0 ? (profit / invested * 100) : 0;
+        const profitRate = marketValue > 0 ? (profit / marketValue * 100) : 0;
         totalInvested += invested;
         totalMarketValue += marketValue;
 
@@ -514,7 +514,7 @@ export async function onRequest(context) {
         const memberMarketValue = memberAccounts.reduce((sum, a) => sum + a.marketValue, 0);
         const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
         const memberProfit = memberMarketValue - memberInvested;
-        const memberProfitRate = memberInvested > 0 ? (memberProfit / memberInvested * 100) : 0;
+        const memberProfitRate = memberMarketValue > 0 ? (memberProfit / memberMarketValue * 100) : 0;
 
         return {
           member_id: member.id,
@@ -532,7 +532,7 @@ export async function onRequest(context) {
       const unassignedAccounts = Object.values(accountStatsMap).filter(a => !a.member_id);
 
       const totalProfit = totalMarketValue - totalInvested;
-      const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
+      const totalProfitRate = totalMarketValue > 0 ? (totalProfit / totalMarketValue * 100) : 0;
 
       return jsonResponse({
         code: 0,
