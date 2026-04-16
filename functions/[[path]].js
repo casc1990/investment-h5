@@ -270,26 +270,35 @@ export async function onRequest(context) {
       }
       const { results } = await stmt.all();
       
-      const positions = results.map(r => ({
-        id: r.id,
-        account_id: r.account_id,
-        account_name: r.account_name || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-        member_emoji: r.member_emoji || '👤',
-        fund_code: r.fund_code,
-        fund_name: r.fund_name,
-        shares: r.quantity,
-        amount: r.amount || 0,
-        current_profit: r.current_profit || 0,
-        dividend_method: r.dividend_method || '红利再投',
-        created_at: r.created_at,
-        // 基金行情
-        nav_gsz: r.nav_gsz || null,       // 估算净值
-        nav_gszzl: r.nav_gszzl || null,   // 估算涨跌幅（%）
-        nav_dwjz: r.nav_dwjz || null,      // 单位净值
-        nav_jzrq: r.nav_jzrq || null,      // 净值日期
-      }));
+        const positions = results.map(r => {
+          const shares = r.quantity || 0;
+          const cost = r.amount || 0;
+          const nav = r.nav_gsz || r.nav_dwjz || 0;
+          const currentMarketValue = shares > 0 && nav > 0 ? parseFloat((shares * nav).toFixed(4)) : 0;
+          const currentProfit = cost > 0 ? parseFloat((currentMarketValue - cost).toFixed(4)) : 0;
+          const profitRate = cost > 0 ? parseFloat(((currentProfit / cost) * 100).toFixed(4)) : 0;
+          return {
+            id: r.id,
+            account_id: r.account_id,
+            account_name: r.account_name || '',
+            member_id: r.member_id,
+            member_name: r.member_name || '',
+            member_emoji: r.member_emoji || '👤',
+            fund_code: r.fund_code,
+            fund_name: r.fund_name || '',
+            shares,
+            cost,
+            current_market_value: currentMarketValue,
+            current_profit: currentProfit,
+            profit_rate: profitRate,
+            dividend_method: r.dividend_method || '红利再投',
+            created_at: r.created_at,
+            nav_gsz: r.nav_gsz || null,
+            nav_gszzl: r.nav_gszzl || null,
+            nav_dwjz: r.nav_dwjz || null,
+            nav_jzrq: r.nav_jzrq || null,
+          };
+        });
       return jsonResponse({ code: 0, data: { total: positions.length, positions } });
     }
 
