@@ -18,7 +18,7 @@
         </div>
         <!-- 成员标签 -->
         <div class="account-member" v-if="account.member_name">
-          <span class="member-tag">👤 {{ account.member_name }}</span>
+          <span class="member-tag">{{ getMemberEmoji(account.member_id) }} {{ account.member_name }}</span>
         </div>
         <div class="account-actions">
           <van-button size="small" type="primary" @click="handleEdit(account)">编辑</van-button>
@@ -153,6 +153,11 @@ const getChannelIcon = (channel) => {
     '其他': '📦',
   }
   return icons[channel] || '📦'
+}
+
+const getMemberEmoji = (memberId) => {
+  const member = members.value.find(m => m.id === memberId)
+  return member?.emoji || '👤'
 }
 
 const fetchMembers = async () => {
