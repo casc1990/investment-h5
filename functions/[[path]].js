@@ -694,7 +694,8 @@ export async function onRequest(context) {
                   gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
                 }
                 nav = currentNAV;
-                prev_nav = prevNAV;  // 前日净值（用于算昨日收益）
+                prev_nav = prevNAV;
+                navDate = currentDate;
               }
             }
             // upsert market_snapshot（含 prev_nav）
