@@ -645,10 +645,16 @@ export async function onRequest(context) {
             if (match) {
               const d = JSON.parse(match[1]);
               gsz = d.gsz ? parseFloat(d.gsz) : null;
-              gszzl = d.gszzl ? parseFloat(d.gszzl) : null;
-              nav = d.dwjz ? parseFloat(d.dwjz) : null;
+              const dwjzRaw = d.dwjz ? parseFloat(d.dwjz) : null;
+              nav = dwjzRaw;
               navDate = d.jzrq || null;
               name = d.name || name;
+              // 日涨跌幅 = (当日最新净值 − 上一交易日净值) ÷ 上一交易日净值
+              if (gsz && dwjzRaw) {
+                gszzl = parseFloat(((gsz - dwjzRaw) / dwjzRaw * 100).toFixed(4));
+              } else {
+                gszzl = null;
+              }
             } else {
               // fundgz 无数据，fallback 到 pingzhongdata 历史净值
               const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
