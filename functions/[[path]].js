@@ -591,19 +591,44 @@ export async function onRequest(context) {
       }
 
       try {
+        // 先尝试 fundgz 接口（实时估值）
         const url2 = `https://fundgz.1234567.com.cn/js/${fundCode}.js?rt=${Date.now()}`;
         const res = await fetch(url2, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://fund.eastmoney.com/',
           }
         });
         const text = await res.text();
-        // 返回格式: jsonpgz({"name":"...","nav":"1.2345","navDate":"2025-01-01","...})
         const match = text.match(/jsonpgz\((.+)\)/);
         if (match) {
           const data = JSON.parse(match[1]);
           return jsonResponse({ code: 0, data });
+        }
+
+        // 如果 fundgz 无数据，从 pingzhongdata 页面提取历史净值
+        const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+        });
+        const text2 = await res2.text();
+        // 格式: Data_netWorthTrend = [{"x":timestamp,"y":nav},...]
+        const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
+        if (navMatch) {
+          const points = navMatch[1];
+          const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
+          if (allPoints.length > 0) {
+            const last = allPoints[allPoints.length - 1];
+            const navDate = new Date(parseInt(last[1]) / 1000).toISOString().split('T')[0];
+            return jsonResponse({
+              code: 0,
+              data: {
+                fundCode,
+                nav: parseFloat(last[2]),
+                navDate,
+                source: 'eastmoney_pingzhongdata'
+              }
+            });
+          }
         }
         return jsonResponse({ code: 404, message: '未找到该基金数据' }, 404);
       } catch (error) {
@@ -625,24 +650,21 @@ export async function onRequest(context) {
       await Promise.all(fundCodes.map(async (code) => {
         try {
           const res = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
           });
           const text = await res.text();
-          // 提取 Data_netWorthTrend 最后一条数据
-          const match = text.match(/var Data_netWorthTrend\s*=\s*\[([^\]]+)\]/);
-          if (match) {
-            const points = match[1];
-            const lastPointMatch = points.match(/\[\d+,\s*([\d.]+)\]/g);
-            if (lastPointMatch) {
-              const last = lastPointMatch[lastPointMatch.length - 1].match(/\[(\d+),\s*([\d.]+)\]/);
-              if (last) {
-                const timestamp = parseInt(last[1]);
-                const nav = parseFloat(last[2]);
-                const navDate = new Date(timestamp).toISOString().split('T')[0];
-                results[code] = { nav, navDate };
-              }
+          const navMatch = text.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
+          if (navMatch) {
+            const points = navMatch[1];
+            const allPoints = [...points.matchAll(/\"x\":(\d+),\s*\"y\":([\d.]+)/g)];
+            if (allPoints.length > 0) {
+              const last = allPoints[allPoints.length - 1];
+              const navDate = new Date(parseInt(last[1]) / 1000).toISOString().split('T')[0];
+              results[code] = { nav: parseFloat(last[2]), navDate };
+              return;
             }
           }
+          results[code] = { nav: null, navDate: null };
         } catch (e) {
           results[code] = { nav: null, navDate: null, error: e.message };
         }
