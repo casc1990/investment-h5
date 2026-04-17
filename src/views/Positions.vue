@@ -1,10 +1,40 @@
 <template>
   <div class="positions-page">
+    <!-- 顶部统计卡片 -->
+    <div class="summary-card" v-if="summary">
+      <div class="summary-asset">
+        <div class="summary-label">总资产(元)</div>
+        <div class="summary-amount">{{ formatAmount(summary.totalMarketValue) }}</div>
+      </div>
+      <div class="summary-profit-row">
+        <div class="summary-profit-item">
+          <div class="sp-label">昨日收益</div>
+          <div class="sp-value" :class="{ positive: summary.totalYesterdayProfit >= 0, negative: summary.totalYesterdayProfit < 0 }">
+            {{ summary.totalYesterdayProfit >= 0 ? '+' : '' }}{{ formatAmount(summary.totalYesterdayProfit) }}
+          </div>
+        </div>
+        <div class="sp-divider"></div>
+        <div class="summary-profit-item">
+          <div class="sp-label">持有收益</div>
+          <div class="sp-value" :class="{ positive: summary.totalHoldingProfit >= 0, negative: summary.totalHoldingProfit < 0 }">
+            {{ summary.totalHoldingProfit >= 0 ? '+' : '' }}{{ formatAmount(summary.totalHoldingProfit) }}
+          </div>
+        </div>
+        <div class="sp-divider"></div>
+        <div class="summary-profit-item">
+          <div class="sp-label">持仓收益率</div>
+          <div class="sp-value" :class="{ positive: summary.totalProfitRate >= 0, negative: summary.totalProfitRate < 0 }">
+            {{ summary.totalProfitRate >= 0 ? '+' : '' }}{{ summary.totalProfitRate }}%
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 筛选栏 -->
     <div class="filter-bar">
       <van-dropdown-menu>
         <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
-        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="fetchPositions" />
+        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="onAccountChange" />
       </van-dropdown-menu>
     </div>
 
@@ -249,6 +279,7 @@ import { positionApi, accountApi, memberApi, marketApi } from '../api'
 const loading = ref(false)
 const positions = ref([])
 const expandedIds = ref([])
+const summary = ref(null)
 const accounts = ref([])
 const members = ref([])
 const selectedMemberId = ref(null)
@@ -327,6 +358,38 @@ const onMemberChange = (memberId) => {
   fetchPositions()
 }
 
+const onAccountChange = () => {
+  fetchPositions()
+}
+
+const updateSummary = () => {
+  if (!positions.value.length) {
+    summary.value = null
+    return
+  }
+  let totalMarketValue = 0
+  let totalYesterdayProfit = 0
+  let totalHoldingProfit = 0
+
+  positions.value.forEach(pos => {
+    const cost = parseFloat(pos.cost) || 0
+    const currentProfit = parseFloat(pos.current_profit) || 0
+    const yesterdayProfit = parseFloat(pos.yesterday_profit) || 0
+    totalMarketValue += cost + currentProfit  // 当前市值 = 成本 + 持有收益
+    totalYesterdayProfit += yesterdayProfit
+    totalHoldingProfit += currentProfit
+  })
+
+  const totalProfitRate = totalMarketValue > 0 ? (totalHoldingProfit / (totalMarketValue - totalHoldingProfit) * 100) : 0
+
+  summary.value = {
+    totalMarketValue: Number(totalMarketValue.toFixed(2)),
+    totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
+    totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
+    totalProfitRate: Number(totalProfitRate.toFixed(2)),
+  }
+}
+
 const fetchMembers = async () => {
   try {
     const data = await memberApi.list()
@@ -350,6 +413,7 @@ const fetchPositions = async () => {
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
     positions.value = data?.positions || []
+    updateSummary()
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     showToast('加载失败')
@@ -540,6 +604,72 @@ onMounted(() => {
   background: white;
   padding: 0 12px;
 }
+
+/* 顶部统计卡片 */
+.summary-card {
+  background: linear-gradient(135deg, #1E80FF 0%, #0066CC 100%);
+  padding: 20px 20px 16px;
+  color: white;
+  margin: 0 12px;
+  border-radius: 12px;
+  margin-top: 12px;
+}
+
+.summary-asset {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.summary-label {
+  font-size: 13px;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+
+.summary-amount {
+  font-size: 30px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: -1px;
+}
+
+.summary-profit-row {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 12px 0;
+}
+
+.summary-profit-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.sp-label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.sp-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.sp-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 颜色 */
+.positive { color: #FF6B6B; }
+.negative { color: #7DDF64; }
 
 .position-list {
   padding: 0 12px 80px;
