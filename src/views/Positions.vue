@@ -10,82 +10,110 @@
 
     <!-- 持仓列表 -->
     <div class="position-list">
-      <div v-for="position in positions" :key="position.id" class="position-card">
-        <!-- 基金信息头部 -->
-        <div class="fund-header">
-          <div class="fund-basic">
-            <div class="fund-name">{{ position.fund_name || '未知基金' }}</div>
-            <div class="fund-meta">
-              <span class="fund-code">{{ position.fund_code }}</span>
+      <div
+        v-for="position in positions"
+        :key="position.id"
+        class="position-card"
+        :class="{ expanded: expandedIds.includes(position.id) }"
+      >
+        <!-- 默认折叠显示：一行三段 -->
+        <div class="fund-collapsed" @click="toggleExpand(position.id)">
+          <div class="collapsed-main">
+            <span class="collapsed-name">{{ position.fund_name || '未知基金' }}</span>
+            <span class="collapsed-tags">
               <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
               <span class="account-tag">{{ position.account_name }}</span>
+            </span>
+          </div>
+          <div class="collapsed-data">
+            <span class="collapsed-item">
+              <span class="collapsed-value">¥{{ formatNumber(position.cost) }}</span>
+              <span class="collapsed-sep">/</span>
+              <span class="collapsed-profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
+                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
+              </span>
+            </span>
+            <span class="collapsed-item">
+              <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
+                {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.current_profit) }}
+              </span>
+              <span class="collapsed-sep">/</span>
+              <span class="collapsed-profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+                {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+              </span>
+            </span>
+          </div>
+          <div class="collapsed-arrow">
+            <van-icon :name="expandedIds.includes(position.id) ? 'arrow-up' : 'arrow-down'" />
+          </div>
+        </div>
+
+        <!-- 展开内容 -->
+        <div v-if="expandedIds.includes(position.id)" class="fund-expanded">
+          <!-- 核心数据网格 -->
+          <div class="fund-data-grid">
+            <div class="data-item">
+              <span class="data-label">持有份额</span>
+              <span class="data-value">{{ formatNumber(position.shares) }} 份</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">持有金额</span>
+              <span class="data-value">¥{{ formatNumber(position.cost) }}</span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">持有收益</span>
+              <span class="data-value profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
+                {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.current_profit) }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">持有收益率</span>
+              <span class="data-value profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+                {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">昨日收益</span>
+              <span class="data-value profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
+                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
+              </span>
             </div>
           </div>
-          <div class="fund-profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
-            <div class="profit-rate">{{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%</div>
-          </div>
-        </div>
 
-        <!-- 核心数据 -->
-        <div class="fund-data-grid">
-          <div class="data-item">
-            <span class="data-label">持有份额</span>
-            <span class="data-value">{{ formatNumber(position.shares) }} 份</span>
+          <!-- 基金行情 -->
+          <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
+            <div class="nav-item">
+              <span class="nav-label">最新净值</span>
+              <span class="nav-value">{{ Number(position.nav_gsz || position.nav_dwjz || 0).toFixed(4) }}</span>
+            </div>
+            <div class="nav-item">
+              <span class="nav-label">日涨幅</span>
+              <span v-if="position.nav_gszzl !== null && position.nav_gszzl !== undefined" class="nav-value profit" :class="{ positive: Number(position.nav_gszzl) >= 0, negative: Number(position.nav_gszzl) < 0 }">
+                {{ Number(position.nav_gszzl) >= 0 ? '+' : '' }}{{ Number(position.nav_gszzl).toFixed(2) }}%
+              </span>
+              <span v-else class="nav-value">--</span>
+            </div>
+            <div class="nav-item" v-if="position.nav_jzrq">
+              <span class="nav-label">净值日期</span>
+              <span class="nav-value">{{ position.nav_jzrq }}</span>
+            </div>
           </div>
-          <div class="data-item">
-            <span class="data-label">持有金额</span>
-            <span class="data-value">¥{{ formatNumber(position.cost) }}</span>
-          </div>
-          <div class="data-item">
-            <span class="data-label">持有收益</span>
-            <span class="data-value profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
-              {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.current_profit) }}
+
+          <!-- 基金代码 & 分红方式 -->
+          <div class="fund-extra">
+            <span class="fund-code-full">代码：{{ position.fund_code }}</span>
+            <span v-if="position.dividend_method" class="dividend-info">
+              <span class="dividend-label">分红方式：</span>
+              <span class="dividend-value">{{ position.dividend_method }}</span>
             </span>
           </div>
-          <div class="data-item">
-            <span class="data-label">持有收益率</span>
-            <span class="data-value profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
-              {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
-            </span>
-          </div>
-          <div class="data-item">
-            <span class="data-label">昨日收益</span>
-            <span class="data-value profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
-              {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
-            </span>
-          </div>
-        </div>
 
-        <!-- 基金行情 -->
-        <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
-          <div class="nav-item">
-            <span class="nav-label">最新净值</span>
-            <span class="nav-value">{{ Number(position.nav_gsz || position.nav_dwjz || 0).toFixed(4) }}</span>
+          <!-- 操作按钮 -->
+          <div class="position-actions">
+            <van-button size="small" type="warning" @click.stop="handleSync(position)">同步净值</van-button>
+            <van-button size="small" type="primary" @click.stop="handleEdit(position)">编辑</van-button>
+            <van-button size="small" type="danger" @click.stop="handleDelete(position)">删除</van-button>
           </div>
-          <div class="nav-item">
-            <span class="nav-label">日涨幅</span>
-            <span v-if="position.nav_gszzl !== null && position.nav_gszzl !== undefined" class="nav-value profit" :class="{ positive: Number(position.nav_gszzl) >= 0, negative: Number(position.nav_gszzl) < 0 }">
-              {{ Number(position.nav_gszzl) >= 0 ? '+' : '' }}{{ Number(position.nav_gszzl).toFixed(2) }}%
-            </span>
-            <span v-else class="nav-value">--</span>
-          </div>
-          <div class="nav-item" v-if="position.nav_jzrq">
-            <span class="nav-label">净值日期</span>
-            <span class="nav-value">{{ position.nav_jzrq }}</span>
-          </div>
-        </div>
-
-        <!-- 分红方式 -->
-        <div class="dividend-info" v-if="position.dividend_method">
-          <span class="dividend-label">分红方式：</span>
-          <span class="dividend-value">{{ position.dividend_method }}</span>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="position-actions">
-          <van-button size="small" type="warning" @click="handleSync(position)">同步</van-button>
-          <van-button size="small" type="primary" @click="handleEdit(position)">编辑</van-button>
-          <van-button size="small" type="danger" @click="handleDelete(position)">删除</van-button>
         </div>
       </div>
 
@@ -214,6 +242,7 @@ import { positionApi, accountApi, memberApi, marketApi } from '../api'
 
 const loading = ref(false)
 const positions = ref([])
+const expandedIds = ref([])
 const accounts = ref([])
 const members = ref([])
 const selectedMemberId = ref(null)
@@ -273,7 +302,7 @@ const accountPickerOptions = computed(() => {
 })
 
 const formatNumber = (num) => {
-  return parseFloat(num || 0).toFixed(4)
+  return parseFloat(num || 0).toFixed(2)
 }
 
 const onMemberChange = (memberId) => {
@@ -397,6 +426,15 @@ const handleSync = async (position) => {
   }
 }
 
+const toggleExpand = (id) => {
+  const idx = expandedIds.value.indexOf(id)
+  if (idx >= 0) {
+    expandedIds.value.splice(idx, 1)
+  } else {
+    expandedIds.value.push(id)
+  }
+}
+
 const handleDelete = async (position) => {
   try {
     await showConfirmDialog({
@@ -498,80 +536,121 @@ onMounted(() => {
 .position-card {
   background: white;
   border-radius: 12px;
-  padding: 16px;
+  overflow: hidden;
 }
 
-.fund-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.fund-basic {
-  flex: 1;
-}
-
-.fund-name {
-  font-weight: 600;
-  font-size: 16px;
-  color: #333;
-}
-
-.fund-meta {
+/* 折叠行 */
+.fund-collapsed {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fund-collapsed:active {
+  background: #fafafa;
+}
+
+.collapsed-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.collapsed-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsed-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.fund-code {
-  font-size: 12px;
-  color: #999;
+.collapsed-data {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  margin: 0 10px;
+  flex-shrink: 0;
+}
+
+.collapsed-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
   font-family: 'Courier New', monospace;
+  white-space: nowrap;
 }
 
-.member-tag {
-  font-size: 12px;
-  color: #1a73e8;
-  background: #e8f0fe;
-  padding: 2px 6px;
-  border-radius: 4px;
+.collapsed-value {
+  color: #333;
+  font-weight: 500;
 }
 
-.account-tag {
-  font-size: 12px;
-  color: #666;
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 4px;
+.collapsed-sep {
+  color: #ccc;
+  margin: 0 1px;
 }
 
-.fund-profit {
-  text-align: right;
+.collapsed-profit {
+  font-weight: 500;
 }
 
-.fund-profit.positive {
+.collapsed-profit.positive {
   color: #ee0a24;
 }
 
-.fund-profit.negative {
+.collapsed-profit.negative {
   color: #07c160;
 }
 
-.profit-rate {
-  font-weight: 600;
-  font-size: 18px;
+.collapsed-arrow {
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+/* 展开内容 */
+.fund-expanded {
+  padding: 0 16px 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* 旧样式已移除 */
+
+/* 折叠行内的标签样式 */
+.member-tag {
+  font-size: 11px;
+  color: #1a73e8;
+  background: #e8f0fe;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.account-tag {
+  font-size: 11px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .fund-data-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid #f5f5f5;
-  border-bottom: 1px solid #f5f5f5;
+  padding: 12px 0 4px;
 }
 
 .data-item {
@@ -604,18 +683,34 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 13px;
   color: #666;
+  display: flex;
+  gap: 8px;
 }
 
 .dividend-label {
   color: #999;
 }
 
-.nav-info {
+.fund-extra {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
   padding: 8px 0;
   border-top: 1px solid #f5f5f5;
   margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.fund-code-full {
+  font-size: 12px;
+  color: #999;
+  font-family: 'Courier New', monospace;
+}
+
+.nav-info {
+  display: flex;
+  gap: 16px;
+  padding: 4px 0;
   flex-wrap: wrap;
 }
 
