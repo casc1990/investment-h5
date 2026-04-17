@@ -589,7 +589,7 @@ export async function onRequest(context) {
         data: {
           summary: {
             totalInvested: Number(totalInvested.toFixed(2)),
-            totalMarketValue: Number(totalMarketValue.toFixed(2)),
+            totalMarketValue: Number((totalInvested + totalProfit).toFixed(2)),
             totalProfit: Number(totalProfit.toFixed(2)),
             totalProfitRate: Number(totalProfitRate.toFixed(2)),
             totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
