@@ -273,7 +273,7 @@ export async function onRequest(context) {
       
         const positions = results.map(r => {
           const shares = r.quantity || 0;
-          const initialAmount = r.amount || 0; // 录入时的初始金额
+          const initialAmount = r.amount || 0; // 录入时的初始本金
           const nav = r.nav_gsz || r.nav_dwjz || 0; // 最新净值
           const prevNav = r.prev_nav || 0; // 前一日净值
 
@@ -282,20 +282,17 @@ export async function onRequest(context) {
             ? parseFloat(((nav - prevNav) * shares).toFixed(4))
             : 0;
 
-          // 持有金额 = 初始金额 + 昨日收益（动态更新）
-          const cost = parseFloat((initialAmount + yesterdayProfit).toFixed(4));
-
-          // 当前市值 = 持有份额 × 最新净值
+          // 当前市值 = 持有份额 × 最新净值（= 页面上的"持有金额"）
           const currentMarketValue = shares > 0 && nav > 0
             ? parseFloat((shares * nav).toFixed(4))
             : 0;
 
-          // 持有收益 = 当前市值 - 初始金额
+          // 持有收益 = 当前市值 - 初始本金（累计正负收益）
           const totalProfit = parseFloat((currentMarketValue - initialAmount).toFixed(4));
 
-          // 持有收益率 = 持有收益 / (持有金额 - 持有收益) × 100%
-          const profitRate = (cost - totalProfit) > 0
-            ? parseFloat(((totalProfit / (cost - totalProfit)) * 100).toFixed(4))
+          // 持有收益率 = 持有收益 / 当前市值 × 100%
+          const profitRate = currentMarketValue > 0
+            ? parseFloat(((totalProfit / currentMarketValue) * 100).toFixed(4))
             : 0;
 
           return {
@@ -308,12 +305,12 @@ export async function onRequest(context) {
             fund_code: r.fund_code,
             fund_name: r.fund_name || '',
             shares,
-            cost,
+            cost: currentMarketValue,        // 持有金额 = 当前市值
             current_market_value: currentMarketValue,
             current_profit: totalProfit,
             profit_rate: profitRate,
             yesterday_profit: yesterdayProfit,
-            initial_profit: initialAmount,
+            initial_profit: initialAmount,   // 录入时的初始本金
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
             nav_gsz: r.nav_gsz || null,
