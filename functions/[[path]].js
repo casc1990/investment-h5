@@ -773,6 +773,89 @@ export async function onRequest(context) {
       }
     }
 
+    // 单基金净值同步接口
+    if (path.match(/^\/api\/fund\/sync\/[\w.]+$/) && method === 'GET') {
+      const fundCode = path.split('/').pop();
+      
+      try {
+        let nav = null, navDate = null, gszzl = null, prev_nav = null, name = '';
+        
+        const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+        });
+        const text2 = await res2.text();
+        const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
+        if (nameMatch) name = nameMatch[1];
+        const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
+        if (navMatch) {
+          const allPoints = [...navMatch[1].matchAll(/"x":(\d+),\s*"y":([\d.]+)/g)];
+          if (allPoints.length >= 2) {
+            const last = allPoints[allPoints.length - 1];
+            const prev = allPoints[allPoints.length - 2];
+            const currentNAV = parseFloat(last[2]);
+            const currentDate = new Date(parseInt(last[1]) + 8 * 3600 * 1000).toISOString().split('T')[0];
+            const prevNAV = parseFloat(prev[2]);
+            if (prevNAV > 0) {
+              gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
+            }
+            nav = currentNAV;
+            prev_nav = prevNAV;
+            navDate = currentDate;
+          }
+        }
+        
+        const { results: oldSnap } = await env.DB.prepare(
+          'SELECT last_nav, last_gszzl FROM market_snapshot WHERE fund_code = ?'
+        ).bind(fundCode).all();
+        const oldLastNav = oldSnap.length > 0 ? oldSnap[0].last_nav : null;
+        const oldLastGszzl = oldSnap.length > 0 ? oldSnap[0].last_gszzl : null;
+
+        await env.DB.prepare(`
+          INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, prev_nav, last_nav, last_gszzl, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+          ON CONFLICT(fund_code) DO UPDATE SET
+            name = excluded.name,
+            dwjz = excluded.dwjz,
+            gsz = excluded.gsz,
+            gszzl = excluded.gszzl,
+            jzrq = excluded.jzrq,
+            gztime = excluded.gztime,
+            prev_nav = excluded.prev_nav,
+            last_nav = excluded.last_nav,
+            last_gszzl = excluded.last_gszzl,
+            updated_at = unixepoch()
+        `).bind(fundCode, name, nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+        
+        // 更新该基金所有持仓的昨日收益
+        const { results: positions } = await env.DB.prepare(
+          'SELECT id, quantity FROM positions WHERE fund_code = ?'
+        ).bind(fundCode).all();
+        
+        for (const pos of positions) {
+          let yesterdayProfit = 0;
+          if (prev_nav && oldLastNav) {
+            yesterdayProfit = parseFloat(((prev_nav - oldLastNav) * (pos.quantity || 0)).toFixed(4));
+          }
+          await env.DB.prepare(`
+            UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
+          `).bind(yesterdayProfit, pos.id).run();
+        }
+        
+        return jsonResponse({
+          code: 0,
+          message: nav ? 'Synced successfully' : 'Fund data not found',
+          fund_code: fundCode,
+          gsz: nav,
+          gszzl,
+          prev_nav,
+          last_nav: oldLastNav,
+          jzrq: navDate,
+        });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
     // 获取基金当前净值（从东方财富API）
     if (path === '/api/fund/nav' && method === 'GET') {
       const fundCode = url.searchParams.get('code');

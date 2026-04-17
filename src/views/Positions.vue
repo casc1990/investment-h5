@@ -83,6 +83,7 @@
 
         <!-- 操作按钮 -->
         <div class="position-actions">
+          <van-button size="small" type="warning" @click="handleSync(position)">同步</van-button>
           <van-button size="small" type="primary" @click="handleEdit(position)">编辑</van-button>
           <van-button size="small" type="danger" @click="handleDelete(position)">删除</van-button>
         </div>
@@ -209,7 +210,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
-import { positionApi, accountApi, memberApi } from '../api'
+import { positionApi, accountApi, memberApi, marketApi } from '../api'
 
 const loading = ref(false)
 const positions = ref([])
@@ -383,6 +384,17 @@ const handleEdit = (position) => {
     }
   }
   showAddModal.value = true
+}
+
+const handleSync = async (position) => {
+  try {
+    await marketApi.syncFund(position.fund_code)
+    showSuccessToast('同步成功')
+    fetchPositions()
+  } catch (error) {
+    console.error('同步失败:', error)
+    showToast('同步失败')
+  }
 }
 
 const handleDelete = async (position) => {
