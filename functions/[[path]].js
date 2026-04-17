@@ -290,9 +290,9 @@ export async function onRequest(context) {
           // 持有收益 = 当前市值 - 初始本金（累计正负收益）
           const totalProfit = parseFloat((currentMarketValue - initialAmount).toFixed(4));
 
-          // 持有收益率 = 持有收益 / 当前市值 × 100%
-          const profitRate = currentMarketValue > 0
-            ? parseFloat(((totalProfit / currentMarketValue) * 100).toFixed(4))
+          // 持有收益率 = 持有收益 / 成本 × 100%
+          const profitRate = initialAmount > 0
+            ? parseFloat(((totalProfit / initialAmount) * 100).toFixed(4))
             : 0;
 
           return {
