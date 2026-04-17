@@ -10,6 +10,14 @@
 
     <!-- 持仓列表 -->
     <div class="position-list">
+      <!-- 表头 -->
+      <div class="list-header">
+        <span class="header-col header-name">名称</span>
+        <span class="header-col header-center">金额/昨日收益</span>
+        <span class="header-col header-right">持有收益/率</span>
+      </div>
+
+      <!-- 持仓卡片 -->
       <div
         v-for="position in positions"
         :key="position.id"
@@ -26,22 +34,20 @@
             </span>
           </div>
           <div class="collapsed-data">
-            <span class="collapsed-item">
-              <span class="collapsed-value">¥{{ formatNumber(position.cost) }}</span>
-              <span class="collapsed-sep">/</span>
-              <span class="collapsed-profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
-                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
+            <div class="collapsed-center">
+              <span class="collapsed-value">¥{{ formatAmount(position.cost) }}</span>
+              <span class="collapsed-yesterday" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
+                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.yesterday_profit) }}
               </span>
-            </span>
-            <span class="collapsed-item">
+            </div>
+            <div class="collapsed-right">
               <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
-                {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.current_profit) }}
+                {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
               </span>
-              <span class="collapsed-sep">/</span>
-              <span class="collapsed-profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+              <span class="collapsed-rate" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
                 {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
               </span>
-            </span>
+            </div>
           </div>
           <div class="collapsed-arrow">
             <van-icon :name="expandedIds.includes(position.id) ? 'arrow-up' : 'arrow-down'" />
@@ -305,6 +311,15 @@ const formatNumber = (num) => {
   return parseFloat(num || 0).toFixed(2)
 }
 
+// 金额格式化：保留2位小数，千分位分隔
+const formatAmount = (num) => {
+  const val = parseFloat(num || 0)
+  if (isNaN(val)) return '0.00'
+  const [int, dec] = val.toFixed(2).split('.')
+  const formatted = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `${formatted}.${dec}`
+}
+
 const onMemberChange = (memberId) => {
   selectedMemberId.value = memberId
   // 成员变化时，重置账户筛选
@@ -527,23 +542,50 @@ onMounted(() => {
 }
 
 .position-list {
-  padding: 12px;
+  padding: 0 12px 80px;
+}
+
+/* 表头 */
+.list-header {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  margin-bottom: 2px;
+}
+
+.header-col {
+  font-size: 12px;
+  color: #999;
+  font-weight: 400;
+}
+
+.header-name {
+  flex: 1;
+  text-align: left;
+}
+
+.header-center {
+  text-align: center;
+  width: 110px;
+}
+
+.header-right {
+  text-align: right;
+  width: 90px;
 }
 
 .position-card {
   background: white;
   border-radius: 12px;
   overflow: hidden;
+  margin-bottom: 10px;
 }
 
-/* 折叠行 */
+/* 折叠行 - 三列布局 */
 .fund-collapsed {
   display: flex;
   align-items: center;
-  padding: 14px 16px;
+  padding: 12px 16px;
   cursor: pointer;
   user-select: none;
 }
@@ -552,73 +594,106 @@ onMounted(() => {
   background: #fafafa;
 }
 
+/* 左：基金名称 */
 .collapsed-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
+  padding-right: 8px;
 }
 
 .collapsed-name {
   font-weight: 600;
   font-size: 15px;
-  color: #333;
+  color: #1a1a1a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
 .collapsed-tags {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
+/* 中：持有金额 / 昨日收益 */
 .collapsed-data {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.collapsed-center {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
-  margin: 0 10px;
-  flex-shrink: 0;
-}
-
-.collapsed-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-family: 'Courier New', monospace;
-  white-space: nowrap;
+  gap: 2px;
+  min-width: 90px;
+  padding-right: 10px;
 }
 
 .collapsed-value {
-  color: #333;
+  font-size: 14px;
   font-weight: 500;
+  color: #1a1a1a;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
-.collapsed-sep {
-  color: #ccc;
-  margin: 0 1px;
+.collapsed-yesterday {
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+/* 右：持有收益 / 持有收益率 */
+.collapsed-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 80px;
 }
 
 .collapsed-profit {
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
-.collapsed-profit.positive {
+.collapsed-rate {
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+/* 颜色 */
+.collapsed-profit.positive,
+.collapsed-yesterday.positive,
+.collapsed-rate.positive {
   color: #ee0a24;
 }
 
-.collapsed-profit.negative {
+.collapsed-profit.negative,
+.collapsed-yesterday.negative,
+.collapsed-rate.negative {
   color: #07c160;
 }
 
 .collapsed-arrow {
   color: #ccc;
   flex-shrink: 0;
+  margin-left: 6px;
 }
 
 /* 展开内容 */
