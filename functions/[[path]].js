@@ -570,6 +570,20 @@ export async function onRequest(context) {
       const totalProfit = totalMarketValue - totalInvested;
       const totalProfitRate = totalMarketValue > 0 ? (totalProfit / totalMarketValue * 100) : 0;
 
+      // 昨日收益 = sum((今日净值 - 昨日净值) * 持有份额)
+      let totalYesterdayProfit = 0;
+      positions.forEach(pos => {
+        const snap = snapshotMap[pos.fund_code];
+        if (snap && snap.gsz && snap.prev_nav && pos.quantity) {
+          totalYesterdayProfit += (snap.gsz - snap.prev_nav) * pos.quantity;
+        }
+      });
+
+      // 持有收益（不含历史累计收益）
+      const totalHoldingProfit = totalProfit;
+      // 累计收益（含历史卖出盈亏）
+      const totalCumulativeProfit = positions.reduce((sum, pos) => sum + (pos.initial_profit || 0), 0);
+
       return jsonResponse({
         code: 0,
         data: {
@@ -578,6 +592,9 @@ export async function onRequest(context) {
             totalMarketValue: Number(totalMarketValue.toFixed(2)),
             totalProfit: Number(totalProfit.toFixed(2)),
             totalProfitRate: Number(totalProfitRate.toFixed(2)),
+            totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
+            totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
+            totalCumulativeProfit: Number(totalCumulativeProfit.toFixed(2)),
           },
           members: memberStats,
           accounts: Object.values(accountStatsMap),
