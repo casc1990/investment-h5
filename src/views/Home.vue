@@ -4,7 +4,7 @@
     <div class="header-card">
       <div class="total-info">
         <div class="label">💰 总资产</div>
-        <div class="amount">¥{{ formatNumber(overview?.summary?.totalMarketValue || 0) }}</div>
+        <div class="amount">¥{{ formatNumber((overview?.summary?.totalInvested || 0) + (overview?.summary?.totalProfit || 0)) }}</div>
         <div class="profit" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
           <span>{{ overview?.summary?.totalProfit >= 0 ? '+' : '' }}¥{{ formatNumber(overview?.summary?.totalProfit || 0) }}</span>
           <span class="rate">({{ overview?.summary?.totalProfitRate || 0 }}%)</span>
@@ -25,7 +25,7 @@
           <div v-if="member.accounts?.length" class="member-stats">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
-              <span class="stat-value">¥{{ formatNumber(member.marketValue || 0) }}</span>
+              <span class="stat-value">¥{{ formatNumber((member.invested || 0) + (member.profit || 0)) }}</span>
             </div>
             <div class="stat-item">
               <span class="stat-label">总收益</span>
@@ -53,7 +53,7 @@
             <span class="account-channel">{{ account.channel }}</span>
           </div>
           <div class="account-value">
-            <span class="value">¥{{ formatNumber(account.marketValue) }}</span>
+            <span class="value">¥{{ formatNumber((account.invested || 0) + (account.profit || 0)) }}</span>
             <span class="profit" :class="{ positive: account.profit > 0 }">
               {{ account.profit >= 0 ? '+' : '' }}{{ account.profitRate }}%
             </span>
