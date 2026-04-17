@@ -1,5 +1,13 @@
 <template>
   <div class="positions-page">
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <van-dropdown-menu>
+        <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
+        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="onAccountChange" />
+      </van-dropdown-menu>
+    </div>
+
     <!-- 顶部统计卡片 -->
     <div class="summary-card" v-if="summary">
       <div class="summary-asset">
@@ -28,14 +36,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- 筛选栏 -->
-    <div class="filter-bar">
-      <van-dropdown-menu>
-        <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
-        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="onAccountChange" />
-      </van-dropdown-menu>
     </div>
 
     <!-- 持仓列表 -->
