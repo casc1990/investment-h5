@@ -242,7 +242,8 @@ export async function onRequest(context) {
       const memberId = url.searchParams.get('member_id');
       
       let query = `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji,
-                   s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq
+                   s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                   s.prev_nav
                    FROM positions p
                    LEFT JOIN accounts a ON p.account_id = a.id
                    LEFT JOIN members m ON a.member_id = m.id
@@ -272,15 +273,31 @@ export async function onRequest(context) {
       
         const positions = results.map(r => {
           const shares = r.quantity || 0;
-          const cost = r.amount || 0;
-          const nav = r.nav_gsz || r.nav_dwjz || 0;
-          const currentMarketValue = shares > 0 && nav > 0 ? parseFloat((shares * nav).toFixed(4)) : 0;
-          const initialProfit = r.initial_profit || 0;
-          const accumulatedProfit = r.total_profit || 0;
-          const yesterdayProfit = r.yesterday_profit || 0;
-          // 持有收益 = 历史录入收益 + 每日增量累加
-          const totalProfit = parseFloat((initialProfit + accumulatedProfit).toFixed(4));
-          const profitRate = cost > 0 ? parseFloat(((totalProfit / cost) * 100).toFixed(4)) : 0;
+          const initialAmount = r.amount || 0; // 录入时的初始金额
+          const nav = r.nav_gsz || r.nav_dwjz || 0; // 最新净值
+          const prevNav = r.prev_nav || 0; // 前一日净值
+
+          // 昨日收益 = (最新净值 - 前一日净值) × 持有份额
+          const yesterdayProfit = shares > 0 && nav > 0 && prevNav > 0
+            ? parseFloat(((nav - prevNav) * shares).toFixed(4))
+            : 0;
+
+          // 持有金额 = 初始金额 + 昨日收益（动态更新）
+          const cost = parseFloat((initialAmount + yesterdayProfit).toFixed(4));
+
+          // 当前市值 = 持有份额 × 最新净值
+          const currentMarketValue = shares > 0 && nav > 0
+            ? parseFloat((shares * nav).toFixed(4))
+            : 0;
+
+          // 持有收益 = 当前市值 - 初始金额
+          const totalProfit = parseFloat((currentMarketValue - initialAmount).toFixed(4));
+
+          // 持有收益率 = 持有收益 / (持有金额 - 持有收益) × 100%
+          const profitRate = (cost - totalProfit) > 0
+            ? parseFloat(((totalProfit / (cost - totalProfit)) * 100).toFixed(4))
+            : 0;
+
           return {
             id: r.id,
             account_id: r.account_id,
@@ -296,7 +313,7 @@ export async function onRequest(context) {
             current_profit: totalProfit,
             profit_rate: profitRate,
             yesterday_profit: yesterdayProfit,
-            initial_profit: initialProfit,
+            initial_profit: initialAmount,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
             nav_gsz: r.nav_gsz || null,
@@ -726,9 +743,8 @@ export async function onRequest(context) {
           }
         }));
 
-        // 3. 计算并更新每个持仓的昨日收益和累计收益
-        // 昨日收益 = (本次 prev_nav − 上次 last_nav) × 份额（两个 sync 点之间的净值差 × 份额）
-        // 今日增量 = (本次 NAV − prev_nav) × 份额（当日涨跌幅 × 份额）
+        // 3. 更新每个持仓的昨日收益（实时计算，由 positions GET 时动态算出）
+        // 昨日收益 = (本次 prev_nav − 上次 last_nav) × 份额
         for (const pos of allPositions) {
           const snap = syncResults[pos.fund_code];
           if (!snap || !snap.ok) continue;
@@ -739,15 +755,12 @@ export async function onRequest(context) {
           if (snap.last_nav && snap.prev_nav) {
             yesterdayProfit = parseFloat(((snap.prev_nav - snap.last_nav) * shares).toFixed(4));
           }
-          const todayProfit = parseFloat(((snap.gsz - snap.prev_nav) * shares).toFixed(4));
-
           await env.DB.prepare(`
             UPDATE positions SET
               yesterday_profit = ?,
-              total_profit = COALESCE(total_profit, 0) + ?,
               updated_at = unixepoch()
             WHERE id = ?
-          `).bind(yesterdayProfit, todayProfit, pos.id).run();
+          `).bind(yesterdayProfit, pos.id).run();
         }
 
         const successCount = Object.values(syncResults).filter(r => r.ok).length;
