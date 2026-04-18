@@ -7,8 +7,8 @@
       </transition>
     </router-view>
 
-    <!-- 底部导航 -->
-    <van-tabbar v-model="activeTab" route fixed placeholder>
+    <!-- 底部导航（仅登录后显示） -->
+    <van-tabbar v-if="isLoggedIn" v-model="activeTab" route fixed placeholder>
       <van-tabbar-item to="/" icon="wap-home">
         首页
       </van-tabbar-item>
@@ -32,11 +32,12 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const activeTab = ref(0)
+const isLoggedIn = computed(() => !!localStorage.getItem('auth_token'))
 
 const tabMap = {
   '/': 0,

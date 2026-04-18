@@ -48,9 +48,132 @@ export async function onRequest(context) {
   }
 
   try {
+    // ========== 认证：建表（自动初始化） ==========
+    // users 表：存储管理员账户
+    const userTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").all();
+    if (userTableInfo.results.length === 0) {
+      await env.DB.prepare(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+    }
+    // auth_tokens 表：存储登录令牌
+    const tokenTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_tokens'").all();
+    if (tokenTableInfo.results.length === 0) {
+      await env.DB.prepare(`
+        CREATE TABLE auth_tokens (
+          id TEXT PRIMARY KEY,
+          token TEXT UNIQUE NOT NULL,
+          created_at INTEGER DEFAULT (unixepoch()),
+          expires_at INTEGER
+        )
+      `).run();
+    }
+
+    // 验证 token 的 helper
+    async function verifyToken(request) {
+      const authHeader = request.headers.get('Authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (!token) return null;
+      const { results } = await env.DB.prepare(
+        'SELECT t.*, u.username FROM auth_tokens t WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?)'
+      ).bind(token, Math.floor(Date.now() / 1000)).all();
+      return results.length > 0 ? results[0] : null;
+    }
+
+    // ========== 公开接口（无需认证）==========
     // 健康检查
     if (path === '/health' || path === '/api/health') {
-      return jsonResponse({ code: 0, message: 'ok', data: { service: 'Investment API', version: '3.0.0', db: 'investment-db' } });
+      return jsonResponse({ code: 0, message: 'ok', data: { service: 'Investment API', version: '3.1.0', db: 'investment-db' } });
+    }
+
+    // 检查是否已设置过管理员
+    if (path === '/api/auth/status' && method === 'GET') {
+      const { results } = await env.DB.prepare('SELECT id, username, created_at FROM users LIMIT 1').all();
+      return jsonResponse({ code: 0, data: { configured: results.length > 0, username: results.length > 0 ? results[0].username : null } });
+    }
+
+    // 注册管理员（首次设置）
+    if (path === '/api/auth/setup' && method === 'POST') {
+      const body = await context.request.json();
+      const username = (body.username || 'admin').trim();
+      const password = body.password;
+      if (!password || password.length < 6) {
+        return jsonResponse({ code: 400, message: '密码长度至少6位' }, 400);
+      }
+      const { results: existing } = await env.DB.prepare('SELECT id FROM users LIMIT 1').all();
+      if (existing.length > 0) {
+        return jsonResponse({ code: 403, message: '已设置过管理员，请登录' }, 403);
+      }
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+      const salt = crypto.randomUUID().replace(/-/g, '').substring(0, 16);
+      const hashBuffer = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const passwordHash = `${salt}$${hashHex}`;
+      const id = generateId();
+      await env.DB.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').bind(id, username, passwordHash).run();
+      const token = crypto.randomUUID().replace(/-/g, '');
+      const tokenId = generateId();
+      const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+      await env.DB.prepare('INSERT INTO auth_tokens (id, token, expires_at) VALUES (?, ?, ?)').bind(tokenId, token, expiresAt).run();
+      return jsonResponse({ code: 0, data: { token, username, expires_at: expiresAt } });
+    }
+
+    // 登录
+    if (path === '/api/auth/login' && method === 'POST') {
+      const body = await context.request.json();
+      const username = (body.username || '').trim();
+      const password = body.password || '';
+      if (!username || !password) {
+        return jsonResponse({ code: 400, message: '用户名和密码不能为空' }, 400);
+      }
+      const { results } = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).all();
+      if (results.length === 0) {
+        return jsonResponse({ code: 401, message: '用户名或密码错误' }, 401);
+      }
+      const user = results[0];
+      const [salt, storedHash] = (user.password_hash || '').split('$');
+      if (!salt || !storedHash) {
+        return jsonResponse({ code: 401, message: '用户名或密码错误' }, 401);
+      }
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+      const hashBuffer = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (hashHex !== storedHash) {
+        return jsonResponse({ code: 401, message: '用户名或密码错误' }, 401);
+      }
+      const token = crypto.randomUUID().replace(/-/g, '');
+      const tokenId = generateId();
+      const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+      await env.DB.prepare('INSERT INTO auth_tokens (id, token, expires_at) VALUES (?, ?, ?)').bind(tokenId, token, expiresAt).run();
+      return jsonResponse({ code: 0, data: { token, username: user.username, expires_at: expiresAt } });
+    }
+
+    // 登出
+    if (path === '/api/auth/logout' && method === 'POST') {
+      const authHeader = context.request.headers.get('Authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (token) {
+        await env.DB.prepare('DELETE FROM auth_tokens WHERE token = ?').bind(token).run();
+      }
+      return jsonResponse({ code: 0, message: '已登出' });
+    }
+
+    // 读操作暂不强制认证（可按需开启）
+    const isReadOnly = method === 'GET' || method === 'OPTIONS';
+
+    // 写操作需要认证
+    if (!isReadOnly) {
+      const authUser = await verifyToken(context.request);
+      if (!authUser) {
+        return jsonResponse({ code: 401, message: '请先登录' }, 401);
+      }
     }
 
     // ========== 成员 API ==========

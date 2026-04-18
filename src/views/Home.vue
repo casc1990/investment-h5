@@ -2,13 +2,16 @@
   <div class="home">
     <!-- 顶部卡片 - 总资产 -->
     <div class="header-card">
-      <div class="total-info">
-        <div class="label">💰 总资产</div>
-        <div class="amount">¥{{ formatNumber((overview?.summary?.totalInvested || 0) + (overview?.summary?.totalProfit || 0)) }}</div>
-        <div class="profit" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
-          <span>{{ overview?.summary?.totalProfit >= 0 ? '+' : '' }}¥{{ formatNumber(overview?.summary?.totalProfit || 0) }}</span>
-          <span class="rate">({{ overview?.summary?.totalProfitRate || 0 }}%)</span>
+      <div class="header-top">
+        <div class="total-info">
+          <div class="label">💰 总资产</div>
+          <div class="amount">¥{{ formatNumber((overview?.summary?.totalInvested || 0) + (overview?.summary?.totalProfit || 0)) }}</div>
+          <div class="profit" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
+            <span>{{ overview?.summary?.totalProfit >= 0 ? '+' : '' }}¥{{ formatNumber(overview?.summary?.totalProfit || 0) }}</span>
+            <span class="rate">({{ overview?.summary?.totalProfitRate || 0 }}%)</span>
+          </div>
         </div>
+        <button class="logout-btn" @click="handleLogout">退出</button>
       </div>
     </div>
 
@@ -94,9 +97,11 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { statsApi } from '../api'
-import { showToast } from 'vant'
+import { useRouter } from 'vue-router'
+import { showConfirmDialog, showToast } from 'vant'
+import { authApi, statsApi } from '../api'
 
+const router = useRouter()
 const loading = ref(false)
 const overview = ref(null)
 
@@ -125,6 +130,21 @@ const fetchData = async () => {
   }
 }
 
+const handleLogout = async () => {
+  try {
+    await showConfirmDialog({
+      title: '确认退出',
+      message: '确定要退出登录吗？',
+    })
+    await authApi.logout()
+  } catch (e) {
+    // user cancelled
+  }
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('auth_username')
+  router.push('/login')
+}
+
 onMounted(() => {
   fetchData()
 })
@@ -141,6 +161,23 @@ onMounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 24px 20px;
   color: white;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.logout-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .total-info {

@@ -9,15 +9,19 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,  // 增加到30秒
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// 请求拦截
+// 请求拦截：注入 token
 apiClient.interceptors.request.use(
   config => {
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
     return config
   },
@@ -30,6 +34,12 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   response => {
     console.log('[API Response]', response.config.url, 'status:', response.status, 'data:', JSON.stringify(response.data)?.slice(0, 200))
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('auth_username')
+      window.location.href = '/login'
+      return Promise.reject(new Error('请先登录'))
+    }
     if (response.data?.code === 0) {
       return response.data.data
     }
@@ -37,9 +47,23 @@ apiClient.interceptors.response.use(
   },
   error => {
     console.error('[API Error]', error.config?.url, error.message, 'status:', error.response?.status, 'data:', JSON.stringify(error.response?.data)?.slice(0, 200))
+    if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('auth_username')
+      window.location.href = '/login'
+    }
     return Promise.reject(error)
   }
 )
+
+// ============ 认证 API ============
+
+export const authApi = {
+  status: () => apiClient.get('/auth/status'),
+  login: (data) => apiClient.post('/auth/login', data),
+  setup: (data) => apiClient.post('/auth/setup', data),
+  logout: () => apiClient.post('/auth/logout'),
+}
 
 // ============ 账户 API ============
 
@@ -75,7 +99,6 @@ export const marketApi = {
   list: (fundCode) => apiClient.get('/market', { params: { fundCode } }),
   get: (fundCode) => apiClient.get(`/market/${fundCode}`),
   sync: () => apiClient.post('/market/sync'),
-  syncFund: (fundCode) => apiClient.get(`/fund/sync/${fundCode}`),
 }
 
 // ============ 成员 API ============
