@@ -374,7 +374,7 @@ export async function onRequest(context) {
       const conditions = [];
       const params = [];
       
-      if (accountId) {
+      if (accountId && accountId !== 'all') {
         conditions.push('p.account_id = ?');
         params.push(accountId);
       }
@@ -396,7 +396,7 @@ export async function onRequest(context) {
       
         const positions = results.map(r => {
           const shares = r.quantity || 0;
-          const initialAmount = r.amount || 0; // 录入时的初始本金
+          const cost = r.cost || 0;              // 买入成本（来自数据库 cost 列）
           const nav = r.nav_gsz || r.nav_dwjz || 0; // 最新净值
           const prevNav = r.prev_nav || 0; // 前一日净值
 
@@ -405,17 +405,17 @@ export async function onRequest(context) {
             ? parseFloat(((nav - prevNav) * shares).toFixed(4))
             : 0;
 
-          // 当前市值 = 持有份额 × 最新净值（= 页面上的"持有金额"）
+          // 当前市值 = 持有份额 × 最新净值
           const currentMarketValue = shares > 0 && nav > 0
             ? parseFloat((shares * nav).toFixed(4))
             : 0;
 
-          // 持有收益 = 当前市值 - 初始本金（累计正负收益）
-          const totalProfit = parseFloat((currentMarketValue - initialAmount).toFixed(4));
+          // 持有收益 = 当前市值 - 买入成本
+          const currentProfit = parseFloat((currentMarketValue - cost).toFixed(4));
 
-          // 持有收益率 = 持有收益 / 成本 × 100%
-          const profitRate = initialAmount > 0
-            ? parseFloat(((totalProfit / initialAmount) * 100).toFixed(4))
+          // 持有收益率 = 持有收益 / 买入成本 × 100%
+          const profitRate = cost > 0
+            ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
             : 0;
 
           return {
@@ -428,12 +428,12 @@ export async function onRequest(context) {
             fund_code: r.fund_code,
             fund_name: r.fund_name || '',
             shares,
-            cost: currentMarketValue,        // 持有金额 = 当前市值
+            cost,
             current_market_value: currentMarketValue,
-            current_profit: totalProfit,
+            current_profit: currentProfit,
             profit_rate: profitRate,
             yesterday_profit: yesterdayProfit,
-            initial_profit: initialAmount,   // 录入时的初始本金
+            initial_profit: r.initial_profit || 0,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
             nav_gsz: r.nav_gsz || null,
