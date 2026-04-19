@@ -80,7 +80,7 @@ export async function onRequest(context) {
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
       if (!token) return null;
       const { results } = await env.DB.prepare(
-        'SELECT t.*, u.username FROM auth_tokens t WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?)'
+        'SELECT t.* FROM auth_tokens t WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?)'
       ).bind(token, Math.floor(Date.now() / 1000)).all();
       return results.length > 0 ? results[0] : null;
     }
@@ -453,13 +453,13 @@ export async function onRequest(context) {
       const fund_code = body.fundCode || body.fund_code;
       const fund_name = body.fundName || body.fund_name;
       const shares = body.shares || body.quantity || 0;
-      const amount = body.amount || 0;
+      const cost = body.cost || body.amount || 0;
       const initial_profit = body.initialProfit || body.initial_profit || 0;
       const dividend_method = body.dividendMethod || body.dividend_method || '红利再投';
 
       await env.DB.prepare(
-        'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, amount, initial_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, fund_code, fund_name || '', shares, amount, initial_profit, dividend_method).run();
+        'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, cost, initial_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, account_id, fund_code, fund_name || '', shares, cost, initial_profit, dividend_method).run();
 
       // 查询关联的账户和成员信息
       const { results: posResults } = await env.DB.prepare(
@@ -481,7 +481,7 @@ export async function onRequest(context) {
         fund_code: r.fund_code,
         fund_name: r.fund_name,
         shares: r.quantity,
-        amount: r.amount || 0,
+        cost: r.cost || 0,
         current_profit: r.current_profit || 0,
         dividend_method: r.dividend_method,
       }});
@@ -495,6 +495,7 @@ export async function onRequest(context) {
       const fund_name = body.fundName || body.fund_name;
       const shares = body.shares || body.quantity;
       const amount = body.amount;
+      const cost = body.cost;
       const initial_profit = body.initialProfit || body.initial_profit;
       const dividend_method = body.dividendMethod || body.dividend_method;
 
@@ -502,7 +503,8 @@ export async function onRequest(context) {
       const values = [];
       if (fund_name !== undefined) { fields.push('fund_name = ?'); values.push(fund_name); }
       if (shares !== undefined) { fields.push('quantity = ?'); values.push(shares); }
-      if (amount !== undefined) { fields.push('amount = ?'); values.push(amount); }
+      if (amount !== undefined) { fields.push('cost = ?'); values.push(amount); }
+      if (cost !== undefined) { fields.push('cost = ?'); values.push(cost); }
       if (initial_profit !== undefined) { fields.push('initial_profit = ?'); values.push(initial_profit); }
       if (dividend_method !== undefined) { fields.push('dividend_method = ?'); values.push(dividend_method); }
 
@@ -535,7 +537,7 @@ export async function onRequest(context) {
         fund_code: r.fund_code,
         fund_name: r.fund_name,
         shares: r.quantity,
-        amount: r.amount || 0,
+        cost: r.cost || 0,
         current_profit: r.current_profit || 0,
         dividend_method: r.dividend_method,
       }});
