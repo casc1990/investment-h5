@@ -639,14 +639,14 @@ export async function onRequest(context) {
         let marketValue = 0;
 
         accPositions.forEach(pos => {
-          invested += pos.amount || 0;
+          invested += pos.cost || 0;
           const snap = snapshotMap[pos.fund_code];
-          // 优先用估算净值 gsz，盘中用这个；没有则用单位净值 dwjz；都没有则 fallback 到 amount
+          // 优先用估算净值 gsz，盘中用这个；没有则用单位净值 dwjz；都没有则 fallback 到 cost
           const nav = (snap && snap.gsz) ? snap.gsz : (snap && snap.dwjz) ? snap.dwjz : null;
           if (nav && pos.quantity) {
             marketValue += pos.quantity * nav;
           } else {
-            marketValue += pos.amount || 0;
+            marketValue += pos.cost || 0;
           }
         });
 
