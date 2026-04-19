@@ -35,10 +35,11 @@
             {{ summary.totalProfitRate >= 0 ? '+' : '' }}{{ summary.totalProfitRate }}%
           </div>
         </div>
-      </div>
-      <div class="summary-cost-row" v-if="summary.totalCost > 0">
-        <div class="summary-cost-label">买入成本</div>
-        <div class="summary-cost-value">{{ formatAmount(summary.totalCost) }}</div>
+        <div class="sp-divider"></div>
+        <div class="summary-profit-item">
+          <div class="sp-label">买入成本</div>
+          <div class="sp-value">{{ formatAmount(summary.totalCost) }}</div>
+        </div>
       </div>
     </div>
 
@@ -662,7 +663,7 @@ onMounted(() => {
 }
 
 .sp-value {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   font-family: 'Courier New', monospace;
   white-space: nowrap;
@@ -672,27 +673,6 @@ onMounted(() => {
   width: 1px;
   height: 28px;
   background: rgba(255, 255, 255, 0.25);
-}
-
-.summary-cost-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-}
-
-.summary-cost-label {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-.summary-cost-value {
-  font-size: 14px;
-  font-weight: 600;
-  font-family: 'Courier New', monospace;
 }
 
 /* 颜色 */
