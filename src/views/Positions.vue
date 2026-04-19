@@ -36,6 +36,10 @@
           </div>
         </div>
       </div>
+      <div class="summary-cost-row" v-if="summary.totalCost > 0">
+        <div class="summary-cost-label">买入成本</div>
+        <div class="summary-cost-value">{{ formatAmount(summary.totalCost) }}</div>
+      </div>
     </div>
 
     <!-- 持仓列表 -->
@@ -43,7 +47,7 @@
       <!-- 表头 -->
       <div class="list-header">
         <span class="header-col header-name">名称</span>
-        <span class="header-col header-center">金额/昨日收益</span>
+        <span class="header-col header-center">总资产/昨日收益</span>
         <span class="header-col header-right">持有收益/率</span>
       </div>
 
@@ -65,7 +69,7 @@
           </div>
           <div class="collapsed-data">
             <div class="collapsed-center">
-              <span class="collapsed-value">¥{{ formatAmount(position.cost) }}</span>
+              <span class="collapsed-value">¥{{ formatAmount(Number(position.cost) + Number(position.current_profit)) }}</span>
               <span class="collapsed-yesterday" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
                 {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.yesterday_profit) }}
               </span>
@@ -93,7 +97,7 @@
               <span class="data-value">{{ formatNumber(position.shares) }} 份</span>
             </div>
             <div class="data-item">
-              <span class="data-label">持有金额</span>
+              <span class="data-label">买入成本</span>
               <span class="data-value">¥{{ formatNumber(position.cost) }}</span>
             </div>
             <div class="data-item">
@@ -212,10 +216,10 @@
             />
             <van-field
               v-model.number="formData.amount"
-              label="持有金额"
+              label="买入成本"
               type="number"
-              placeholder="持有金额（成本）"
-              :rules="[{ required: true, message: '请输入持有金额' }]"
+              placeholder="买入成本（成本价×份额）"
+              :rules="[{ required: true, message: '请输入买入成本' }]"
             />
             <van-field
               v-model.number="formData.initialProfit"
@@ -370,23 +374,26 @@ const updateSummary = () => {
   let totalMarketValue = 0
   let totalYesterdayProfit = 0
   let totalHoldingProfit = 0
+  let totalCost = 0
 
   positions.value.forEach(pos => {
     const cost = parseFloat(pos.cost) || 0
     const currentProfit = parseFloat(pos.current_profit) || 0
     const yesterdayProfit = parseFloat(pos.yesterday_profit) || 0
-    totalMarketValue += cost + currentProfit  // 当前市值 = 成本 + 持有收益
+    totalCost += cost
+    totalMarketValue += cost + currentProfit  // 当前市值 = 买入成本 + 持有收益
     totalYesterdayProfit += yesterdayProfit
     totalHoldingProfit += currentProfit
   })
 
-  const totalProfitRate = totalMarketValue > 0 ? (totalHoldingProfit / (totalMarketValue - totalHoldingProfit) * 100) : 0
+  const totalProfitRate = totalCost > 0 ? (totalHoldingProfit / totalCost * 100) : 0
 
   summary.value = {
     totalMarketValue: Number(totalMarketValue.toFixed(2)),
     totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
     totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
     totalProfitRate: Number(totalProfitRate.toFixed(2)),
+    totalCost: Number(totalCost.toFixed(2)),
   }
 }
 
@@ -665,6 +672,27 @@ onMounted(() => {
   width: 1px;
   height: 28px;
   background: rgba(255, 255, 255, 0.25);
+}
+
+.summary-cost-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.summary-cost-label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.summary-cost-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
 }
 
 /* 颜色 */
