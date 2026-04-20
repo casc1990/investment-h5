@@ -895,10 +895,11 @@ export async function onRequest(context) {
                   estimateChange = parseFloat(gzData.gszzl);
                   // gztime 格式如 "2026-04-20 15:00"，截取日期
                   estimateDate = (gzData.gztime || '').split(' ')[0];
-                  // dwjz 是昨日官方净值
+                  // dwjz 是昨日官方净值（fundgz给出）
                   const officialNavYesterday = parseFloat(gzData.dwjz);
-                  // 如果 pingzhongdata 的日期 < fundgz 的日期，说明 fundgz 有更新
-                  if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0) {
+                  // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
+                  // 只有当 gsz 有实质更新（gsz !== dwjz 且日期更新）才替换 pingzhongdata 数据
+                  if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0 && estimateNav !== officialNavYesterday) {
                     prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                     nav = estimateNav;
                     navDate = estimateDate;
@@ -1018,8 +1019,9 @@ export async function onRequest(context) {
               const estimateChange = parseFloat(gzData.gszzl);
               const estimateDate = (gzData.gztime || '').split(' ')[0];
               const officialNavYesterday = parseFloat(gzData.dwjz);
-              // fundgz 有更新时用它的数据
-              if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0) {
+              // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
+              // 只有当 gsz 有实质更新（gsz !== dwjz 且日期更新）才替换 pingzhongdata 数据
+              if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0 && estimateNav !== officialNavYesterday) {
                 prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                 nav = estimateNav;
                 navDate = estimateDate;
