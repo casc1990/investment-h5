@@ -497,8 +497,8 @@ export async function onRequest(context) {
       const shares = body.shares || body.quantity;
       const amount = body.amount;
       const cost = body.cost;
-      const initial_profit = body.initialProfit || body.initial_profit;
-      const dividend_method = body.dividendMethod || body.dividend_method;
+      const initial_profit = body.initialProfit ?? body.initial_profit;
+      const dividend_method = body.dividendMethod ?? body.dividend_method;
 
       const fields = [];
       const values = [];
@@ -528,6 +528,15 @@ export async function onRequest(context) {
       }
       
       const r = posResults[0];
+      // 计算当前收益和收益率（实时计算，不依赖存储字段）
+      const _shares = r.quantity || 0;
+      const _cost = r.cost || 0;
+      const nav = r.nav_gsz || r.nav_dwjz || 0;
+      const currentMarketValue = _shares > 0 && nav > 0 ? parseFloat((_shares * nav).toFixed(4)) : 0;
+      const currentProfit = parseFloat((currentMarketValue - _cost + (r.initial_profit || 0)).toFixed(4));
+      const profitRate = _cost > 0 ? parseFloat(((currentProfit / _cost) * 100).toFixed(4)) : 0;
+      const prevNav = r.prev_nav || 0;
+      const yesterdayProfit = _shares > 0 && nav > 0 && prevNav > 0 ? parseFloat(((nav - prevNav) * _shares).toFixed(4)) : 0;
       return jsonResponse({ code: 0, data: {
         id: r.id,
         account_id: r.account_id,
@@ -539,7 +548,10 @@ export async function onRequest(context) {
         fund_name: r.fund_name,
         shares: r.quantity,
         cost: r.cost || 0,
-        current_profit: r.current_profit || 0,
+        current_profit: currentProfit,
+        profit_rate: profitRate,
+        yesterday_profit: yesterdayProfit,
+        initial_profit: r.initial_profit || 0,
         dividend_method: r.dividend_method,
       }});
     }
