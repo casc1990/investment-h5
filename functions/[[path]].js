@@ -419,6 +419,12 @@ export async function onRequest(context) {
             ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
             : 0;
 
+          // 日涨幅：从 market_snapshot 的 prev_nav 实时计算，避免 gszzl=0 被 || 误判为 null
+          const navGsz = r.nav_gsz || null;
+          const navGszzl = (navGsz && prevNav && prevNav > 0)
+            ? parseFloat(((navGsz - prevNav) / prevNav * 100).toFixed(4))
+            : (r.nav_gszzl != null ? r.nav_gszzl : null);
+
           return {
             id: r.id,
             account_id: r.account_id,
@@ -437,8 +443,8 @@ export async function onRequest(context) {
             initial_profit: r.initial_profit || 0,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
-            nav_gsz: r.nav_gsz || null,
-            nav_gszzl: r.nav_gszzl || null,
+            nav_gsz: navGsz,
+            nav_gszzl: navGszzl,
             nav_dwjz: r.nav_dwjz || null,
             nav_jzrq: r.nav_jzrq || null,
           };
