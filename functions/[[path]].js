@@ -410,8 +410,8 @@ export async function onRequest(context) {
             ? parseFloat((shares * nav).toFixed(4))
             : 0;
 
-          // 持有收益 = 当前市值 - 买入成本 + 历史累计收益
-          const totalProfit = parseFloat((currentMarketValue - cost + (r.initial_profit || 0)).toFixed(4));
+          // 持有收益 = 当前市值 - 买入成本（不含历史收益，历史收益已固化在成本中）
+          const totalProfit = parseFloat((currentMarketValue - cost).toFixed(4));
           const currentProfit = totalProfit;
 
           // 持有收益率 = 持有收益 / 买入成本 × 100%
@@ -505,6 +505,7 @@ export async function onRequest(context) {
       const cost = body.cost;
       const initial_profit = body.initialProfit ?? body.initial_profit;
       const dividend_method = body.dividendMethod ?? body.dividend_method;
+      const account_id = body.accountId || body.account_id;
 
       const fields = [];
       const values = [];
@@ -514,6 +515,7 @@ export async function onRequest(context) {
       if (cost !== undefined) { fields.push('cost = ?'); values.push(cost); }
       if (initial_profit !== undefined) { fields.push('initial_profit = ?'); values.push(initial_profit); }
       if (dividend_method !== undefined) { fields.push('dividend_method = ?'); values.push(dividend_method); }
+      if (account_id !== undefined) { fields.push('account_id = ?'); values.push(account_id); }
 
       if (fields.length > 0) {
         values.push(id);
@@ -539,7 +541,7 @@ export async function onRequest(context) {
       const _cost = r.cost || 0;
       const nav = r.nav_gsz || r.nav_dwjz || 0;
       const currentMarketValue = _shares > 0 && nav > 0 ? parseFloat((_shares * nav).toFixed(4)) : 0;
-      const currentProfit = parseFloat((currentMarketValue - _cost + (r.initial_profit || 0)).toFixed(4));
+      const currentProfit = parseFloat((currentMarketValue - _cost).toFixed(4));
       const profitRate = _cost > 0 ? parseFloat(((currentProfit / _cost) * 100).toFixed(4)) : 0;
       const prevNav = r.prev_nav || 0;
       const yesterdayProfit = _shares > 0 && nav > 0 && prevNav > 0 ? parseFloat(((nav - prevNav) * _shares).toFixed(4)) : 0;
@@ -901,13 +903,13 @@ export async function onRequest(context) {
                   const officialNavYesterday = parseFloat(gzData.dwjz);
                   // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
                   // 两种情况替换：
-                  // 1. fundgz jzrq 日期更新（> pingzhongdata navDate）——fundgz 有今日新净值
-                  // 2. 日期相同但 gsz !== dwjz ——fundgz 有实质的今日估算（gsz是今天的估算，dwjz是昨日官方净值）
-                  // 不替换：日期相同且 gsz === dwjz（QDII非交易日，fundgz未产生有效估算）
+                  // 1. fundgz jzrq 日期更新（> navDate）——fundgz 有今日新净值
+                  // 2. 日期相同但 |gszzl| > 0.05% ——fundgz 产生了实质的今日估算
+                  // 不替换：日期相同且 |gszzl| <= 0.05%（QDII非交易日/估算噪声）
                   const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
                   const dateIsNewer = fundGzNavDate > navDate;
-                  const hasEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday;
-                  if (shouldReplace && (dateIsNewer || hasEstimate)) {
+                  const hasSignificantEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday && Math.abs(estimateChange) > 0.05;
+                  if (shouldReplace && (dateIsNewer || hasSignificantEstimate)) {
                     prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                     nav = estimateNav;
                     navDate = fundGzNavDate;
@@ -1031,8 +1033,8 @@ export async function onRequest(context) {
                 // 只有当 gsz 有实质更新（gsz !== dwjz 且净值日期更新）才替换 pingzhongdata 数据
                 const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
                 const dateIsNewer = fundGzNavDate > navDate;
-                const hasEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday;
-                if (shouldReplace && (dateIsNewer || hasEstimate)) {
+                const hasSignificantEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday && Math.abs(estimateChange) > 0.05;
+                if (shouldReplace && (dateIsNewer || hasSignificantEstimate)) {
                   prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                   nav = estimateNav;
                   navDate = fundGzNavDate;

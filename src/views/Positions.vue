@@ -151,7 +151,10 @@
 
           <!-- 操作按钮 -->
           <div class="position-actions">
-            <van-button size="small" type="warning" @click.stop="handleSync(position)">同步净值</van-button>
+            <van-button size="small" type="warning" :disabled="syncingId === position.id" @click.stop="handleSync(position)">
+              <van-loading v-if="syncingId === position.id" size="14px" color="#fff" />
+              <span v-else>同步净值</span>
+            </van-button>
             <van-button size="small" type="primary" @click.stop="handleEdit(position)">编辑</van-button>
             <van-button size="small" type="danger" @click.stop="handleDelete(position)">删除</van-button>
           </div>
@@ -278,11 +281,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
+import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
 
+const syncingId = ref(null)
 const loading = ref(false)
-const positions = ref([])
+const positionsRaw = ref([])
+const positions = computed(() =>
+  [...positionsRaw.value].sort((a, b) => Number(b.profit_rate || 0) - Number(a.profit_rate || 0))
+)
 const expandedIds = ref([])
 const summary = ref(null)
 const accounts = ref([])
@@ -420,7 +427,7 @@ const fetchPositions = async () => {
   loading.value = true
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
-    positions.value = data?.positions || []
+    positionsRaw.value = data?.positions || []
     updateSummary()
   } catch (error) {
     console.error('Failed to fetch positions:', error)
@@ -466,13 +473,12 @@ const handleSubmit = async () => {
     
     if (editingPosition.value) {
       await positionApi.update(editingPosition.value.id, payload)
-      showSuccessToast('更新成功')
     } else {
       await positionApi.create(payload)
-      showSuccessToast('添加成功')
     }
+    await fetchPositions()
     closeModal()
-    fetchPositions()
+    showToast(editingPosition.value ? '更新成功' : '添加成功')
   } catch (error) {
     console.error('提交失败:', error)
     showToast(editingPosition.value ? '更新失败' : '添加失败')
@@ -504,13 +510,17 @@ const handleEdit = (position) => {
 }
 
 const handleSync = async (position) => {
+  if (syncingId.value === position.id) return
+  syncingId.value = position.id
   try {
     await marketApi.syncFund(position.fund_code)
-    showSuccessToast('同步成功')
+    showToast('同步成功')
     fetchPositions()
   } catch (error) {
     console.error('同步失败:', error)
     showToast('同步失败')
+  } finally {
+    syncingId.value = null
   }
 }
 
@@ -530,7 +540,7 @@ const handleDelete = async (position) => {
       message: `确定要删除 "${position.fund_name}" 持仓吗？`,
     })
     await positionApi.delete(position.id)
-    showSuccessToast('删除成功')
+    showToast('删除成功')
     fetchPositions()
   } catch (error) {
     if (error !== 'cancel') {
@@ -596,9 +606,7 @@ const closeModal = () => {
 }
 
 onMounted(() => {
-  fetchMembers()
-  fetchAccounts()
-  fetchPositions()
+  Promise.all([fetchMembers(), fetchAccounts(), fetchPositions()])
 })
 </script>
 
