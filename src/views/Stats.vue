@@ -59,7 +59,7 @@
               {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
             </div>
             <div class="rate">
-              {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+              {{ Number(position.profit_rate).toFixed(2) }}%
             </div>
           </div>
         </div>

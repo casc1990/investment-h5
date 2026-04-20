@@ -80,7 +80,7 @@
                 {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
               </span>
               <span class="collapsed-rate" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
-                {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+                {{ Number(position.profit_rate).toFixed(2) }}%
               </span>
             </div>
           </div>
@@ -110,7 +110,7 @@
             <div class="data-item">
               <span class="data-label">持有收益率</span>
               <span class="data-value profit" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
-                {{ Number(position.profit_rate) >= 0 ? '+' : '' }}{{ position.profit_rate }}%
+                {{ Number(position.profit_rate).toFixed(2) }}%
               </span>
             </div>
             <div class="data-item">
