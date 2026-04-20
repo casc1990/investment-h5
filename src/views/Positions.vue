@@ -216,17 +216,17 @@
               :rules="[{ required: true, message: '请输入持有份额' }]"
             />
             <van-field
-              v-model.number="formData.amount"
-              label="买入成本"
+              v-model.number="formData.totalAmount"
+              label="总金额"
               type="number"
-              placeholder="买入成本（成本价×份额）"
-              :rules="[{ required: true, message: '请输入买入成本' }]"
+              placeholder="基金平台显示的总金额（成本+收益）"
+              :rules="[{ required: true, message: '请输入总金额' }]"
             />
             <van-field
               v-model.number="formData.initialProfit"
               label="历史累计收益"
               type="number"
-              placeholder="买入至今的累计收益"
+              placeholder="昨日收盘时的累计收益"
             />
             <van-field
               v-model="formData.dividendMethod"
@@ -308,7 +308,7 @@ const formData = ref({
   fundCode: '',
   fundName: '',
   shares: null,
-  amount: null,
+  totalAmount: null,
   initialProfit: null,
   dividendMethod: '红利再投',
 })
@@ -447,8 +447,8 @@ const handleSubmit = async () => {
     showToast('请输入持有份额')
     return
   }
-  if (formData.value.amount === null || formData.value.amount === '') {
-    showToast('请输入持有金额')
+  if (formData.value.totalAmount === null || formData.value.totalAmount === '') {
+    showToast('请输入总金额')
     return
   }
 
@@ -458,7 +458,8 @@ const handleSubmit = async () => {
       fundCode: formData.value.fundCode.trim(),
       fundName: formData.value.fundName.trim(),
       shares: parseFloat(formData.value.shares),
-      amount: parseFloat(formData.value.amount),
+      // 持有金额 = 总金额 - 历史累计收益
+      amount: parseFloat((formData.value.totalAmount - (parseFloat(formData.value.initialProfit) || 0)).toFixed(4)),
       initialProfit: parseFloat(formData.value.initialProfit) || 0,
       dividendMethod: formData.value.dividendMethod,
     }
@@ -488,7 +489,7 @@ const handleEdit = (position) => {
     fundCode: position.fund_code,
     fundName: position.fund_name,
     shares: position.shares,
-    amount: position.cost,
+    totalAmount: (parseFloat(position.cost) || 0) + (parseFloat(position.initial_profit) || 0),
     initialProfit: position.initial_profit || 0,
     dividendMethod: position.dividend_method || '红利再投',
   }
@@ -588,7 +589,7 @@ const closeModal = () => {
     fundCode: '',
     fundName: '',
     shares: null,
-    amount: null,
+    totalAmount: null,
     initialProfit: null,
     dividendMethod: '红利再投',
   }
