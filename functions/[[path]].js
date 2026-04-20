@@ -410,8 +410,9 @@ export async function onRequest(context) {
             ? parseFloat((shares * nav).toFixed(4))
             : 0;
 
-          // 持有收益 = 当前市值 - 买入成本
-          const currentProfit = parseFloat((currentMarketValue - cost).toFixed(4));
+          // 持有收益 = 当前市值 - 买入成本 + 历史累计收益
+          const totalProfit = parseFloat((currentMarketValue - cost + (r.initial_profit || 0)).toFixed(4));
+          const currentProfit = totalProfit;
 
           // 持有收益率 = 持有收益 / 买入成本 × 100%
           const profitRate = cost > 0
