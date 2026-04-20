@@ -134,6 +134,7 @@ const channelOptions = [
   { text: '天天基金', value: '天天基金' },
   { text: '微信理财', value: '微信理财' },
   { text: '银行', value: '银行' },
+  { text: '京东金融', value: '京东金融' },
   { text: '其他', value: '其他' },
 ]
 
@@ -150,6 +151,7 @@ const getChannelIcon = (channel) => {
     '天天基金': '💚',
     '微信理财': '💜',
     '银行': '🏦',
+    '京东金融': '🟠',
     '其他': '📦',
   }
   return icons[channel] || '📦'
