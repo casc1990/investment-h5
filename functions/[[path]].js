@@ -845,14 +845,24 @@ export async function onRequest(context) {
         const fundNameMap = {};
         allPositions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
 
-        // 2. 批量调 pingzhongdata
+        // 2. 批量调 pingzhongdata + fundgz 实时估算（并行）
         const syncResults = {};
         await Promise.all(fundCodes.map(async (code) => {
           try {
             let nav = null, navDate = null, gszzl = null, prev_nav = null, name = fundNameMap[code] || '';
-            const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
-              headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-            });
+            let estimateNav = null, estimateDate = null, estimateChange = null;
+
+            // 同时请求两个接口
+            const [res2, resGz] = await Promise.all([
+              fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+              }),
+              fetch(`https://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Referer': 'http://fundgz.1234567.com.cn/' }
+              })
+            ]);
+
+            // 解析 pingzhongdata（官方净值）
             const text2 = await res2.text();
             const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
             if (nameMatch) name = nameMatch[1];
@@ -872,6 +882,30 @@ export async function onRequest(context) {
                 prev_nav = prevNAV;
                 navDate = currentDate;
               }
+            }
+
+            // 解析 fundgz 实时估算（兜底：pingzhongdata 日期非今日时用这个）
+            const textGz = await resGz.text();
+            const gzMatch = textGz.match(/jsonpgz\((.+)\)/);
+            if (gzMatch) {
+              try {
+                const gzData = JSON.parse(gzMatch[1]);
+                if (gzData.gsz) {
+                  estimateNav = parseFloat(gzData.gsz);
+                  estimateChange = parseFloat(gzData.gszzl);
+                  // gztime 格式如 "2026-04-20 15:00"，截取日期
+                  estimateDate = (gzData.gztime || '').split(' ')[0];
+                  // dwjz 是昨日官方净值
+                  const officialNavYesterday = parseFloat(gzData.dwjz);
+                  // 如果 pingzhongdata 的日期 < fundgz 的日期，说明 fundgz 有更新
+                  if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0) {
+                    prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
+                    nav = estimateNav;
+                    navDate = estimateDate;
+                    gszzl = estimateChange;
+                  }
+                }
+              } catch (_) {}
             }
             // upsert market_snapshot（含 prev_nav）
             const { results: oldSnap } = await env.DB.prepare(
@@ -940,10 +974,18 @@ export async function onRequest(context) {
       
       try {
         let nav = null, navDate = null, gszzl = null, prev_nav = null, name = '';
-        
-        const res2 = await fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-        });
+
+        // 同时请求 pingzhongdata + fundgz
+        const [res2, resGz] = await Promise.all([
+          fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+          }),
+          fetch(`https://fundgz.1234567.com.cn/js/${fundCode}.js?v=${Date.now()}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Referer': 'http://fundgz.1234567.com.cn/' }
+          })
+        ]);
+
+        // 解析 pingzhongdata（官方净值）
         const text2 = await res2.text();
         const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
         if (nameMatch) name = nameMatch[1];
@@ -963,6 +1005,28 @@ export async function onRequest(context) {
             prev_nav = prevNAV;
             navDate = currentDate;
           }
+        }
+
+        // 解析 fundgz 实时估算（兜底）
+        const textGz = await resGz.text();
+        const gzMatch = textGz.match(/jsonpgz\((.+)\)/);
+        if (gzMatch) {
+          try {
+            const gzData = JSON.parse(gzMatch[1]);
+            if (gzData.gsz) {
+              const estimateNav = parseFloat(gzData.gsz);
+              const estimateChange = parseFloat(gzData.gszzl);
+              const estimateDate = (gzData.gztime || '').split(' ')[0];
+              const officialNavYesterday = parseFloat(gzData.dwjz);
+              // fundgz 有更新时用它的数据
+              if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0) {
+                prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
+                nav = estimateNav;
+                navDate = estimateDate;
+                gszzl = estimateChange;
+              }
+            }
+          } catch (_) {}
         }
         
         const { results: oldSnap } = await env.DB.prepare(
