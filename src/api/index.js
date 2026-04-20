@@ -98,7 +98,8 @@ export const tradeApi = {
 export const marketApi = {
   list: (fundCode) => apiClient.get('/market', { params: { fundCode } }),
   get: (fundCode) => apiClient.get(`/market/${fundCode}`),
-  sync: () => apiClient.post('/market/sync'),
+  sync: () => apiClient.get('/fund/sync'),
+  syncFund: (fundCode) => apiClient.get(`/fund/sync/${fundCode}`),
 }
 
 // ============ 成员 API ============
