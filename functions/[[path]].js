@@ -893,16 +893,24 @@ export async function onRequest(context) {
                 if (gzData.gsz) {
                   estimateNav = parseFloat(gzData.gsz);
                   estimateChange = parseFloat(gzData.gszzl);
-                  // gztime 格式如 "2026-04-20 15:00"，截取日期
-                  estimateDate = (gzData.gztime || '').split(' ')[0];
+                  // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
+                  // QDII基金在非交易日 fundgz 仍返回上一交易日作为 jzrq，完美满足需求
+                  // gztime 格式如 "2026-04-20 15:00"，jzrq 格式如 "2026-04-17"
+                  const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
                   // dwjz 是昨日官方净值（fundgz给出）
                   const officialNavYesterday = parseFloat(gzData.dwjz);
                   // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
-                  // 只有当 gsz 有实质更新（gsz !== dwjz 且日期更新）才替换 pingzhongdata 数据
-                  if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0 && estimateNav !== officialNavYesterday) {
+                  // 两种情况替换：
+                  // 1. fundgz jzrq 日期更新（> pingzhongdata navDate）——fundgz 有今日新净值
+                  // 2. 日期相同但 gsz !== dwjz ——fundgz 有实质的今日估算（gsz是今天的估算，dwjz是昨日官方净值）
+                  // 不替换：日期相同且 gsz === dwjz（QDII非交易日，fundgz未产生有效估算）
+                  const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
+                  const dateIsNewer = fundGzNavDate > navDate;
+                  const hasEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday;
+                  if (shouldReplace && (dateIsNewer || hasEstimate)) {
                     prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                     nav = estimateNav;
-                    navDate = estimateDate;
+                    navDate = fundGzNavDate;
                     gszzl = estimateChange;
                   }
                 }
@@ -1013,21 +1021,24 @@ export async function onRequest(context) {
         const gzMatch = textGz.match(/jsonpgz\((.+)\)/);
         if (gzMatch) {
           try {
-            const gzData = JSON.parse(gzMatch[1]);
-            if (gzData.gsz) {
-              const estimateNav = parseFloat(gzData.gsz);
-              const estimateChange = parseFloat(gzData.gszzl);
-              const estimateDate = (gzData.gztime || '').split(' ')[0];
-              const officialNavYesterday = parseFloat(gzData.dwjz);
-              // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
-              // 只有当 gsz 有实质更新（gsz !== dwjz 且日期更新）才替换 pingzhongdata 数据
-              if (navDate && estimateDate && estimateDate > navDate && estimateNav > 0 && estimateNav !== officialNavYesterday) {
-                prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
-                nav = estimateNav;
-                navDate = estimateDate;
-                gszzl = estimateChange;
+              const gzData = JSON.parse(gzMatch[1]);
+              if (gzData.gsz) {
+                const estimateNav = parseFloat(gzData.gsz);
+                const estimateChange = parseFloat(gzData.gszzl);
+                // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
+                const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
+                const officialNavYesterday = parseFloat(gzData.dwjz);
+                // 只有当 gsz 有实质更新（gsz !== dwjz 且净值日期更新）才替换 pingzhongdata 数据
+                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
+                const dateIsNewer = fundGzNavDate > navDate;
+                const hasEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday;
+                if (shouldReplace && (dateIsNewer || hasEstimate)) {
+                  prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
+                  nav = estimateNav;
+                  navDate = fundGzNavDate;
+                  gszzl = estimateChange;
+                }
               }
-            }
           } catch (_) {}
         }
         
