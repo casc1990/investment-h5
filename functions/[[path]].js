@@ -397,17 +397,19 @@ export async function onRequest(context) {
         const positions = results.map(r => {
           const shares = r.quantity || 0;
           const cost = r.cost || 0;              // 买入成本（来自数据库 cost 列）
-          const nav = r.nav_gsz || r.nav_dwjz || 0; // 最新净值
-          const prevNav = r.prev_nav || 0; // 前一日净值
+          // 昨日确认净值（dwjz）用于计算昨日收益和市值；盘中估算（gsz）仅用于显示日涨幅
+          const confirmedNav = r.nav_dwjz || r.nav_gsz || 0; // 昨日确认净值
+          const estimateNav = r.nav_gsz || null;  // 今日盘中估算
+          const prevNav = r.prev_nav || 0;        // 前一日净值
 
-          // 昨日收益 = (最新净值 - 前一日净值) × 持有份额
-          const yesterdayProfit = shares > 0 && nav > 0 && prevNav > 0
-            ? parseFloat(((nav - prevNav) * shares).toFixed(4))
+          // 昨日收益 = (昨日确认净值 - 前一日净值) × 持有份额
+          const yesterdayProfit = shares > 0 && confirmedNav > 0 && prevNav > 0
+            ? parseFloat(((confirmedNav - prevNav) * shares).toFixed(4))
             : 0;
 
-          // 当前市值 = 持有份额 × 最新净值
-          const currentMarketValue = shares > 0 && nav > 0
-            ? parseFloat((shares * nav).toFixed(4))
+          // 当前市值 = 持有份额 × 昨日确认净值
+          const currentMarketValue = shares > 0 && confirmedNav > 0
+            ? parseFloat((shares * confirmedNav).toFixed(4))
             : 0;
 
           // 持有收益 = 当前市值 - 买入成本（不含历史收益，历史收益已固化在成本中）
@@ -419,10 +421,9 @@ export async function onRequest(context) {
             ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
             : 0;
 
-          // 日涨幅：从 market_snapshot 的 prev_nav 实时计算，避免 gszzl=0 被 || 误判为 null
-          const navGsz = r.nav_gsz || null;
-          const navGszzl = (navGsz && prevNav && prevNav > 0)
-            ? parseFloat(((navGsz - prevNav) / prevNav * 100).toFixed(4))
+          // 日涨幅：盘中估算对比昨日确认净值，避免 gszzl=0 被 || 误判为 null
+          const navGszzl = (estimateNav && confirmedNav && confirmedNav > 0)
+            ? parseFloat(((estimateNav - confirmedNav) / confirmedNav * 100).toFixed(4))
             : (r.nav_gszzl != null ? r.nav_gszzl : null);
 
           return {
@@ -443,9 +444,10 @@ export async function onRequest(context) {
             initial_profit: r.initial_profit || 0,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
-            nav_gsz: navGsz,
+            // confirmedNav=dwjz（昨日确认净值），estimateNav=gsz（今日估算）
+            nav_gsz: estimateNav,
             nav_gszzl: navGszzl,
-            nav_dwjz: r.nav_dwjz || null,
+            nav_dwjz: confirmedNav,
             nav_jzrq: r.nav_jzrq || null,
           };
         });
@@ -895,27 +897,25 @@ export async function onRequest(context) {
                 if (gzData.gsz) {
                   estimateNav = parseFloat(gzData.gsz);
                   estimateChange = parseFloat(gzData.gszzl);
-                  // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
-                  // QDII基金在非交易日 fundgz 仍返回上一交易日作为 jzrq，完美满足需求
-                  // gztime 格式如 "2026-04-20 15:00"，jzrq 格式如 "2026-04-17"
-                  const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
-                  // dwjz 是昨日官方净值（fundgz给出）
-                  const officialNavYesterday = parseFloat(gzData.dwjz);
-                  // gsz === dwjz 说明估算净值和官方净值相同，尚未形成新的有效估算（尤其QDII节假日）
-                  // 两种情况替换：
-                  // 1. fundgz jzrq 日期更新（> navDate）——fundgz 有今日新净值
-                  // 2. 日期相同但 |gszzl| > 0.05% ——fundgz 产生了实质的今日估算
-                  // 不替换：日期相同且 |gszzl| <= 0.05%（QDII非交易日/估算噪声）
-                  const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
-                  const dateIsNewer = fundGzNavDate > navDate;
-                  const hasSignificantEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday && Math.abs(estimateChange) > 0.05;
-                  if (shouldReplace && (dateIsNewer || hasSignificantEstimate)) {
-                    prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
-                    nav = estimateNav;
-                    navDate = fundGzNavDate;
-                    gszzl = estimateChange;
-                  }
+                // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
+                // QDII基金在非交易日 fundgz 仍返回上一交易日作为 jzrq，此时 jzrq < navDate
+                // pingzhongdata 的 navDate 永远是真实最新净值日期（哪怕是节假日后的第一个交易日）
+                // 所以用 jzrq 做日期比较：fundgz 的 jzrq > navDate 才说明 fundgz 有更新的净值
+                const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
+                const officialNavYesterday = parseFloat(gzData.dwjz);
+                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
+                const dateIsNewer = fundGzNavDate > navDate;
+                // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
+                // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
+                const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
+                if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
+                  // 用 fundgz 估算替换（估算净值是今天的新净值，dwjz 是昨天官方净值）
+                  prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
+                  nav = estimateNav;
+                  navDate = fundGzNavDate;
+                  gszzl = estimateChange;
                 }
+              }
               } catch (_) {}
             }
             // upsert market_snapshot（含 prev_nav）
@@ -939,7 +939,7 @@ export async function onRequest(context) {
                 last_nav = excluded.last_nav,
                 last_gszzl = excluded.last_gszzl,
                 updated_at = unixepoch()
-            `).bind(code, name, officialNavYesterday || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+            `).bind(code, name, prev_nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
             syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
@@ -1030,11 +1030,10 @@ export async function onRequest(context) {
                 // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
                 const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
                 const officialNavYesterday = parseFloat(gzData.dwjz);
-                // 只有当 gsz 有实质更新（gsz !== dwjz 且净值日期更新）才替换 pingzhongdata 数据
-                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0 && estimateNav !== officialNavYesterday;
-                const dateIsNewer = fundGzNavDate > navDate;
-                const hasSignificantEstimate = fundGzNavDate === navDate && estimateNav !== officialNavYesterday && Math.abs(estimateChange) > 0.05;
-                if (shouldReplace && (dateIsNewer || hasSignificantEstimate)) {
+                // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
+                // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
+                const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
+                if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
                   prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
                   nav = estimateNav;
                   navDate = fundGzNavDate;

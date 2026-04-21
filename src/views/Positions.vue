@@ -130,7 +130,7 @@
           <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
             <div class="nav-item">
               <span class="nav-label">最新净值</span>
-              <span class="nav-value">{{ Number(position.nav_gsz || position.nav_dwjz || 0).toFixed(4) }}</span>
+              <span class="nav-value">{{ Number(position.nav_dwjz || position.nav_gsz || 0).toFixed(4) }}</span>
             </div>
             <div class="nav-item">
               <span class="nav-label">日涨幅</span>
@@ -516,13 +516,6 @@ const handleEdit = (position) => {
     totalAmount: (parseFloat(position.cost) || 0) + (parseFloat(position.initial_profit) || 0),
     initialProfit: position.initial_profit || 0,
     dividendMethod: position.dividend_method || '红利再投',
-  }
-  // 设置成员信息
-  if (position.member_id) {
-    const member = members.value.find(m => m.id === position.member_id)
-    if (member) {
-      formData.value.memberName = `${member.emoji || '👤'} ${member.name}`
-    }
   }
   showAddModal.value = true
 }
