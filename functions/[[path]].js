@@ -855,6 +855,7 @@ export async function onRequest(context) {
           try {
             let nav = null, navDate = null, gszzl = null, prev_nav = null, name = fundNameMap[code] || '';
             let estimateNav = null, estimateDate = null, estimateChange = null;
+            let dwjzFromFundGz = null;  // fundgz 的 dwjz（昨日确认净值），单独保存用于 INSERT
 
             // 同时请求两个接口
             const [res2, resGz] = await Promise.all([
@@ -897,6 +898,7 @@ export async function onRequest(context) {
                 if (gzData.gsz) {
                   estimateNav = parseFloat(gzData.gsz);
                   estimateChange = parseFloat(gzData.gszzl);
+                  dwjzFromFundGz = parseFloat(gzData.dwjz);
                 // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
                 // QDII基金在非交易日 fundgz 仍返回上一交易日作为 jzrq，此时 jzrq < navDate
                 // pingzhongdata 的 navDate 永远是真实最新净值日期（哪怕是节假日后的第一个交易日）
@@ -910,17 +912,19 @@ export async function onRequest(context) {
                 const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
                 if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
                   if (dateIsNewer) {
-                    // fundgz 有新的确认净值（前一交易日）：nav 更新，prev_nav 设为 pingzhongdata 的当前 NAV（前一确认日）
+                    // fundgz 有新的确认净值（前一交易日）
+                    // nav 更新为估算，prev_nav = pingzhongdata 当前 nav（上一个确认日），dwjz = officialNavYesterday（上一个确认净值）
                     prev_nav = nav > 0 ? nav : prev_nav;
                     nav = estimateNav;
                     navDate = fundGzNavDate;
                     gszzl = estimateChange;
+                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
                   } else if (hasSameDayEstimate) {
-                    // fundgz 有今日盘中估算（jzrq = pingzhongdata 最新日期 = 今日）
-                    // nav 更新为估算，prev_nav 保持 pingzhongdata 的前日净值（正确的上一个确认日）
+                    // fundgz 有今日盘中估算（jzrq = 今日）
+                    // nav 更新为估算，prev_nav 不变（正确的上一个确认日）
+                    // dwjz 也不变（保持上一个确认净值，不被 pingzhongdata nav 覆盖）
                     nav = estimateNav;
                     gszzl = estimateChange;
-                    // prev_nav 不变，保持 pingzhongdata 已有的 prev_nav
                   }
                 }
               }
@@ -947,7 +951,7 @@ export async function onRequest(context) {
                 last_nav = excluded.last_nav,
                 last_gszzl = excluded.last_gszzl,
                 updated_at = unixepoch()
-            `).bind(code, name, prev_nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+            `).bind(code, name, dwjzFromFundGz || prev_nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
             syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
@@ -992,7 +996,7 @@ export async function onRequest(context) {
       const fundCode = path.split('/').pop();
       
       try {
-        let nav = null, navDate = null, gszzl = null, prev_nav = null, name = '';
+        let nav = null, navDate = null, gszzl = null, prev_nav = null, dwjz = null, name = '';
 
         // 同时请求 pingzhongdata + fundgz
         const [res2, resGz] = await Promise.all([
@@ -1049,9 +1053,11 @@ export async function onRequest(context) {
                     nav = estimateNav;
                     navDate = fundGzNavDate;
                     gszzl = estimateChange;
+                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
                   } else if (hasSameDayEstimate) {
                     nav = estimateNav;
                     gszzl = estimateChange;
+                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
                   }
                 }
               }
@@ -1078,7 +1084,7 @@ export async function onRequest(context) {
             last_nav = excluded.last_nav,
             last_gszzl = excluded.last_gszzl,
             updated_at = unixepoch()
-        `).bind(fundCode, name, officialNavYesterday || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+        `).bind(fundCode, name, dwjz || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
         
         // 更新该基金所有持仓的昨日收益
         const { results: positions } = await env.DB.prepare(
