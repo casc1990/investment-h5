@@ -2,11 +2,13 @@
   <div class="positions-page">
     <!-- 筛选栏 -->
     <div class="filter-bar">
-      <van-dropdown-menu>
-        <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
-        <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="onAccountChange" />
-      </van-dropdown-menu>
-      <van-button size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
+      <div class="filter-dropdowns">
+        <van-dropdown-menu>
+          <van-dropdown-item v-model="selectedMemberId" :title="selectedMemberTitle" :options="memberOptions" @change="onMemberChange" />
+          <van-dropdown-item v-model="selectedAccountId" :title="selectedAccountTitle" :options="filteredAccountOptions" @change="onAccountChange" />
+        </van-dropdown-menu>
+      </div>
+      <van-button class="sync-all-btn" size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
         {{ syncingAll ? '同步中...' : '同步所有' }}
       </van-button>
     </div>
@@ -341,6 +343,18 @@ const filteredAccountOptions = computed(() => {
   ]
 })
 
+const selectedMemberTitle = computed(() => {
+  if (!selectedMemberId.value) return '全部成员'
+  const m = members.value.find(m => m.id === selectedMemberId.value)
+  return m ? `${m.emoji || '👤'} ${m.name}` : '全部成员'
+})
+
+const selectedAccountTitle = computed(() => {
+  if (!selectedAccountId.value) return '全部账户'
+  const a = accounts.value.find(a => a.id === selectedAccountId.value)
+  return a ? a['账户名称'] : '全部账户'
+})
+
 // 成员选择器选项
 const memberPickerOptions = computed(() =>
   members.value.map(m => ({ text: `${m.emoji || '👤'} ${m.name}`, value: m.id }))
@@ -638,10 +652,25 @@ onMounted(() => {
 
 .filter-bar {
   background: white;
-  padding: 8px 12px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+}
+
+.filter-dropdowns {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-dropdowns .van-dropdown-menu {
+  height: 36px;
+}
+
+.sync-all-btn {
+  height: 36px !important;
+  line-height: 36px !important;
+  flex-shrink: 0;
 }
 
 /* 顶部统计卡片 */
