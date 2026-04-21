@@ -939,7 +939,7 @@ export async function onRequest(context) {
                 last_nav = excluded.last_nav,
                 last_gszzl = excluded.last_gszzl,
                 updated_at = unixepoch()
-            `).bind(code, name, nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+            `).bind(code, name, officialNavYesterday || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
             syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
