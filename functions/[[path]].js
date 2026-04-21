@@ -909,11 +909,19 @@ export async function onRequest(context) {
                 // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
                 const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
                 if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
-                  // 用 fundgz 估算替换（估算净值是今天的新净值，dwjz 是昨天官方净值）
-                  prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
-                  nav = estimateNav;
-                  navDate = fundGzNavDate;
-                  gszzl = estimateChange;
+                  if (dateIsNewer) {
+                    // fundgz 有新的确认净值（前一交易日）：nav 更新，prev_nav 设为 pingzhongdata 的当前 NAV（前一确认日）
+                    prev_nav = nav > 0 ? nav : prev_nav;
+                    nav = estimateNav;
+                    navDate = fundGzNavDate;
+                    gszzl = estimateChange;
+                  } else if (hasSameDayEstimate) {
+                    // fundgz 有今日盘中估算（jzrq = pingzhongdata 最新日期 = 今日）
+                    // nav 更新为估算，prev_nav 保持 pingzhongdata 的前日净值（正确的上一个确认日）
+                    nav = estimateNav;
+                    gszzl = estimateChange;
+                    // prev_nav 不变，保持 pingzhongdata 已有的 prev_nav
+                  }
                 }
               }
               } catch (_) {}
@@ -1030,14 +1038,21 @@ export async function onRequest(context) {
                 // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
                 const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
                 const officialNavYesterday = parseFloat(gzData.dwjz);
+                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
+                const dateIsNewer = fundGzNavDate > navDate;
                 // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
                 // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
                 const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
                 if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
-                  prev_nav = officialNavYesterday > 0 ? officialNavYesterday : prev_nav;
-                  nav = estimateNav;
-                  navDate = fundGzNavDate;
-                  gszzl = estimateChange;
+                  if (dateIsNewer) {
+                    prev_nav = nav > 0 ? nav : prev_nav;
+                    nav = estimateNav;
+                    navDate = fundGzNavDate;
+                    gszzl = estimateChange;
+                  } else if (hasSameDayEstimate) {
+                    nav = estimateNav;
+                    gszzl = estimateChange;
+                  }
                 }
               }
           } catch (_) {}
