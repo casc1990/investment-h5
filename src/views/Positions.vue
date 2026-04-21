@@ -6,6 +6,9 @@
         <van-dropdown-item v-model="selectedMemberId" title="全部成员" :options="memberOptions" @change="onMemberChange" />
         <van-dropdown-item v-model="selectedAccountId" title="全部账户" :options="filteredAccountOptions" @change="onAccountChange" />
       </van-dropdown-menu>
+      <van-button size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
+        {{ syncingAll ? '同步中...' : '同步所有' }}
+      </van-button>
     </div>
 
     <!-- 顶部统计卡片 -->
@@ -285,6 +288,7 @@ import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
 
 const syncingId = ref(null)
+const syncingAll = ref(false)
 const loading = ref(false)
 const positionsRaw = ref([])
 const positions = computed(() =>
@@ -524,6 +528,21 @@ const handleSync = async (position) => {
   }
 }
 
+const handleSyncAll = async () => {
+  if (syncingAll.value) return
+  syncingAll.value = true
+  try {
+    await marketApi.sync()
+    showToast('全部基金净值同步成功')
+    await fetchPositions()
+  } catch (error) {
+    console.error('同步所有失败:', error)
+    showToast('同步所有失败')
+  } finally {
+    syncingAll.value = false
+  }
+}
+
 const toggleExpand = (id) => {
   const idx = expandedIds.value.indexOf(id)
   if (idx >= 0) {
@@ -619,7 +638,10 @@ onMounted(() => {
 
 .filter-bar {
   background: white;
-  padding: 0 12px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 /* 顶部统计卡片 */
