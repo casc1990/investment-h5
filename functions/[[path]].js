@@ -1064,7 +1064,7 @@ export async function onRequest(context) {
             last_nav = excluded.last_nav,
             last_gszzl = excluded.last_gszzl,
             updated_at = unixepoch()
-        `).bind(fundCode, name, nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+        `).bind(fundCode, name, officialNavYesterday || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
         
         // 更新该基金所有持仓的昨日收益
         const { results: positions } = await env.DB.prepare(
