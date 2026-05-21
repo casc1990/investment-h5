@@ -85,6 +85,10 @@
           <div class="icon purple">📈</div>
           <span>统计</span>
         </div>
+        <div class="action-item" @click="$router.push('/advisory')">
+          <div class="icon orange">🤖</div>
+          <span>顾投</span>
+        </div>
       </div>
     </div>
 
@@ -326,7 +330,7 @@ onMounted(() => {
 /* 快捷操作 */
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 

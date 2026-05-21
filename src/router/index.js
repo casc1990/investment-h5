@@ -37,9 +37,19 @@ const routes = [
     component: () => import('../views/Stats.vue'),
   },
   {
+    path: '/ledger',
+    name: 'ProfitLedger',
+    component: () => import('../views/ProfitLedger.vue'),
+  },
+  {
     path: '/members',
     name: 'Members',
     component: () => import('../views/Members.vue'),
+  },
+  {
+    path: '/advisory',
+    name: 'Advisory',
+    component: () => import('../views/Advisory.vue'),
   },
 ]
 

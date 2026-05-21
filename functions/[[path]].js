@@ -85,6 +85,43 @@ export async function onRequest(context) {
       return results.length > 0 ? results[0] : null;
     }
 
+    async function ensureAdvisoryTables() {
+      const productTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='advisory_products'").all();
+      if (productTableInfo.results.length === 0) {
+        await env.DB.prepare(`
+          CREATE TABLE advisory_products (
+            id TEXT PRIMARY KEY,
+            account_id TEXT,
+            member_id TEXT,
+            platform TEXT DEFAULT 'xueqiu',
+            product_name TEXT NOT NULL,
+            status TEXT DEFAULT '正常',
+            remark TEXT DEFAULT '',
+            created_at INTEGER DEFAULT (unixepoch()),
+            updated_at INTEGER DEFAULT (unixepoch())
+          )
+        `).run();
+      }
+
+      const snapshotTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='advisory_product_snapshots'").all();
+      if (snapshotTableInfo.results.length === 0) {
+        await env.DB.prepare(`
+          CREATE TABLE advisory_product_snapshots (
+            id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            total_amount REAL DEFAULT 0,
+            daily_profit REAL DEFAULT 0,
+            current_profit REAL DEFAULT 0,
+            profit_rate REAL DEFAULT 0,
+            created_at INTEGER DEFAULT (unixepoch()),
+            updated_at INTEGER DEFAULT (unixepoch()),
+            UNIQUE(product_id, snapshot_date)
+          )
+        `).run();
+      }
+    }
+
     // ========== 公开接口（无需认证）==========
     // 健康检查
     if (path === '/health' || path === '/api/health') {
@@ -357,6 +394,150 @@ export async function onRequest(context) {
       }});
     }
 
+    // ========== 顾投组合 API ==========
+
+    if (path === '/api/advisory-products' && method === 'GET') {
+      await ensureAdvisoryTables();
+      const accountId = url.searchParams.get('account_id');
+      const memberId = url.searchParams.get('member_id');
+      let query = `
+        SELECT p.*, a.name as account_name, a.channel as account_channel,
+               m.name as member_name, m.emoji as member_emoji,
+               s.snapshot_date, s.total_amount, s.daily_profit, s.current_profit, s.profit_rate
+        FROM advisory_products p
+        LEFT JOIN accounts a ON p.account_id = a.id
+        LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
+        LEFT JOIN advisory_product_snapshots s ON s.id = (
+          SELECT s2.id FROM advisory_product_snapshots s2
+          WHERE s2.product_id = p.id
+          ORDER BY s2.snapshot_date DESC, s2.updated_at DESC, s2.created_at DESC
+          LIMIT 1
+        )
+      `;
+      const conditions = [];
+      const params = [];
+      if (accountId && accountId !== 'all') {
+        conditions.push('p.account_id = ?');
+        params.push(accountId);
+      }
+      if (memberId) {
+        conditions.push('COALESCE(p.member_id, a.member_id) = ?');
+        params.push(memberId);
+      }
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY COALESCE(s.total_amount, 0) DESC, p.created_at DESC';
+      let stmt = env.DB.prepare(query);
+      if (params.length > 0) stmt = stmt.bind(...params);
+      const { results } = await stmt.all();
+      const products = results.map(r => ({
+        id: r.id,
+        product_name: r.product_name,
+        platform: r.platform || 'xueqiu',
+        account_id: r.account_id,
+        account_name: r.account_name || '',
+        account_channel: r.account_channel || '',
+        member_id: r.member_id || null,
+        member_name: r.member_name || '',
+        member_emoji: r.member_emoji || '👤',
+        status: r.status || '正常',
+        remark: r.remark || '',
+        snapshot_date: r.snapshot_date || null,
+        total_amount: Number((r.total_amount || 0).toFixed ? r.total_amount.toFixed(2) : Number(r.total_amount || 0).toFixed(2)),
+        daily_profit: Number((r.daily_profit || 0).toFixed ? r.daily_profit.toFixed(2) : Number(r.daily_profit || 0).toFixed(2)),
+        current_profit: Number((r.current_profit || 0).toFixed ? r.current_profit.toFixed(2) : Number(r.current_profit || 0).toFixed(2)),
+        profit_rate: Number((r.profit_rate || 0).toFixed ? r.profit_rate.toFixed(2) : Number(r.profit_rate || 0).toFixed(2)),
+        current_market_value: Number((r.total_amount || 0).toFixed ? r.total_amount.toFixed(2) : Number(r.total_amount || 0).toFixed(2)),
+        yesterday_profit: Number((r.daily_profit || 0).toFixed ? r.daily_profit.toFixed(2) : Number(r.daily_profit || 0).toFixed(2)),
+        kind: 'advisory',
+      }));
+      return jsonResponse({ code: 0, data: { total: products.length, products } });
+    }
+
+    if (path === '/api/advisory-products' && method === 'POST') {
+      await ensureAdvisoryTables();
+      const body = await context.request.json();
+      const productName = (body.product_name || body.productName || '').trim();
+      if (!productName) {
+        return jsonResponse({ code: 400, message: '产品名称不能为空' }, 400);
+      }
+      const id = generateId();
+      const account_id = body.account_id || body.accountId || null;
+      const member_id = body.member_id || body.memberId || null;
+      const platform = body.platform || 'xueqiu';
+      const status = body.status || '正常';
+      const remark = body.remark || '';
+      await env.DB.prepare(
+        'INSERT INTO advisory_products (id, account_id, member_id, platform, product_name, status, remark) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, account_id, member_id, platform, productName, status, remark).run();
+      return jsonResponse({ code: 0, data: { id, product_name: productName, account_id, member_id, platform, status, remark } });
+    }
+
+    if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'PUT') {
+      await ensureAdvisoryTables();
+      const id = path.split('/').pop();
+      const body = await context.request.json();
+      const product_name = body.product_name ?? body.productName;
+      const account_id = body.account_id ?? body.accountId;
+      const member_id = body.member_id ?? body.memberId;
+      const platform = body.platform;
+      const status = body.status;
+      const remark = body.remark;
+      const fields = [];
+      const values = [];
+      if (product_name !== undefined) { fields.push('product_name = ?'); values.push(product_name); }
+      if (account_id !== undefined) { fields.push('account_id = ?'); values.push(account_id); }
+      if (member_id !== undefined) { fields.push('member_id = ?'); values.push(member_id); }
+      if (platform !== undefined) { fields.push('platform = ?'); values.push(platform); }
+      if (status !== undefined) { fields.push('status = ?'); values.push(status); }
+      if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
+      if (fields.length > 0) {
+        values.push(id);
+        await env.DB.prepare(`UPDATE advisory_products SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
+      }
+      const { results } = await env.DB.prepare('SELECT * FROM advisory_products WHERE id = ?').bind(id).all();
+      if (results.length === 0) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
+      return jsonResponse({ code: 0, data: results[0] });
+    }
+
+    if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'DELETE') {
+      await ensureAdvisoryTables();
+      const id = path.split('/').pop();
+      await env.DB.prepare('DELETE FROM advisory_product_snapshots WHERE product_id = ?').bind(id).run();
+      await env.DB.prepare('DELETE FROM advisory_products WHERE id = ?').bind(id).run();
+      return jsonResponse({ code: 0, message: 'Advisory product deleted' });
+    }
+
+    if (path === '/api/advisory-snapshots' && method === 'POST') {
+      await ensureAdvisoryTables();
+      const body = await context.request.json();
+      const product_id = body.product_id || body.productId;
+      const snapshot_date = body.snapshot_date || body.snapshotDate;
+      if (!product_id || !snapshot_date) {
+        return jsonResponse({ code: 400, message: 'product_id 和 snapshot_date 必填' }, 400);
+      }
+      const total_amount = Number(body.total_amount ?? body.totalAmount ?? 0);
+      const daily_profit = Number(body.daily_profit ?? body.dailyProfit ?? 0);
+      const current_profit = Number(body.current_profit ?? body.currentProfit ?? 0);
+      const inputProfitRate = body.profit_rate ?? body.profitRate;
+      const profit_rate = inputProfitRate !== undefined && inputProfitRate !== null && inputProfitRate !== ''
+        ? Number(inputProfitRate)
+        : ((total_amount - current_profit) > 0 ? Number(((current_profit / (total_amount - current_profit)) * 100).toFixed(2)) : 0);
+      const existing = await env.DB.prepare('SELECT id FROM advisory_product_snapshots WHERE product_id = ? AND snapshot_date = ?').bind(product_id, snapshot_date).all();
+      if (existing.results.length > 0) {
+        await env.DB.prepare(
+          'UPDATE advisory_product_snapshots SET total_amount = ?, daily_profit = ?, current_profit = ?, profit_rate = ?, updated_at = unixepoch() WHERE id = ?'
+        ).bind(total_amount, daily_profit, current_profit, profit_rate, existing.results[0].id).run();
+        return jsonResponse({ code: 0, data: { id: existing.results[0].id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate } });
+      }
+      const id = generateId();
+      await env.DB.prepare(
+        'INSERT INTO advisory_product_snapshots (id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate).run();
+      return jsonResponse({ code: 0, data: { id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate } });
+    }
+
     // ========== 持仓 API ==========
 
     // 获取持仓列表
@@ -396,20 +577,20 @@ export async function onRequest(context) {
       
         const positions = results.map(r => {
           const shares = r.quantity || 0;
-          const cost = r.cost || 0;              // 买入成本（来自数据库 cost 列）
-          // 昨日确认净值（dwjz）用于计算昨日收益和市值；盘中估算（gsz）仅用于显示日涨幅
-          const confirmedNav = r.nav_dwjz || r.nav_gsz || 0; // 昨日确认净值
-          const estimateNav = r.nav_gsz || null;  // 今日盘中估算
-          const prevNav = r.prev_nav || 0;        // 前一日净值
+          const cost = r.cost || 0;                  // 买入成本（来自数据库 cost 列）
+          const estimateNav = r.nav_gsz || null;     // 今日盘中估算
+          const confirmedNav = r.nav_dwjz || 0;      // 最新确认净值
+          const marketNav = estimateNav || confirmedNav || 0; // 盘中优先用估算净值计算持仓收益
+          const prevNav = r.prev_nav || 0;           // 前一日净值
 
-          // 昨日收益 = (昨日确认净值 - 前一日净值) × 持有份额
+          // 昨日收益 = (最新确认净值 - 前一日净值) × 持有份额
           const yesterdayProfit = shares > 0 && confirmedNav > 0 && prevNav > 0
             ? parseFloat(((confirmedNav - prevNav) * shares).toFixed(4))
             : 0;
 
-          // 当前市值 = 持有份额 × 昨日确认净值
-          const currentMarketValue = shares > 0 && confirmedNav > 0
-            ? parseFloat((shares * confirmedNav).toFixed(4))
+          // 当前市值 = 持有份额 × 盘中净值（优先 gsz，其次 dwjz）
+          const currentMarketValue = shares > 0 && marketNav > 0
+            ? parseFloat((shares * marketNav).toFixed(4))
             : 0;
 
           // 持有收益 = 当前市值 - 买入成本（不含历史收益，历史收益已固化在成本中）
@@ -421,7 +602,7 @@ export async function onRequest(context) {
             ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
             : 0;
 
-          // 日涨幅：盘中估算对比昨日确认净值，避免 gszzl=0 被 || 误判为 null
+          // 日涨幅：盘中估算对比最新确认净值，避免 gszzl=0 被 || 误判为 null
           const navGszzl = (estimateNav && confirmedNav && confirmedNav > 0)
             ? parseFloat(((estimateNav - confirmedNav) / confirmedNav * 100).toFixed(4))
             : (r.nav_gszzl != null ? r.nav_gszzl : null);
@@ -444,7 +625,7 @@ export async function onRequest(context) {
             initial_profit: r.initial_profit || 0,
             dividend_method: r.dividend_method || '红利再投',
             created_at: r.created_at,
-            // confirmedNav=dwjz（昨日确认净值），estimateNav=gsz（今日估算）
+            // confirmedNav=dwjz（最新确认净值），estimateNav=gsz（今日估算）
             nav_gsz: estimateNav,
             nav_gszzl: navGszzl,
             nav_dwjz: confirmedNav,
@@ -541,12 +722,14 @@ export async function onRequest(context) {
       // 计算当前收益和收益率（实时计算，不依赖存储字段）
       const _shares = r.quantity || 0;
       const _cost = r.cost || 0;
-      const nav = r.nav_gsz || r.nav_dwjz || 0;
-      const currentMarketValue = _shares > 0 && nav > 0 ? parseFloat((_shares * nav).toFixed(4)) : 0;
+      const estimateNav = r.nav_gsz || 0;
+      const confirmedNav = r.nav_dwjz || 0;
+      const marketNav = estimateNav || confirmedNav || 0;
+      const currentMarketValue = _shares > 0 && marketNav > 0 ? parseFloat((_shares * marketNav).toFixed(4)) : 0;
       const currentProfit = parseFloat((currentMarketValue - _cost).toFixed(4));
       const profitRate = _cost > 0 ? parseFloat(((currentProfit / _cost) * 100).toFixed(4)) : 0;
       const prevNav = r.prev_nav || 0;
-      const yesterdayProfit = _shares > 0 && nav > 0 && prevNav > 0 ? parseFloat(((nav - prevNav) * _shares).toFixed(4)) : 0;
+      const yesterdayProfit = _shares > 0 && confirmedNav > 0 && prevNav > 0 ? parseFloat(((confirmedNav - prevNav) * _shares).toFixed(4)) : 0;
       return jsonResponse({ code: 0, data: {
         id: r.id,
         account_id: r.account_id,
@@ -637,107 +820,150 @@ export async function onRequest(context) {
     // 收益总览
     if (path === '/api/stats/overview' && method === 'GET') {
       const memberId = url.searchParams.get('member_id');
+      await ensureAdvisoryTables();
 
-      // 查询所有成员
       const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY created_at DESC').all();
-      // 查询所有账户
       const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all();
-      // 查询所有持仓
       const { results: positions } = await env.DB.prepare('SELECT * FROM positions').all();
-      // 查询最新净值快照
       const { results: snapshots } = await env.DB.prepare('SELECT * FROM market_snapshot').all();
+      const { results: advisoryProducts } = await env.DB.prepare('SELECT * FROM advisory_products').all();
+      const { results: advisorySnapshots } = await env.DB.prepare('SELECT * FROM advisory_product_snapshots').all();
 
-      // 建立基金最新净值快照映射
       const snapshotMap = {};
       snapshots.forEach(m => {
         snapshotMap[m.fund_code] = m;
       });
 
-      // 计算每个账户的统计数据
+      const advisorySnapshotMap = {};
+      advisorySnapshots.forEach(row => {
+        const current = advisorySnapshotMap[row.product_id];
+        if (!current || row.snapshot_date > current.snapshot_date || (row.snapshot_date === current.snapshot_date && (row.updated_at || 0) > (current.updated_at || 0))) {
+          advisorySnapshotMap[row.product_id] = row;
+        }
+      });
+
       const accountStatsMap = {};
       let totalInvested = 0;
       let totalMarketValue = 0;
+      let totalYesterdayProfit = 0;
+      let totalCumulativeProfit = positions.reduce((sum, pos) => sum + (pos.initial_profit || 0), 0);
 
       accounts.forEach(acc => {
-        const accPositions = positions.filter(p => p.account_id === acc.id);
-        let invested = 0;
-        let marketValue = 0;
-
-        accPositions.forEach(pos => {
-          invested += pos.cost || 0;
-          const snap = snapshotMap[pos.fund_code];
-          // 优先用估算净值 gsz，盘中用这个；没有则用单位净值 dwjz；都没有则 fallback 到 cost
-          const nav = (snap && snap.gsz) ? snap.gsz : (snap && snap.dwjz) ? snap.dwjz : null;
-          if (nav && pos.quantity) {
-            marketValue += pos.quantity * nav;
-          } else {
-            marketValue += pos.cost || 0;
-          }
-        });
-
-        const profit = marketValue - invested;
-        const profitRate = marketValue > 0 ? (profit / marketValue * 100) : 0;
-        totalInvested += invested;
-        totalMarketValue += marketValue;
-
         accountStatsMap[acc.id] = {
           accountId: acc.id,
           accountName: acc.name,
           channel: acc.channel,
           member_id: acc.member_id,
-          invested: Number(invested.toFixed(2)),
-          marketValue: Number(marketValue.toFixed(2)),
-          profit: Number(profit.toFixed(2)),
-          profitRate: Number(profitRate.toFixed(2)),
+          invested: 0,
+          marketValue: 0,
+          profit: 0,
+          profitRate: 0,
         };
       });
 
-      // 按成员分组计算成员统计数据
-      const memberStats = members.map(member => {
-        const memberAccounts = Object.values(accountStatsMap).filter(a => a.member_id === member.id);
-        const memberMarketValue = memberAccounts.reduce((sum, a) => sum + a.marketValue, 0);
-        const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
-        const memberProfit = memberMarketValue - memberInvested;
-        const memberProfitRate = memberMarketValue > 0 ? (memberProfit / memberMarketValue * 100) : 0;
-
-        return {
-          member_id: member.id,
-          member_name: member.name,
-          emoji: member.emoji || '👤',
-          accounts: memberAccounts,
-          marketValue: Number(memberMarketValue.toFixed(2)),
-          invested: Number(memberInvested.toFixed(2)),
-          profit: Number(memberProfit.toFixed(2)),
-          profitRate: Number(memberProfitRate.toFixed(2)),
-        };
-      });
-
-      // 未分配账户（member_id 为 NULL 或空）
-      const unassignedAccounts = Object.values(accountStatsMap).filter(a => !a.member_id);
-
-      const totalProfit = totalMarketValue - totalInvested;
-      const totalProfitRate = totalMarketValue > 0 ? (totalProfit / totalMarketValue * 100) : 0;
-
-      // 昨日收益 = sum((今日净值 - 昨日净值) * 持有份额)
-      let totalYesterdayProfit = 0;
       positions.forEach(pos => {
+        const accountStats = accountStatsMap[pos.account_id];
+        if (!accountStats) return;
+        const cost = pos.cost || 0;
         const snap = snapshotMap[pos.fund_code];
+        const nav = (snap && snap.gsz) ? snap.gsz : (snap && snap.dwjz) ? snap.dwjz : null;
+        const marketValue = (nav && pos.quantity) ? (pos.quantity * nav) : cost;
+        accountStats.invested += cost;
+        accountStats.marketValue += marketValue;
+        totalInvested += cost;
+        totalMarketValue += marketValue;
         if (snap && snap.gsz && snap.prev_nav && pos.quantity) {
           totalYesterdayProfit += (snap.gsz - snap.prev_nav) * pos.quantity;
         }
       });
 
-      // 持有收益（不含历史累计收益）
+      const advisoryStats = advisoryProducts.map(product => {
+        const latest = advisorySnapshotMap[product.id];
+        const totalAmount = Number(latest?.total_amount || 0);
+        const currentProfit = Number(latest?.current_profit || 0);
+        const invested = Math.max(0, totalAmount - currentProfit);
+        const profitRate = latest?.profit_rate !== undefined && latest?.profit_rate !== null
+          ? Number(latest.profit_rate || 0)
+          : (invested > 0 ? Number(((currentProfit / invested) * 100).toFixed(2)) : 0);
+        const dailyProfit = Number(latest?.daily_profit || 0);
+        const fallbackMemberId = product.member_id || accounts.find(acc => acc.id === product.account_id)?.member_id || null;
+        return {
+          id: product.id,
+          product_name: product.product_name,
+          account_id: product.account_id,
+          member_id: fallbackMemberId,
+          marketValue: totalAmount,
+          invested,
+          profit: currentProfit,
+          profitRate,
+          dailyProfit,
+          snapshot_date: latest?.snapshot_date || null,
+        };
+      });
+
+      advisoryStats.forEach(item => {
+        totalInvested += item.invested;
+        totalMarketValue += item.marketValue;
+        totalYesterdayProfit += item.dailyProfit;
+        totalCumulativeProfit += item.profit;
+        if (item.account_id && accountStatsMap[item.account_id]) {
+          const accountStats = accountStatsMap[item.account_id];
+          accountStats.invested += item.invested;
+          accountStats.marketValue += item.marketValue;
+        } else if (item.account_id) {
+          const account = accounts.find(acc => acc.id === item.account_id);
+          accountStatsMap[item.account_id] = {
+            accountId: item.account_id,
+            accountName: account?.name || item.product_name,
+            channel: account?.channel || '雪球顾投',
+            member_id: item.member_id,
+            invested: item.invested,
+            marketValue: item.marketValue,
+            profit: 0,
+            profitRate: 0,
+          };
+        }
+      });
+
+      Object.values(accountStatsMap).forEach(accountStats => {
+        accountStats.profit = Number((accountStats.marketValue - accountStats.invested).toFixed(2));
+        accountStats.profitRate = Number((accountStats.invested > 0 ? (accountStats.profit / accountStats.invested * 100) : 0).toFixed(2));
+        accountStats.invested = Number(accountStats.invested.toFixed(2));
+        accountStats.marketValue = Number(accountStats.marketValue.toFixed(2));
+      });
+
+      const memberStats = members
+        .map(member => {
+          const memberAccounts = Object.values(accountStatsMap).filter(a => a.member_id === member.id);
+          const memberMarketValue = memberAccounts.reduce((sum, a) => sum + a.marketValue, 0);
+          const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
+          const memberProfit = memberMarketValue - memberInvested;
+          const memberProfitRate = memberInvested > 0 ? (memberProfit / memberInvested * 100) : 0;
+          return {
+            member_id: member.id,
+            member_name: member.name,
+            emoji: member.emoji || '👤',
+            accounts: memberAccounts,
+            marketValue: Number(memberMarketValue.toFixed(2)),
+            invested: Number(memberInvested.toFixed(2)),
+            profit: Number(memberProfit.toFixed(2)),
+            profitRate: Number(memberProfitRate.toFixed(2)),
+          };
+        })
+        .filter(member => !memberId || member.member_id === memberId);
+
+      const filteredAccounts = Object.values(accountStatsMap).filter(a => !memberId || a.member_id === memberId);
+      const unassignedAccounts = filteredAccounts.filter(a => !a.member_id);
+      const totalProfit = totalMarketValue - totalInvested;
+      const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
       const totalHoldingProfit = totalProfit;
-      // 累计收益（含历史卖出盈亏）
-      const totalCumulativeProfit = positions.reduce((sum, pos) => sum + (pos.initial_profit || 0), 0);
 
       return jsonResponse({
         code: 0,
         data: {
           summary: {
             totalInvested: Number(totalInvested.toFixed(2)),
-            totalMarketValue: Number((totalInvested + totalProfit).toFixed(2)),
+            totalMarketValue: Number(totalMarketValue.toFixed(2)),
             totalProfit: Number(totalProfit.toFixed(2)),
             totalProfitRate: Number(totalProfitRate.toFixed(2)),
             totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
@@ -745,7 +971,7 @@ export async function onRequest(context) {
             totalCumulativeProfit: Number(totalCumulativeProfit.toFixed(2)),
           },
           members: memberStats,
-          accounts: Object.values(accountStatsMap),
+          accounts: filteredAccounts,
           unassignedAccounts,
         },
       });
@@ -822,6 +1048,8 @@ export async function onRequest(context) {
         if (!posInfo.results.some(col => col.name === 'initial_profit')) {
           await env.DB.prepare('ALTER TABLE positions ADD COLUMN initial_profit REAL DEFAULT 0').run();
         }
+
+        await ensureAdvisoryTables();
 
         return jsonResponse({ code: 0, message: 'Migration completed' });
       } catch (error) {

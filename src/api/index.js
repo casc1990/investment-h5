@@ -112,6 +112,16 @@ export const memberApi = {
   delete: (id) => apiClient.delete(`/members/${id}`),
 }
 
+// ============ 顾投组合 API ============
+
+export const advisoryApi = {
+  list: (params) => apiClient.get('/advisory-products', { params }),
+  createProduct: (data) => apiClient.post('/advisory-products', data),
+  updateProduct: (id, data) => apiClient.put(`/advisory-products/${id}`, data),
+  deleteProduct: (id) => apiClient.delete(`/advisory-products/${id}`),
+  saveSnapshot: (data) => apiClient.post('/advisory-snapshots', data),
+}
+
 // ============ 统计 API ============
 
 export const statsApi = {

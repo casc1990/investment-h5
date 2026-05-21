@@ -24,6 +24,9 @@
       <van-tabbar-item to="/stats" icon="chart-trending-o">
         统计
       </van-tabbar-item>
+      <van-tabbar-item to="/ledger" icon="notes-o">
+        台账
+      </van-tabbar-item>
       <van-tabbar-item to="/members" icon="friends-o">
         成员
       </van-tabbar-item>
@@ -45,7 +48,8 @@ const tabMap = {
   '/positions': 2,
   '/trades': 3,
   '/stats': 4,
-  '/members': 5,
+  '/ledger': 5,
+  '/members': 6,
 }
 
 watch(() => route.path, (path) => {

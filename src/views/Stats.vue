@@ -39,6 +39,10 @@
           {{ Number(overview?.summary?.totalProfitRate) >= 0 ? '+' : '' }}{{ overview?.summary?.totalProfitRate }}%
         </span>
       </div>
+
+      <div class="ledger-entry">
+        <van-button block round type="primary" plain @click="goLedger">查看收益台账</van-button>
+      </div>
     </div>
 
     <!-- 持仓明细 -->
@@ -67,6 +71,32 @@
       </div>
     </div>
 
+    <!-- 顾投组合 -->
+    <div class="section">
+      <div class="section-title">🤖 顾投组合</div>
+      <div class="position-list">
+        <div v-for="product in advisoryProducts" :key="product.id" class="position-item">
+          <div class="position-info">
+            <div class="fund-name">{{ product.product_name }}</div>
+            <div class="fund-meta">
+              <span class="fund-code">顾投组合</span>
+              <span v-if="product.member_name" class="member-tag">{{ product.member_emoji }} {{ product.member_name }}</span>
+              <span class="account-tag">{{ product.account_name || '未绑定账户' }}</span>
+            </div>
+          </div>
+          <div class="position-profit" :class="{ positive: Number(product.current_profit) >= 0, negative: Number(product.current_profit) < 0 }">
+            <div class="profit">
+              {{ Number(product.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(product.current_profit) }}
+            </div>
+            <div class="rate">
+              {{ Number(product.profit_rate || 0).toFixed(2) }}%
+            </div>
+          </div>
+        </div>
+        <van-empty v-if="!advisoryProducts.length" description="暂无顾投组合" />
+      </div>
+    </div>
+
     <!-- 加载状态 -->
     <van-loading v-if="loading" type="spinner" class="loading" />
   </div>
@@ -74,12 +104,16 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { statsApi, positionApi } from '../api'
+import { advisoryApi, statsApi, positionApi } from '../api'
+import { recordProfitSnapshot } from '../utils/profitLedger'
 
+const router = useRouter()
 const loading = ref(false)
 const overview = ref(null)
 const positions = ref([])
+const advisoryProducts = ref([])
 
 const formatAmount = (num) => {
   const val = parseFloat(num || 0)
@@ -97,12 +131,36 @@ const fetchData = async () => {
 
     const positionsData = await positionApi.list()
     positions.value = positionsData?.positions || []
+
+    const advisoryData = await advisoryApi.list()
+    advisoryProducts.value = advisoryData?.products || []
+
+    recordProfitSnapshot({
+      summary: overviewData?.summary,
+      positions: [
+        ...positions.value,
+        ...advisoryProducts.value.map(item => ({
+          id: `advisory-${item.id}`,
+          fund_name: item.product_name,
+          fund_code: '顾投组合',
+          account_name: item.account_name,
+          member_name: item.member_name,
+          member_emoji: item.member_emoji,
+          current_profit: item.current_profit,
+          profit_rate: item.profit_rate,
+        })),
+      ],
+    })
   } catch (error) {
     console.error('Failed to fetch stats:', error)
     showToast('数据加载失败')
   } finally {
     loading.value = false
   }
+}
+
+const goLedger = () => {
+  router.push('/ledger')
 }
 
 onMounted(() => {
@@ -184,6 +242,10 @@ onMounted(() => {
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
+}
+
+.ledger-entry {
+  margin-top: 14px;
 }
 
 .rate-label {

@@ -130,7 +130,7 @@
           <div class="nav-info" v-if="position.nav_gsz || position.nav_dwjz">
             <div class="nav-item">
               <span class="nav-label">最新净值</span>
-              <span class="nav-value">{{ Number(position.nav_dwjz || position.nav_gsz || 0).toFixed(4) }}</span>
+              <span class="nav-value">{{ Number(position.nav_gsz || position.nav_dwjz || 0).toFixed(4) }}</span>
             </div>
             <div class="nav-item">
               <span class="nav-label">日涨幅</span>
@@ -156,9 +156,18 @@
 
           <!-- 操作按钮 -->
           <div class="position-actions">
-            <van-button size="small" type="warning" :disabled="syncingId === position.id" @click.stop="handleSync(position)">
-              <van-loading v-if="syncingId === position.id" size="14px" color="#fff" />
-              <span v-else>同步净值</span>
+            <van-button
+              size="small"
+              type="warning"
+              class="sync-fund-btn"
+              :class="{ syncing: syncingId === position.id }"
+              :disabled="syncingId === position.id"
+              @click.stop="handleSync(position)"
+            >
+              <span class="sync-btn-content">
+                <van-icon name="replay" class="sync-btn-icon" :class="{ spinning: syncingId === position.id }" />
+                <span>{{ syncingId === position.id ? '同步中...' : '同步净值' }}</span>
+              </span>
             </van-button>
             <van-button size="small" type="primary" @click.stop="handleEdit(position)">编辑</van-button>
             <van-button size="small" type="danger" @click.stop="handleDelete(position)">删除</van-button>
@@ -174,8 +183,11 @@
 
     <!-- 添加按钮 -->
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">
-        ➕ 添加持仓
+      <van-button round type="primary" class="add-btn" @click="openAddModal">
+        <span class="add-btn-content">
+          <van-icon name="plus" size="16" />
+          <span>新增持仓</span>
+        </span>
       </van-button>
     </div>
 
@@ -733,7 +745,7 @@ onMounted(() => {
 .negative { color: #7DDF64; }
 
 .position-list {
-  padding: 0 12px 80px;
+  padding: 0 12px 112px;
 }
 
 /* 表头 */
@@ -788,10 +800,11 @@ onMounted(() => {
 /* 左：基金名称 */
 .collapsed-main {
   flex: 1;
+  min-width: 0;
+  max-width: calc(100% - 190px);
   display: flex;
   flex-direction: column;
   gap: 3px;
-  min-width: 0;
   padding-right: 8px;
 }
 
@@ -817,6 +830,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-end;
   gap: 0;
+  flex-shrink: 0;
 }
 
 .collapsed-center {
@@ -1011,6 +1025,25 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.sync-fund-btn {
+  min-width: 94px;
+}
+
+.sync-fund-btn.syncing {
+  opacity: 0.92;
+}
+
+.sync-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sync-btn-icon.spinning {
+  animation: sync-spin 0.9s linear infinite;
 }
 
 .loading {
@@ -1020,14 +1053,34 @@ onMounted(() => {
 
 .add-btn-wrapper {
   position: fixed;
-  bottom: 70px;
-  left: 12px;
-  right: 12px;
+  right: 14px;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
 }
 
 .add-btn {
+  height: 42px;
+  padding: 0 14px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
+  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+}
+
+.add-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .modal-content {
