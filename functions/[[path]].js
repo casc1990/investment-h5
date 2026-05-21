@@ -908,8 +908,11 @@ export async function onRequest(context) {
                 const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
                 const dateIsNewer = fundGzNavDate > navDate;
                 // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
-                // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
-                const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
+                // 情况2：同日期且 fundgz 的 gsz 既不同于 dwjz、也不同于 pingzhongdata 最新净值 → 说明 fundgz 确实提供了额外的盘中估算
+                // 如果 gsz 与 pingzhongdata 最新净值相同，说明 pingzhongdata 已是最新确认净值，不应再把 dwjz（上一确认净值）覆盖到当前净值位置
+                const hasSameDayEstimate = fundGzNavDate === navDate
+                  && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4)
+                  && estimateNav.toFixed(4) !== nav.toFixed(4);
                 if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
                   if (dateIsNewer) {
                     // fundgz 有新的确认净值（前一交易日）
@@ -1045,8 +1048,11 @@ export async function onRequest(context) {
                 const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
                 const dateIsNewer = fundGzNavDate > navDate;
                 // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
-                // 情况2：同日期但 gsz≠dwjz（有盘中估算，截断到4位再比较避免浮点误差）→ 用 fundgz 的 gsz 作 nav，dwjz 作 prev_nav
-                const hasSameDayEstimate = fundGzNavDate === navDate && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4);
+                // 情况2：同日期且 fundgz 的 gsz 既不同于 dwjz、也不同于 pingzhongdata 最新净值 → 说明 fundgz 确实提供了额外的盘中估算
+                // 如果 gsz 与 pingzhongdata 最新净值相同，说明 pingzhongdata 已是最新确认净值，不应再把 dwjz（上一确认净值）覆盖到当前净值位置
+                const hasSameDayEstimate = fundGzNavDate === navDate
+                  && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4)
+                  && estimateNav.toFixed(4) !== nav.toFixed(4);
                 if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
                   if (dateIsNewer) {
                     prev_nav = nav > 0 ? nav : prev_nav;
