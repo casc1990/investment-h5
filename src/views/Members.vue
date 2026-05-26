@@ -32,8 +32,11 @@
 
     <!-- 添加按钮 -->
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">
-        ➕ 添加成员
+      <van-button round type="primary" class="add-btn" @click="openAddModal">
+        <span class="add-btn-content">
+          <van-icon name="plus" size="16" />
+          <span>新增成员</span>
+        </span>
       </van-button>
     </div>
 
@@ -76,13 +79,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onActivated, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { memberApi, accountApi, default as apiClient } from '../api'
+import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const loading = ref(false)
 const members = ref([])
 const memberStats = ref({})
+const lastLoadedAt = ref(0)
+const hasLoadedOnce = ref(false)
 const showModal = ref(false)
 const editingMember = ref(null)
 
@@ -102,13 +108,13 @@ const formatDate = (timestamp) => {
 const fetchMembers = async () => {
   loading.value = true
   try {
-    const data = await memberApi.list()
-    members.value = data?.members || []
+    const [membersData, accountsData] = await Promise.all([
+      memberApi.list(),
+      accountApi.list(),
+    ])
+    members.value = membersData?.members || []
 
-    // 获取每个成员的账户统计
-    const accountsData = await accountApi.list()
     const accounts = accountsData?.accounts || []
-
     const stats = {}
     members.value.forEach(m => {
       const memberAccounts = accounts.filter(a => a.member_id === m.id)
@@ -117,12 +123,21 @@ const fetchMembers = async () => {
       }
     })
     memberStats.value = stats
+    hasLoadedOnce.value = true
+    lastLoadedAt.value = Date.now()
   } catch (error) {
     console.error('Failed to fetch members:', error)
     showToast('加载失败')
   } finally {
     loading.value = false
   }
+}
+
+const ensureFreshData = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
+    return
+  }
+  await fetchMembers()
 }
 
 const openAddModal = () => {
@@ -199,7 +214,11 @@ const closeModal = () => {
 onMounted(() => {
   // 确保数据库结构是最新的
   apiClient.post('/migrate').catch(() => {})
-  fetchMembers()
+  ensureFreshData({ force: true })
+})
+
+onActivated(() => {
+  ensureFreshData()
 })
 </script>
 
@@ -208,7 +227,7 @@ onMounted(() => {
   min-height: 100vh;
   background: #f5f5f5;
   padding: 12px;
-  padding-bottom: 80px;
+  padding-bottom: var(--app-floating-page-space);
 }
 
 .member-list {
@@ -285,14 +304,25 @@ onMounted(() => {
 
 .add-btn-wrapper {
   position: fixed;
-  bottom: 70px;
-  left: 12px;
-  right: 12px;
+  right: 14px;
+  bottom: var(--app-floating-bottom);
+  z-index: 20;
 }
 
 .add-btn {
+  height: 42px;
+  padding: 0 14px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
+  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+}
+
+.add-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .modal-content {

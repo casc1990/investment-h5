@@ -39,7 +39,7 @@ const routes = [
   {
     path: '/ledger',
     name: 'ProfitLedger',
-    component: () => import('../views/ProfitLedger.vue'),
+    redirect: '/stats',
   },
   {
     path: '/members',

@@ -14,6 +14,10 @@
       </van-tabs>
     </div>
 
+    <div class="section nav-section">
+      <SectionShortcutNav :items="analysisLinks" />
+    </div>
+
     <div v-if="rangeSummary.latest" class="summary-card">
       <div class="summary-top">
         <div>
@@ -103,8 +107,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { showToast } from 'vant'
-import { positionApi, statsApi } from '../api'
-import { buildFundTrend, getProfitSnapshots, recordProfitSnapshot, summarizeProfitRange } from '../utils/profitLedger'
+import SectionShortcutNav from '../components/SectionShortcutNav.vue'
+import { formatAmount, formatSignedAmount, profitClass } from '../utils/formatters'
+import { buildFundTrend, getProfitSnapshots, summarizeProfitRange } from '../utils/profitLedger'
+import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 
 const periodOptions = [
   { label: '近7天', value: 7 },
@@ -115,6 +121,12 @@ const periodOptions = [
 const activePeriod = ref(30)
 const allSnapshots = ref([])
 const loading = ref(false)
+
+const analysisLinks = [
+  { label: '统计', to: '/stats', icon: '📈' },
+  { label: '台账', to: '/ledger', icon: '📒' },
+  { label: '顾投', to: '/advisory', icon: '🤖' },
+]
 
 const snapshots = computed(() => {
   const days = activePeriod.value
@@ -130,26 +142,7 @@ const snapshots = computed(() => {
 const rangeSummary = computed(() => summarizeProfitRange(snapshots.value))
 const fundTrend = computed(() => buildFundTrend(snapshots.value))
 
-const formatAmount = (num) => {
-  const val = Number(num || 0)
-  return val.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-}
-
-const formatSigned = (num) => {
-  const value = Number(num || 0)
-  const prefix = value > 0 ? '+' : ''
-  return `${prefix}${formatAmount(value)}`
-}
-
-const profitClass = (num) => {
-  const value = Number(num || 0)
-  if (value > 0) return 'positive'
-  if (value < 0) return 'negative'
-  return 'neutral'
-}
+const formatSigned = formatSignedAmount
 
 const refreshLocalSnapshots = () => {
   allSnapshots.value = getProfitSnapshots()
@@ -158,15 +151,10 @@ const refreshLocalSnapshots = () => {
 const captureSnapshot = async () => {
   loading.value = true
   try {
-    const [overviewData, positionsData] = await Promise.all([
-      statsApi.overview(),
-      positionApi.list(),
-    ])
-
-    recordProfitSnapshot({
-      summary: overviewData?.summary,
-      positions: positionsData?.positions || [],
-    })
+    const data = await captureProfitSnapshotFromApis()
+    if (!data.snapshotResult?.saved) {
+      throw new Error(data.snapshotResult?.reason || 'snapshot-save-failed')
+    }
 
     refreshLocalSnapshots()
     return true
@@ -206,6 +194,10 @@ onMounted(async () => {
   border-radius: 14px;
   padding: 16px;
   margin-bottom: 12px;
+}
+
+.nav-section {
+  padding: 12px 16px;
 }
 
 .ledger-header {

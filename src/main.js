@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { registerSW } from 'virtual:pwa-register'
 import App from './App.vue'
 import router from './router'
 import { Icon } from 'vant'
@@ -20,6 +21,19 @@ import 'vant/lib/popup/style'
 import 'vant/lib/action-sheet/style'
 import 'vant/lib/icon/style'
 import 'vant/lib/badge/style'
+
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateSW(true)
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return
+    setInterval(() => {
+      registration.update().catch(() => {})
+    }, 60 * 1000)
+  },
+})
 
 const app = createApp(App)
 app.use(router)

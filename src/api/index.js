@@ -4,8 +4,10 @@
  */
 
 import axios from 'axios'
+import { shouldLogApi } from '../utils/appShell'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+const ENABLE_API_LOG = shouldLogApi(import.meta.env)
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -22,7 +24,9 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+    if (ENABLE_API_LOG) {
+      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+    }
     return config
   },
   error => {
@@ -33,7 +37,9 @@ apiClient.interceptors.request.use(
 // 响应拦截
 apiClient.interceptors.response.use(
   response => {
-    console.log('[API Response]', response.config.url, 'status:', response.status, 'data:', JSON.stringify(response.data)?.slice(0, 200))
+    if (ENABLE_API_LOG) {
+      console.log('[API Response]', response.config.url, 'status:', response.status, 'data:', JSON.stringify(response.data)?.slice(0, 200))
+    }
     if (response.status === 401) {
       localStorage.removeItem('auth_token')
       localStorage.removeItem('auth_username')
@@ -46,7 +52,9 @@ apiClient.interceptors.response.use(
     return response.data
   },
   error => {
-    console.error('[API Error]', error.config?.url, error.message, 'status:', error.response?.status, 'data:', JSON.stringify(error.response?.data)?.slice(0, 200))
+    if (ENABLE_API_LOG) {
+      console.error('[API Error]', error.config?.url, error.message, 'status:', error.response?.status, 'data:', JSON.stringify(error.response?.data)?.slice(0, 200))
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('auth_token')
       localStorage.removeItem('auth_username')

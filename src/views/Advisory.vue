@@ -3,6 +3,9 @@
     <div class="tips-card">
       <div class="tips-title">🤖 顾投组合日报录入</div>
       <div class="tips-text">每个组合每天录一次：总金额、当日收益、总收益、收益率。日报会自动按成员/账户汇总。</div>
+      <div class="tips-nav">
+        <SectionShortcutNav :items="analysisLinks" />
+      </div>
     </div>
 
     <div class="product-list">
@@ -48,7 +51,12 @@
     <van-loading v-if="loading" type="spinner" class="loading" />
 
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">➕ 添加顾投组合</van-button>
+      <van-button round type="primary" class="add-btn" @click="openAddModal">
+        <span class="add-btn-content">
+          <van-icon name="plus" size="16" />
+          <span>新增顾投</span>
+        </span>
+      </van-button>
     </div>
 
     <van-popup v-model:show="showModal" position="bottom" round>
@@ -105,9 +113,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import { showConfirmDialog, showSuccessToast, showToast } from 'vant'
 import { accountApi, advisoryApi } from '../api'
+import SectionShortcutNav from '../components/SectionShortcutNav.vue'
+import { formatAmount, formatPercent, profitClass } from '../utils/formatters'
+import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const loading = ref(false)
 const showModal = ref(false)
@@ -115,6 +126,8 @@ const showAccountPicker = ref(false)
 const editingProduct = ref(null)
 const products = ref([])
 const accounts = ref([])
+const lastLoadedAt = ref(0)
+const hasLoadedOnce = ref(false)
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -130,19 +143,29 @@ const formData = ref({
   remark: '',
 })
 
+const analysisLinks = [
+  { label: '统计', to: '/stats', icon: '📈' },
+  { label: '台账', to: '/ledger', icon: '📒' },
+  { label: '顾投', to: '/advisory', icon: '🤖' },
+]
+
 const accountOptions = computed(() => [
   { text: '不绑定账户', value: '', accountName: '' },
   ...accounts.value.map(account => ({
-    text: `${account['账户名称']}（${account['渠道']}）`,
+    text: `${account.account_name}（${account.channel}）`,
     value: account.id,
-    accountName: account['账户名称'],
+    accountName: account.account_name,
   })),
 ])
 
-const formatAmount = (num) => Number(num || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const signedAmount = (num) => `${Number(num || 0) >= 0 ? '+' : ''}¥${formatAmount(num)}`
-const signedRate = (num) => `${Number(num || 0) >= 0 ? '+' : ''}${Number(num || 0).toFixed(2)}%`
-const profitClass = (num) => ({ positive: Number(num || 0) >= 0, negative: Number(num || 0) < 0 })
+const signedAmount = (num) => {
+  const value = Number(num || 0)
+  return `${value >= 0 ? '+' : ''}¥${formatAmount(value)}`
+}
+const signedRate = (num) => {
+  const value = Number(num || 0)
+  return `${value >= 0 ? '+' : ''}${formatPercent(value)}`
+}
 const toNumber = (value) => value === '' || value === null || value === undefined ? 0 : Number(value)
 
 const fetchAccounts = async () => {
@@ -161,6 +184,15 @@ const fetchProducts = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const ensureFreshData = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
+    return
+  }
+  await Promise.all([fetchAccounts(), fetchProducts()])
+  hasLoadedOnce.value = true
+  lastLoadedAt.value = Date.now()
 }
 
 const resetForm = () => {
@@ -269,9 +301,12 @@ const closeModal = () => {
   resetForm()
 }
 
-onMounted(async () => {
-  await fetchAccounts()
-  await fetchProducts()
+onMounted(() => {
+  ensureFreshData({ force: true })
+})
+
+onActivated(() => {
+  ensureFreshData()
 })
 </script>
 
@@ -280,7 +315,7 @@ onMounted(async () => {
   min-height: 100vh;
   background: #f5f5f5;
   padding: 12px;
-  padding-bottom: 80px;
+  padding-bottom: var(--app-floating-page-space);
 }
 
 .tips-card,
@@ -304,6 +339,10 @@ onMounted(async () => {
   color: #666;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.tips-nav {
+  margin-top: 12px;
 }
 
 .card-header,
@@ -368,12 +407,26 @@ onMounted(async () => {
 }
 
 .add-btn-wrapper {
-  position: sticky;
-  bottom: 12px;
+  position: fixed;
+  right: 14px;
+  bottom: var(--app-floating-bottom);
+  z-index: 20;
 }
 
 .add-btn {
-  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+}
+
+.add-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .modal-content {

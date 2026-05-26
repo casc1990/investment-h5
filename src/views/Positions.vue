@@ -9,19 +9,23 @@
         </van-dropdown-menu>
       </div>
       <van-button class="sync-all-btn" size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
-        {{ syncingAll ? '同步中...' : '同步所有' }}
+        {{ syncingAll ? '同步中...' : '同步净值' }}
       </van-button>
     </div>
 
     <!-- 顶部统计卡片 -->
     <div class="summary-card" v-if="summary">
-      <div class="summary-asset">
-        <div class="summary-label">总资产(元)</div>
-        <div class="summary-amount">{{ formatAmount(summary.totalMarketValue) }}</div>
+      <div class="summary-header" @click="summaryExpanded = !summaryExpanded">
+        <div class="summary-asset">
+          <div class="summary-label">总资产(元)</div>
+          <div class="summary-amount">{{ formatAmount(summary.totalMarketValue) }}</div>
+          <div class="summary-hint">{{ summaryExpanded ? '收起统计' : '展开统计' }}</div>
+        </div>
+        <van-icon :name="summaryExpanded ? 'arrow-up' : 'arrow-down'" class="summary-toggle-icon" />
       </div>
-      <div class="summary-profit-row">
+      <div v-if="summaryExpanded" class="summary-profit-row">
         <div class="summary-profit-item">
-          <div class="sp-label">昨日收益</div>
+          <div class="sp-label">日收益</div>
           <div class="sp-value" :class="{ positive: summary.totalYesterdayProfit >= 0, negative: summary.totalYesterdayProfit < 0 }">
             {{ summary.totalYesterdayProfit >= 0 ? '+' : '' }}{{ formatAmount(summary.totalYesterdayProfit) }}
           </div>
@@ -53,7 +57,7 @@
       <!-- 表头 -->
       <div class="list-header">
         <span class="header-col header-name">名称</span>
-        <span class="header-col header-center">总资产/昨日收益</span>
+        <span class="header-col header-center">总资产/日收益</span>
         <span class="header-col header-right">持有收益/率</span>
       </div>
 
@@ -76,11 +80,14 @@
           <div class="collapsed-data">
             <div class="collapsed-center">
               <span class="collapsed-value">¥{{ formatAmount(Number(position.cost) + Number(position.current_profit)) }}</span>
-              <span class="collapsed-yesterday" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
-                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.yesterday_profit) }}
+              <span class="collapsed-yesterday" :class="{ positive: Number(position.daily_profit ?? position.yesterday_profit) >= 0, negative: Number(position.daily_profit ?? position.yesterday_profit) < 0 }">
+                {{ Number(position.daily_profit ?? position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.daily_profit ?? position.yesterday_profit) }}
               </span>
             </div>
             <div class="collapsed-right">
+              <span v-if="position.daily_profit_updated" class="profit-update-badge">
+                {{ position.daily_profit_update_text || '今日收益更新' }}
+              </span>
               <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
                 {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
               </span>
@@ -119,9 +126,20 @@
               </span>
             </div>
             <div class="data-item">
-              <span class="data-label">昨日收益</span>
-              <span class="data-value profit" :class="{ positive: Number(position.yesterday_profit) >= 0, negative: Number(position.yesterday_profit) < 0 }">
-                {{ Number(position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.yesterday_profit) }}
+              <span class="data-label">
+                {{ position.daily_profit_label || '昨日收益' }}
+                <span v-if="position.daily_profit_updated" class="profit-update-badge inline">
+                  {{ position.daily_profit_update_text || '今日收益更新' }}
+                </span>
+              </span>
+              <span class="data-value profit" :class="{ positive: Number(position.daily_profit ?? position.yesterday_profit) >= 0, negative: Number(position.daily_profit ?? position.yesterday_profit) < 0 }">
+                {{ Number(position.daily_profit ?? position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatNumber(position.daily_profit ?? position.yesterday_profit) }}
+              </span>
+            </div>
+            <div class="data-item">
+              <span class="data-label">{{ position.daily_profit_rate_label || '昨日收益率' }}</span>
+              <span class="data-value profit" :class="{ positive: Number(position.daily_profit_rate ?? position.yesterday_profit_rate) >= 0, negative: Number(position.daily_profit_rate ?? position.yesterday_profit_rate) < 0 }">
+                {{ Number(position.daily_profit_rate ?? position.yesterday_profit_rate).toFixed(2) }}%
               </span>
             </div>
           </div>
@@ -297,9 +315,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onActivated, onMounted } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
+import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const syncingId = ref(null)
 const syncingAll = ref(false)
@@ -309,6 +328,10 @@ const positions = computed(() =>
   [...positionsRaw.value].sort((a, b) => Number(b.profit_rate || 0) - Number(a.profit_rate || 0))
 )
 const expandedIds = ref([])
+const lastLoadedAt = ref(0)
+const hasLoadedOnce = ref(false)
+const metaLastLoadedAt = ref(0)
+const metaLoadedOnce = ref(false)
 const summary = ref(null)
 const accounts = ref([])
 const members = ref([])
@@ -319,6 +342,7 @@ const showMemberPicker = ref(false)
 const showAccountPicker = ref(false)
 const showDividendPicker = ref(false)
 const editingPosition = ref(null)
+const summaryExpanded = ref(false)
 
 const dividendOptions = [
   { text: '红利再投', value: '红利再投' },
@@ -338,6 +362,9 @@ const formData = ref({
   dividendMethod: '红利再投',
 })
 
+const advisoryChannels = new Set(['雪球顾投'])
+const visibleAccounts = computed(() => accounts.value.filter(a => !advisoryChannels.has(a.channel)))
+
 // 成员选项（筛选栏）
 const memberOptions = computed(() => [
   { text: '全部成员', value: null },
@@ -347,11 +374,11 @@ const memberOptions = computed(() => [
 // 筛选后的账户选项（受成员筛选影响）
 const filteredAccountOptions = computed(() => {
   const filtered = selectedMemberId.value
-    ? accounts.value.filter(a => a.member_id === selectedMemberId.value)
-    : accounts.value
+    ? visibleAccounts.value.filter(a => a.member_id === selectedMemberId.value)
+    : visibleAccounts.value
   return [
     { text: '全部账户', value: null },
-    ...filtered.map(a => ({ text: a['账户名称'], value: a.id }))
+    ...filtered.map(a => ({ text: a.account_name, value: a.id }))
   ]
 })
 
@@ -364,7 +391,7 @@ const selectedMemberTitle = computed(() => {
 const selectedAccountTitle = computed(() => {
   if (!selectedAccountId.value) return '全部账户'
   const a = accounts.value.find(a => a.id === selectedAccountId.value)
-  return a ? a['账户名称'] : '全部账户'
+  return a ? a.account_name : '全部账户'
 })
 
 // 成员选择器选项
@@ -375,9 +402,9 @@ const memberPickerOptions = computed(() =>
 // 账户选择器选项（受成员筛选影响）
 const accountPickerOptions = computed(() => {
   const filtered = formData.value.memberId
-    ? accounts.value.filter(a => a.member_id === formData.value.memberId)
-    : accounts.value
-  return filtered.map(a => ({ text: a['账户名称'], value: a.id }))
+    ? visibleAccounts.value.filter(a => a.member_id === formData.value.memberId)
+    : visibleAccounts.value
+  return filtered.map(a => ({ text: a.account_name, value: a.id }))
 })
 
 const formatNumber = (num) => {
@@ -453,11 +480,25 @@ const fetchAccounts = async () => {
   }
 }
 
+const ensureFreshMetaData = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({ hasData: metaLoadedOnce.value, lastLoadedAt: metaLastLoadedAt.value, force, ttl: 5 * 60 * 1000 })) {
+    return
+  }
+
+  try {
+    await Promise.all([fetchMembers(), fetchAccounts()])
+    metaLoadedOnce.value = true
+    metaLastLoadedAt.value = Date.now()
+  } catch (error) {
+    console.error('Failed to refresh meta data:', error)
+  }
+}
+
 const fetchPositions = async () => {
   loading.value = true
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
-    positionsRaw.value = data?.positions || []
+    positionsRaw.value = (data?.positions || []).filter(position => position.account_channel !== '雪球顾投')
     updateSummary()
   } catch (error) {
     console.error('Failed to fetch positions:', error)
@@ -465,6 +506,44 @@ const fetchPositions = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const buildPositionSignatureMap = (list) => new Map(
+  (list || []).map(item => [
+    item.id,
+    JSON.stringify({
+      yesterday_profit: item.yesterday_profit,
+      current_profit: item.current_profit,
+      nav_dwjz: item.nav_dwjz,
+      nav_jzrq: item.nav_jzrq,
+    }),
+  ])
+)
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+const refreshPositionsUntilChanged = async (previousPositions, maxAttempts = 4) => {
+  const previousMap = buildPositionSignatureMap(previousPositions)
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) {
+      await wait(2000 * attempt)
+    }
+
+    const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
+    const nextPositions = data?.positions || []
+    const nextMap = buildPositionSignatureMap(nextPositions)
+    const hasChanged = nextPositions.some(item => nextMap.get(item.id) !== previousMap.get(item.id))
+
+    positionsRaw.value = nextPositions
+    updateSummary()
+
+    if (hasChanged || nextPositions.length !== previousPositions.length || attempt === maxAttempts - 1) {
+      return hasChanged
+    }
+  }
+
+  return false
 }
 
 const handleSubmit = async () => {
@@ -536,9 +615,10 @@ const handleSync = async (position) => {
   if (syncingId.value === position.id) return
   syncingId.value = position.id
   try {
+    const previousPositions = positionsRaw.value.map(item => ({ ...item }))
     await marketApi.syncFund(position.fund_code)
-    showToast('同步成功')
-    fetchPositions()
+    const changed = await refreshPositionsUntilChanged(previousPositions, 3)
+    showToast(changed ? '同步成功，净值已刷新' : '同步已提交，数据可能稍后更新')
   } catch (error) {
     console.error('同步失败:', error)
     showToast('同步失败')
@@ -551,9 +631,10 @@ const handleSyncAll = async () => {
   if (syncingAll.value) return
   syncingAll.value = true
   try {
+    const previousPositions = positionsRaw.value.map(item => ({ ...item }))
     await marketApi.sync()
-    showToast('全部基金净值同步成功')
-    await fetchPositions()
+    const changed = await refreshPositionsUntilChanged(previousPositions, 4)
+    showToast(changed ? '全部基金净值已刷新' : '同步已提交，昨日收益可能有几秒延迟')
   } catch (error) {
     console.error('同步所有失败:', error)
     showToast('同步所有失败')
@@ -643,8 +724,23 @@ const closeModal = () => {
   }
 }
 
+const ensureFreshData = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
+    ensureFreshMetaData().catch(() => {})
+    return
+  }
+  await fetchPositions()
+  hasLoadedOnce.value = true
+  lastLoadedAt.value = Date.now()
+  ensureFreshMetaData({ force }).catch(() => {})
+}
+
 onMounted(() => {
-  Promise.all([fetchMembers(), fetchAccounts(), fetchPositions()])
+  ensureFreshData({ force: true })
+})
+
+onActivated(() => {
+  ensureFreshData()
 })
 </script>
 
@@ -652,7 +748,7 @@ onMounted(() => {
 .positions-page {
   min-height: 100vh;
   background: #f5f5f5;
-  padding-bottom: 80px;
+  padding-bottom: var(--app-floating-page-space);
 }
 
 .filter-bar {
@@ -681,16 +777,34 @@ onMounted(() => {
 /* 顶部统计卡片 */
 .summary-card {
   background: linear-gradient(135deg, #1E80FF 0%, #0066CC 100%);
-  padding: 20px 20px 16px;
+  padding: 18px 20px 14px;
   color: white;
   margin: 0 12px;
   border-radius: 12px;
   margin-top: 12px;
 }
 
+.summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .summary-asset {
-  text-align: center;
-  margin-bottom: 16px;
+  text-align: left;
+  flex: 1;
+}
+
+.summary-toggle-icon {
+  font-size: 18px;
+  opacity: 0.95;
+}
+
+.summary-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.82;
 }
 
 .summary-label {
@@ -712,6 +826,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   padding: 12px 0;
+  margin-top: 14px;
 }
 
 .summary-profit-item {
@@ -867,6 +982,29 @@ onMounted(() => {
   min-width: 80px;
 }
 
+.profit-update-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-end;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #1677ff;
+  background: #e8f3ff;
+  border: 1px solid #bfdbff;
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+
+.profit-update-badge.inline {
+  align-self: flex-start;
+  margin-left: 0;
+  margin-bottom: 0;
+  vertical-align: middle;
+}
+
 .collapsed-profit {
   font-size: 15px;
   font-weight: 700;
@@ -940,6 +1078,10 @@ onMounted(() => {
 }
 
 .data-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
   font-size: 12px;
   color: #999;
 }
@@ -1054,7 +1196,7 @@ onMounted(() => {
 .add-btn-wrapper {
   position: fixed;
   right: 14px;
-  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  bottom: var(--app-floating-bottom);
   z-index: 20;
 }
 

@@ -4,17 +4,17 @@
     <div class="account-list">
       <div v-for="account in accounts" :key="account.id" class="account-card">
         <div class="account-header">
-          <div class="account-icon">{{ getChannelIcon(account['渠道']) }}</div>
+          <div class="account-icon">{{ getChannelIcon(account.channel) }}</div>
           <div class="account-info">
-            <div class="account-name">{{ account['账户名称'] }}</div>
-            <div class="account-channel">{{ account['渠道'] }}</div>
+            <div class="account-name">{{ account.account_name }}</div>
+            <div class="account-channel">{{ account.channel }}</div>
           </div>
-          <div class="account-status" :class="account['账户状态'] === '正常' ? 'active' : 'inactive'">
-            {{ account['账户状态'] }}
+          <div class="account-status" :class="account.status === '正常' ? 'active' : 'inactive'">
+            {{ account.status }}
           </div>
         </div>
-        <div class="account-remark" v-if="account['备注']">
-          📝 {{ account['备注'] }}
+        <div class="account-remark" v-if="account.remark">
+          📝 {{ account.remark }}
         </div>
         <!-- 成员标签 -->
         <div class="account-member" v-if="account.member_name">
@@ -34,8 +34,11 @@
 
     <!-- 添加按钮 -->
     <div class="add-btn-wrapper">
-      <van-button round type="primary" size="large" class="add-btn" @click="openAddModal">
-        ➕ 添加账户
+      <van-button round type="primary" class="add-btn" @click="openAddModal">
+        <span class="add-btn-content">
+          <van-icon name="plus" size="16" />
+          <span>新增账户</span>
+        </span>
       </van-button>
     </div>
 
@@ -108,13 +111,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onActivated, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { accountApi, memberApi } from '../api'
+import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const loading = ref(false)
 const accounts = ref([])
 const members = ref([])
+const lastLoadedAt = ref(0)
+const hasLoadedOnce = ref(false)
 const showAddModal = ref(false)
 const showChannelPicker = ref(false)
 const showMemberPicker = ref(false)
@@ -186,6 +192,15 @@ const fetchAccounts = async () => {
   }
 }
 
+const ensureFreshData = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
+    return
+  }
+  await Promise.all([fetchMembers(), fetchAccounts()])
+  hasLoadedOnce.value = true
+  lastLoadedAt.value = Date.now()
+}
+
 const openAddModal = () => {
   editingAccount.value = null
   editingAccountMemberId.value = null
@@ -203,11 +218,11 @@ const handleEdit = (account) => {
   editingAccount.value = account
   editingAccountMemberId.value = account.member_id || null
   formData.value = {
-    accountName: account['账户名称'],
-    channel: account['渠道'],
+    accountName: account.account_name,
+    channel: account.channel,
     memberId: account.member_id || '',
     memberName: account.member_name || '',
-    remark: account['备注'] || '',
+    remark: account.remark || '',
   }
   showAddModal.value = true
 }
@@ -216,7 +231,7 @@ const handleDelete = async (account) => {
   try {
     await showConfirmDialog({
       title: '确认删除',
-      message: `确定要删除账户 "${account['账户名称']}" 吗？`,
+      message: `确定要删除账户 "${account.account_name}" 吗？`,
     })
     await accountApi.delete(account.id)
     showSuccessToast('删除成功')
@@ -284,8 +299,11 @@ const closeModal = () => {
 }
 
 onMounted(() => {
-  fetchMembers()
-  fetchAccounts()
+  ensureFreshData({ force: true })
+})
+
+onActivated(() => {
+  ensureFreshData()
 })
 </script>
 
@@ -294,7 +312,7 @@ onMounted(() => {
   min-height: 100vh;
   background: #f5f5f5;
   padding: 12px;
-  padding-bottom: 80px;
+  padding-bottom: var(--app-floating-page-space);
 }
 
 .account-list {
@@ -386,14 +404,25 @@ onMounted(() => {
 
 .add-btn-wrapper {
   position: fixed;
-  bottom: 70px;
-  left: 12px;
-  right: 12px;
+  right: 14px;
+  bottom: var(--app-floating-bottom);
+  z-index: 20;
 }
 
 .add-btn {
+  height: 42px;
+  padding: 0 14px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
+  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+}
+
+.add-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .modal-content {

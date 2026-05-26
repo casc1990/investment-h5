@@ -42,14 +42,49 @@ function getChinaDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-export function getDailyProfitMeta(navDate, now = new Date()) {
-  const isTodayUpdated = Boolean(navDate) && navDate === getChinaDateString(now);
+function addDays(date, days) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function getPreviousChinaTradingDateString(now = new Date()) {
+  let cursor = addDays(now, -1);
+
+  while (true) {
+    const weekday = new Intl.DateTimeFormat('en', {
+      timeZone: 'Asia/Shanghai',
+      weekday: 'short',
+    }).format(cursor);
+
+    if (weekday !== 'Sat' && weekday !== 'Sun') {
+      return getChinaDateString(cursor);
+    }
+
+    cursor = addDays(cursor, -1);
+  }
+}
+
+function isQdiiFund(fundName = '') {
+  return /QDII/i.test(String(fundName || ''));
+}
+
+export function getDailyProfitMeta(navDate, now = new Date(), fundName = '') {
+  const chinaToday = getChinaDateString(now);
+  const previousChinaTradingDate = getPreviousChinaTradingDateString(now);
+  const isTodayUpdated = Boolean(navDate) && navDate === chinaToday;
+  const isQdiiLatestUpdated = Boolean(navDate)
+    && !isTodayUpdated
+    && isQdiiFund(fundName)
+    && navDate === previousChinaTradingDate;
 
   return {
     daily_profit_label: isTodayUpdated ? '今日收益' : '昨日收益',
     daily_profit_rate_label: isTodayUpdated ? '今日收益率' : '昨日收益率',
-    daily_profit_updated: isTodayUpdated,
-    daily_profit_update_text: isTodayUpdated ? '今日收益更新' : '',
+    daily_profit_updated: isTodayUpdated || isQdiiLatestUpdated,
+    daily_profit_update_text: isTodayUpdated
+      ? '今日收益更新'
+      : (isQdiiLatestUpdated ? '最新收益已更新' : ''),
   };
 }
 
@@ -188,7 +223,7 @@ export async function onRequest(context) {
           ? parseFloat((((confirmedNav - prevNav) / prevNav) * 100).toFixed(4))
           : (r.nav_gszzl != null ? r.nav_gszzl : null));
       const navDate = r.nav_jzrq || null;
-      const dailyProfitMeta = getDailyProfitMeta(navDate);
+      const dailyProfitMeta = getDailyProfitMeta(navDate, new Date(), r.fund_name || '');
 
       return {
         id: r.id,
