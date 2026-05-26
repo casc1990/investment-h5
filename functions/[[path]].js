@@ -3,6 +3,11 @@
  * 不依赖外部 API，中国可直接访问
  */
 
+import { rebuildPositionFromTrades, normalizeTradeType, toNumber, TRADE_TYPES } from '../shared/tradeEngine.js'
+
+let runtimeSchemaInitPromise = null;
+let advisorySchemaInitPromise = null;
+
 // 生成 UUID
 function generateId() {
   return crypto.randomUUID().replace(/-/g, '').substring(0, 16);
@@ -22,6 +27,41 @@ function jsonResponse(data, status = 200) {
       'Expires': '0',
     },
   });
+}
+
+function getChinaDateString(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find(part => part.type === 'year')?.value;
+  const month = parts.find(part => part.type === 'month')?.value;
+  const day = parts.find(part => part.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+}
+
+export function getDailyProfitMeta(navDate, now = new Date()) {
+  const isTodayUpdated = Boolean(navDate) && navDate === getChinaDateString(now);
+
+  return {
+    daily_profit_label: isTodayUpdated ? '今日收益' : '昨日收益',
+    daily_profit_rate_label: isTodayUpdated ? '今日收益率' : '昨日收益率',
+    daily_profit_updated: isTodayUpdated,
+    daily_profit_update_text: isTodayUpdated ? '今日收益更新' : '',
+  };
+}
+
+export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryDailyProfit = 0) {
+  const fundProfit = Number(positionDailyProfit || 0);
+  const advisoryProfit = Number(advisoryDailyProfit || 0);
+
+  return {
+    totalYesterdayProfit: Number((fundProfit + advisoryProfit).toFixed(2)),
+    totalPositionYesterdayProfit: Number(fundProfit.toFixed(2)),
+    totalAdvisoryYesterdayProfit: Number(advisoryProfit.toFixed(2)),
+  };
 }
 
 // 主处理函数
@@ -48,32 +88,6 @@ export async function onRequest(context) {
   }
 
   try {
-    // ========== 认证：建表（自动初始化） ==========
-    // users 表：存储管理员账户
-    const userTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").all();
-    if (userTableInfo.results.length === 0) {
-      await env.DB.prepare(`
-        CREATE TABLE users (
-          id TEXT PRIMARY KEY,
-          username TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          created_at INTEGER DEFAULT (unixepoch())
-        )
-      `).run();
-    }
-    // auth_tokens 表：存储登录令牌
-    const tokenTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_tokens'").all();
-    if (tokenTableInfo.results.length === 0) {
-      await env.DB.prepare(`
-        CREATE TABLE auth_tokens (
-          id TEXT PRIMARY KEY,
-          token TEXT UNIQUE NOT NULL,
-          created_at INTEGER DEFAULT (unixepoch()),
-          expires_at INTEGER
-        )
-      `).run();
-    }
-
     // 验证 token 的 helper
     async function verifyToken(request) {
       const authHeader = request.headers.get('Authorization') || '';
@@ -121,6 +135,321 @@ export async function onRequest(context) {
         `).run();
       }
     }
+
+    async function ensureMembersSchema() {
+      const tableInfo = await env.DB.prepare("PRAGMA table_info(members)").all();
+      const columns = new Set((tableInfo.results || []).map(col => col.name));
+      if (!columns.has('remark')) {
+        await env.DB.prepare("ALTER TABLE members ADD COLUMN remark TEXT DEFAULT ''").run();
+      }
+    }
+
+    function serializeAccountRow(r) {
+      return {
+        id: r.id,
+        account_name: r.name,
+        channel: r.channel,
+        status: r.status,
+        remark: r.remark || '',
+        member_id: r.member_id,
+        member_name: r.member_name || '',
+        created_at: r.created_at,
+      };
+    }
+
+    function serializePositionRow(r) {
+      const shares = r.quantity || 0;
+      const cost = r.cost || 0;
+      const estimateNav = r.nav_gsz || null;
+      const confirmedNav = r.nav_dwjz || 0;
+      // 默认和支付宝持有页口径对齐：金额/持有收益优先按确认净值 dwjz 展示。
+      // gsz 仅作为盘中估算信息保留给前端详情展示，不直接覆盖主列表金额。
+      const marketNav = confirmedNav || estimateNav || 0;
+      const prevNav = r.prev_nav || 0;
+      const yesterdayProfit = shares > 0 && confirmedNav > 0 && prevNav > 0
+        ? parseFloat(((confirmedNav - prevNav) * shares).toFixed(4))
+        : 0;
+      const currentMarketValue = shares > 0 && marketNav > 0
+        ? parseFloat((shares * marketNav).toFixed(4))
+        : 0;
+      const previousMarketValue = parseFloat((currentMarketValue - yesterdayProfit).toFixed(4));
+      const yesterdayProfitRate = previousMarketValue > 0
+        ? parseFloat(((yesterdayProfit / previousMarketValue) * 100).toFixed(4))
+        : 0;
+      const currentProfit = parseFloat((currentMarketValue - cost).toFixed(4));
+      const profitRate = cost > 0
+        ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
+        : 0;
+      const hasIntradayEstimate = estimateNav > 0 && confirmedNav > 0
+        && Math.abs(estimateNav - confirmedNav) > 0.000001;
+      const navGszzl = hasIntradayEstimate
+        ? parseFloat((((estimateNav - confirmedNav) / confirmedNav) * 100).toFixed(4))
+        : (confirmedNav > 0 && prevNav > 0
+          ? parseFloat((((confirmedNav - prevNav) / prevNav) * 100).toFixed(4))
+          : (r.nav_gszzl != null ? r.nav_gszzl : null));
+      const navDate = r.nav_jzrq || null;
+      const dailyProfitMeta = getDailyProfitMeta(navDate);
+
+      return {
+        id: r.id,
+        account_id: r.account_id,
+        account_name: r.account_name || '',
+        account_channel: r.account_channel || '',
+        member_id: r.member_id,
+        member_name: r.member_name || '',
+        member_emoji: r.member_emoji || '👤',
+        fund_code: r.fund_code,
+        fund_name: r.fund_name || '',
+        shares,
+        cost,
+        current_market_value: currentMarketValue,
+        current_profit: currentProfit,
+        profit_rate: profitRate,
+        yesterday_profit: yesterdayProfit,
+        yesterday_profit_rate: yesterdayProfitRate,
+        daily_profit: yesterdayProfit,
+        daily_profit_label: dailyProfitMeta.daily_profit_label,
+        daily_profit_rate: yesterdayProfitRate,
+        daily_profit_rate_label: dailyProfitMeta.daily_profit_rate_label,
+        daily_profit_updated: dailyProfitMeta.daily_profit_updated,
+        daily_profit_update_text: dailyProfitMeta.daily_profit_update_text,
+        initial_profit: r.initial_profit || 0,
+        realized_profit: r.realized_profit || 0,
+        cash_dividend: r.cash_dividend || 0,
+        total_buy_amount: r.total_buy_amount || 0,
+        total_sell_amount: r.total_sell_amount || 0,
+        opening_quantity: r.opening_quantity ?? shares,
+        opening_cost: r.opening_cost ?? cost,
+        opening_initial_profit: r.opening_initial_profit ?? (r.initial_profit || 0),
+        dividend_method: r.dividend_method || '红利再投',
+        created_at: r.created_at,
+        nav_gsz: estimateNav,
+        nav_gszzl: navGszzl,
+        nav_dwjz: confirmedNav,
+        nav_jzrq: r.nav_jzrq || null,
+      };
+    }
+
+    async function ensureColumn(tableName, columnName, definition) {
+      const { results } = await env.DB.prepare(`PRAGMA table_info(${tableName})`).all();
+      if (!results.some(column => column.name === columnName)) {
+        await env.DB.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`).run();
+      }
+    }
+
+    async function ensureLedgerSchemas() {
+      await ensureColumn('positions', 'opening_quantity', 'opening_quantity REAL');
+      await ensureColumn('positions', 'opening_cost', 'opening_cost REAL');
+      await ensureColumn('positions', 'opening_initial_profit', 'opening_initial_profit REAL');
+      await ensureColumn('positions', 'realized_profit', 'realized_profit REAL DEFAULT 0');
+      await ensureColumn('positions', 'cash_dividend', 'cash_dividend REAL DEFAULT 0');
+      await ensureColumn('positions', 'total_buy_amount', 'total_buy_amount REAL DEFAULT 0');
+      await ensureColumn('positions', 'total_sell_amount', 'total_sell_amount REAL DEFAULT 0');
+      await ensureColumn('trades', 'fund_name', 'fund_name TEXT');
+      await ensureColumn('trades', 'note', 'note TEXT');
+      await ensureColumn('trades', 'target_quantity', 'target_quantity REAL');
+      await ensureColumn('trades', 'target_cost', 'target_cost REAL');
+      await ensureColumn('trades', 'target_initial_profit', 'target_initial_profit REAL');
+      await ensureColumn('trades', 'updated_at', 'updated_at INTEGER');
+
+      await env.DB.prepare(`
+        UPDATE positions
+        SET
+          opening_quantity = COALESCE(opening_quantity, quantity, 0),
+          opening_cost = COALESCE(opening_cost, cost, amount, 0),
+          opening_initial_profit = COALESCE(opening_initial_profit, initial_profit, 0),
+          realized_profit = COALESCE(realized_profit, 0),
+          cash_dividend = COALESCE(cash_dividend, 0),
+          total_buy_amount = COALESCE(total_buy_amount, 0),
+          total_sell_amount = COALESCE(total_sell_amount, 0)
+        WHERE
+          opening_quantity IS NULL OR opening_cost IS NULL OR opening_initial_profit IS NULL OR
+          realized_profit IS NULL OR cash_dividend IS NULL OR total_buy_amount IS NULL OR total_sell_amount IS NULL
+      `).run();
+    }
+
+    async function ensureRuntimeSchemaOnce() {
+      if (!runtimeSchemaInitPromise) {
+        runtimeSchemaInitPromise = (async () => {
+          const userTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").all();
+          if (userTableInfo.results.length === 0) {
+            await env.DB.prepare(`
+              CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at INTEGER DEFAULT (unixepoch())
+              )
+            `).run();
+          }
+
+          const tokenTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_tokens'").all();
+          if (tokenTableInfo.results.length === 0) {
+            await env.DB.prepare(`
+              CREATE TABLE auth_tokens (
+                id TEXT PRIMARY KEY,
+                token TEXT UNIQUE NOT NULL,
+                created_at INTEGER DEFAULT (unixepoch()),
+                expires_at INTEGER
+              )
+            `).run();
+          }
+
+          await ensureMembersSchema();
+          await ensureLedgerSchemas();
+        })().catch(error => {
+          runtimeSchemaInitPromise = null;
+          throw error;
+        });
+      }
+
+      return runtimeSchemaInitPromise;
+    }
+
+    async function ensureAdvisorySchemaOnce() {
+      if (!advisorySchemaInitPromise) {
+        advisorySchemaInitPromise = ensureAdvisoryTables().catch(error => {
+          advisorySchemaInitPromise = null;
+          throw error;
+        });
+      }
+
+      return advisorySchemaInitPromise;
+    }
+
+    async function fetchPositionDetailById(id) {
+      const { results } = await env.DB.prepare(
+        `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
+                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                s.prev_nav
+         FROM positions p
+         LEFT JOIN accounts a ON p.account_id = a.id
+         LEFT JOIN members m ON a.member_id = m.id
+         LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+         WHERE p.id = ?`
+      ).bind(id).all();
+      return results[0] || null;
+    }
+
+    async function fetchBasePositionByAccountFund(accountId, fundCode) {
+      const { results } = await env.DB.prepare(
+        'SELECT * FROM positions WHERE account_id = ? AND fund_code = ? ORDER BY created_at ASC, id ASC LIMIT 1'
+      ).bind(accountId, fundCode).all();
+      return results[0] || null;
+    }
+
+    async function seedOpeningSnapshot(position) {
+      if (!position) return null;
+      const openingQuantity = position.opening_quantity ?? position.quantity ?? 0;
+      const openingCost = position.opening_cost ?? position.cost ?? position.amount ?? 0;
+      const openingInitialProfit = position.opening_initial_profit ?? position.initial_profit ?? 0;
+      if (position.opening_quantity == null || position.opening_cost == null || position.opening_initial_profit == null) {
+        await env.DB.prepare(
+          `UPDATE positions
+           SET opening_quantity = COALESCE(opening_quantity, ?),
+               opening_cost = COALESCE(opening_cost, ?),
+               opening_initial_profit = COALESCE(opening_initial_profit, ?),
+               updated_at = unixepoch()
+           WHERE id = ?`
+        ).bind(openingQuantity, openingCost, openingInitialProfit, position.id).run();
+      }
+      return {
+        ...position,
+        opening_quantity: openingQuantity,
+        opening_cost: openingCost,
+        opening_initial_profit: openingInitialProfit,
+      };
+    }
+
+    async function countTradesForPosition(accountId, fundCode) {
+      const { results } = await env.DB.prepare(
+        'SELECT COUNT(1) AS total FROM trades WHERE account_id = ? AND fund_code = ?'
+      ).bind(accountId, fundCode).all();
+      return Number(results?.[0]?.total || 0);
+    }
+
+    function normalizeTradePayload(body = {}) {
+      const tradeType = normalizeTradeType(body.trade_type || body.tradeType || '');
+      return {
+        account_id: (body.account_id || body.accountId || '').trim(),
+        fund_code: (body.fund_code || body.fundCode || '').trim(),
+        fund_name: (body.fund_name || body.fundName || '').trim(),
+        trade_type: tradeType,
+        quantity: body.quantity === '' || body.quantity == null ? null : toNumber(body.quantity),
+        amount: body.amount === '' || body.amount == null ? null : toNumber(body.amount),
+        fee: body.fee === '' || body.fee == null ? 0 : toNumber(body.fee),
+        trade_date: (body.trade_date || body.tradeDate || new Date().toISOString().split('T')[0]).trim(),
+        note: (body.note || '').trim(),
+        target_quantity: body.target_quantity ?? body.targetQuantity ?? null,
+        target_cost: body.target_cost ?? body.targetCost ?? null,
+        target_initial_profit: body.target_initial_profit ?? body.targetInitialProfit ?? null,
+        dividend_method: body.dividend_method || body.dividendMethod || undefined,
+      };
+    }
+
+    async function ensurePositionBaseForTrade(trade) {
+      let position = await fetchBasePositionByAccountFund(trade.account_id, trade.fund_code);
+      if (position) return seedOpeningSnapshot(position);
+
+      const creatableTypes = new Set([
+        TRADE_TYPES.BUY,
+        TRADE_TYPES.TRANSFER_IN,
+        TRADE_TYPES.REINVEST_DIVIDEND,
+        TRADE_TYPES.CALIBRATION,
+      ]);
+      if (!creatableTypes.has(trade.trade_type)) {
+        throw new Error('该基金当前没有可匹配持仓，请先新增初始持仓或录入买入/转入');
+      }
+
+      const positionId = generateId();
+      await env.DB.prepare(
+        `INSERT INTO positions (
+          id, account_id, fund_code, fund_name, quantity, cost, initial_profit, dividend_method,
+          opening_quantity, opening_cost, opening_initial_profit, realized_profit, cash_dividend, total_buy_amount, total_sell_amount
+        ) VALUES (?, ?, ?, ?, 0, 0, 0, ?, 0, 0, 0, 0, 0, 0, 0)`
+      ).bind(positionId, trade.account_id, trade.fund_code, trade.fund_name || '', trade.dividend_method || '红利再投').run();
+
+      position = await fetchBasePositionByAccountFund(trade.account_id, trade.fund_code);
+      return seedOpeningSnapshot(position);
+    }
+
+    async function recomputeAndPersistPosition(accountId, fundCode) {
+      const basePosition = await fetchBasePositionByAccountFund(accountId, fundCode);
+      if (!basePosition) return null;
+      const seededPosition = await seedOpeningSnapshot(basePosition);
+      const { results: trades } = await env.DB.prepare(
+        'SELECT * FROM trades WHERE account_id = ? AND fund_code = ? ORDER BY trade_date ASC, created_at ASC, id ASC'
+      ).bind(accountId, fundCode).all();
+      const ledgerState = rebuildPositionFromTrades(seededPosition, trades);
+      await env.DB.prepare(
+        `UPDATE positions
+         SET fund_name = ?,
+             quantity = ?,
+             cost = ?,
+             initial_profit = ?,
+             dividend_method = ?,
+             realized_profit = ?,
+             cash_dividend = ?,
+             total_buy_amount = ?,
+             total_sell_amount = ?,
+             updated_at = unixepoch()
+         WHERE id = ?`
+      ).bind(
+        ledgerState.fund_name || seededPosition.fund_name || '',
+        ledgerState.quantity,
+        ledgerState.cost,
+        ledgerState.initial_profit,
+        ledgerState.dividend_method || seededPosition.dividend_method || '红利再投',
+        ledgerState.realized_profit,
+        ledgerState.cash_dividend,
+        ledgerState.total_buy_amount,
+        ledgerState.total_sell_amount,
+        seededPosition.id,
+      ).run();
+      return fetchPositionDetailById(seededPosition.id);
+    }
+
+    await ensureRuntimeSchemaOnce();
 
     // ========== 公开接口（无需认证）==========
     // 健康检查
@@ -293,16 +622,7 @@ export async function onRequest(context) {
         stmt = env.DB.prepare(query + ' ORDER BY a.created_at DESC');
       }
       const { results } = await stmt.all();
-      const accounts = results.map(r => ({
-        id: r.id,
-        '账户名称': r.name,
-        '渠道': r.channel,
-        '账户状态': r.status,
-        '备注': r.remark || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-        created_at: r.created_at,
-      }));
+      const accounts = results.map(serializeAccountRow);
       return jsonResponse({ code: 0, data: { total: accounts.length, accounts } });
     }
 
@@ -320,7 +640,16 @@ export async function onRequest(context) {
         'INSERT INTO accounts (id, name, channel, status, remark, member_id) VALUES (?, ?, ?, ?, ?, ?)'
       ).bind(id, name, channel, status, remark, member_id).run();
 
-      return jsonResponse({ code: 0, data: { id, '账户名称': name, '渠道': channel, '账户状态': status, '备注': remark, member_id } });
+      return jsonResponse({ code: 0, data: serializeAccountRow({
+        id,
+        name,
+        channel,
+        status,
+        remark,
+        member_id,
+        member_name: '',
+        created_at: Math.floor(Date.now() / 1000),
+      }) });
     }
 
     // 获取单个账户
@@ -332,16 +661,7 @@ export async function onRequest(context) {
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Account not found' }, 404);
       }
-      const r = results[0];
-      return jsonResponse({ code: 0, data: {
-        id: r.id,
-        '账户名称': r.name,
-        '渠道': r.channel,
-        '账户状态': r.status,
-        '备注': r.remark || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-      }});
+      return jsonResponse({ code: 0, data: serializeAccountRow(results[0]) });
     }
 
     // 删除账户
@@ -382,22 +702,13 @@ export async function onRequest(context) {
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Account not found' }, 404);
       }
-      const r = results[0];
-      return jsonResponse({ code: 0, data: {
-        id: r.id,
-        '账户名称': r.name,
-        '渠道': r.channel,
-        '账户状态': r.status,
-        '备注': r.remark || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-      }});
+      return jsonResponse({ code: 0, data: serializeAccountRow(results[0]) });
     }
 
     // ========== 顾投组合 API ==========
 
     if (path === '/api/advisory-products' && method === 'GET') {
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
       const accountId = url.searchParams.get('account_id');
       const memberId = url.searchParams.get('member_id');
       let query = `
@@ -456,7 +767,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/advisory-products' && method === 'POST') {
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
       const body = await context.request.json();
       const productName = (body.product_name || body.productName || '').trim();
       if (!productName) {
@@ -475,7 +786,7 @@ export async function onRequest(context) {
     }
 
     if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'PUT') {
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
       const id = path.split('/').pop();
       const body = await context.request.json();
       const product_name = body.product_name ?? body.productName;
@@ -502,7 +813,7 @@ export async function onRequest(context) {
     }
 
     if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'DELETE') {
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
       const id = path.split('/').pop();
       await env.DB.prepare('DELETE FROM advisory_product_snapshots WHERE product_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM advisory_products WHERE id = ?').bind(id).run();
@@ -510,7 +821,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/advisory-snapshots' && method === 'POST') {
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
       const body = await context.request.json();
       const product_id = body.product_id || body.productId;
       const snapshot_date = body.snapshot_date || body.snapshotDate;
@@ -545,7 +856,7 @@ export async function onRequest(context) {
       const accountId = url.searchParams.get('account_id');
       const memberId = url.searchParams.get('member_id');
       
-      let query = `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji,
+      let query = `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
                    s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
                    s.prev_nav
                    FROM positions p
@@ -575,128 +886,141 @@ export async function onRequest(context) {
       }
       const { results } = await stmt.all();
       
-        const positions = results.map(r => {
-          const shares = r.quantity || 0;
-          const cost = r.cost || 0;                  // 买入成本（来自数据库 cost 列）
-          const estimateNav = r.nav_gsz || null;     // 今日盘中估算
-          const confirmedNav = r.nav_dwjz || 0;      // 最新确认净值
-          const marketNav = estimateNav || confirmedNav || 0; // 盘中优先用估算净值计算持仓收益
-          const prevNav = r.prev_nav || 0;           // 前一日净值
-
-          // 昨日收益 = (最新确认净值 - 前一日净值) × 持有份额
-          const yesterdayProfit = shares > 0 && confirmedNav > 0 && prevNav > 0
-            ? parseFloat(((confirmedNav - prevNav) * shares).toFixed(4))
-            : 0;
-
-          // 当前市值 = 持有份额 × 盘中净值（优先 gsz，其次 dwjz）
-          const currentMarketValue = shares > 0 && marketNav > 0
-            ? parseFloat((shares * marketNav).toFixed(4))
-            : 0;
-
-          // 持有收益 = 当前市值 - 买入成本（不含历史收益，历史收益已固化在成本中）
-          const totalProfit = parseFloat((currentMarketValue - cost).toFixed(4));
-          const currentProfit = totalProfit;
-
-          // 持有收益率 = 持有收益 / 买入成本 × 100%
-          const profitRate = cost > 0
-            ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
-            : 0;
-
-          // 日涨幅：盘中估算对比最新确认净值，避免 gszzl=0 被 || 误判为 null
-          const navGszzl = (estimateNav && confirmedNav && confirmedNav > 0)
-            ? parseFloat(((estimateNav - confirmedNav) / confirmedNav * 100).toFixed(4))
-            : (r.nav_gszzl != null ? r.nav_gszzl : null);
-
-          return {
-            id: r.id,
-            account_id: r.account_id,
-            account_name: r.account_name || '',
-            member_id: r.member_id,
-            member_name: r.member_name || '',
-            member_emoji: r.member_emoji || '👤',
-            fund_code: r.fund_code,
-            fund_name: r.fund_name || '',
-            shares,
-            cost,
-            current_market_value: currentMarketValue,
-            current_profit: currentProfit,
-            profit_rate: profitRate,
-            yesterday_profit: yesterdayProfit,
-            initial_profit: r.initial_profit || 0,
-            dividend_method: r.dividend_method || '红利再投',
-            created_at: r.created_at,
-            // confirmedNav=dwjz（最新确认净值），estimateNav=gsz（今日估算）
-            nav_gsz: estimateNav,
-            nav_gszzl: navGszzl,
-            nav_dwjz: confirmedNav,
-            nav_jzrq: r.nav_jzrq || null,
-          };
-        });
+      const positions = results
+        .map(serializePositionRow)
+        .filter(position => Number(position.shares || 0) > 0);
       return jsonResponse({ code: 0, data: { total: positions.length, positions } });
     }
 
-    // 创建持仓
+    // 获取单个持仓
+    if (path.match(/^\/api\/positions\/[\w-]+$/) && method === 'GET') {
+      const id = path.split('/').pop();
+      const { results } = await env.DB.prepare(
+        `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
+                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                s.prev_nav
+         FROM positions p
+         LEFT JOIN accounts a ON p.account_id = a.id
+         LEFT JOIN members m ON a.member_id = m.id
+         LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+         WHERE p.id = ?`
+      ).bind(id).all();
+      if (results.length === 0) {
+        return jsonResponse({ code: 404, message: 'Position not found' }, 404);
+      }
+      return jsonResponse({ code: 0, data: serializePositionRow(results[0]) });
+    }
+
+    // 创建持仓（作为该基金在该账户的初始基准仓位）
     if (path === '/api/positions' && method === 'POST') {
       const body = await context.request.json();
       const id = generateId();
       const account_id = body.accountId || body.account_id;
-      const fund_code = body.fundCode || body.fund_code;
+      const fund_code = (body.fundCode || body.fund_code || '').trim();
       const fund_name = body.fundName || body.fund_name;
-      const shares = body.shares || body.quantity || 0;
-      const cost = body.cost || body.amount || 0;
-      const initial_profit = body.initialProfit || body.initial_profit || 0;
+      const shares = toNumber(body.shares ?? body.quantity ?? 0);
+      const cost = toNumber(body.cost ?? body.amount ?? 0);
+      const initial_profit = toNumber(body.initialProfit ?? body.initial_profit ?? 0);
       const dividend_method = body.dividendMethod || body.dividend_method || '红利再投';
 
-      await env.DB.prepare(
-        'INSERT INTO positions (id, account_id, fund_code, fund_name, quantity, cost, initial_profit, dividend_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, fund_code, fund_name || '', shares, cost, initial_profit, dividend_method).run();
+      if (!account_id || !fund_code) {
+        return jsonResponse({ code: 400, message: '账户和基金代码不能为空' }, 400);
+      }
 
-      // 查询关联的账户和成员信息
-      const { results: posResults } = await env.DB.prepare(
-        `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
-         FROM positions p 
-         LEFT JOIN accounts a ON p.account_id = a.id 
-         LEFT JOIN members m ON a.member_id = m.id 
-         WHERE p.id = ?`
-      ).bind(id).all();
-      
-      const r = posResults[0];
-      return jsonResponse({ code: 0, data: {
-        id: r.id,
-        account_id: r.account_id,
-        account_name: r.account_name || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-        member_emoji: r.member_emoji || '👤',
-        fund_code: r.fund_code,
-        fund_name: r.fund_name,
-        shares: r.quantity,
-        cost: r.cost || 0,
-        current_profit: r.current_profit || 0,
-        dividend_method: r.dividend_method,
-      }});
+      const existing = await fetchBasePositionByAccountFund(account_id, fund_code);
+      if (existing) {
+        return jsonResponse({ code: 409, message: '该账户下此基金已存在，请直接编辑持仓或录入交易' }, 409);
+      }
+
+      await env.DB.prepare(
+        `INSERT INTO positions (
+          id, account_id, fund_code, fund_name, quantity, cost, initial_profit, dividend_method,
+          opening_quantity, opening_cost, opening_initial_profit, realized_profit, cash_dividend, total_buy_amount, total_sell_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)`
+      ).bind(id, account_id, fund_code, fund_name || '', shares, cost, initial_profit, dividend_method, shares, cost, initial_profit).run();
+
+      const detail = await fetchPositionDetailById(id);
+      return jsonResponse({ code: 0, data: serializePositionRow(detail) });
     }
 
-    // 更新持仓
+    // 更新持仓：无交易时更新初始仓位；有交易时自动追加一条“手动校准”交易
     if (path.match(/^\/api\/positions\/[\w-]+$/) && method === 'PUT') {
       const id = path.split('/').pop();
       const body = await context.request.json();
+      const existing = await fetchPositionDetailById(id);
+      if (!existing) {
+        return jsonResponse({ code: 404, message: 'Position not found' }, 404);
+      }
 
       const fund_name = body.fundName || body.fund_name;
-      const shares = body.shares || body.quantity;
+      const shares = body.shares ?? body.quantity;
       const amount = body.amount;
       const cost = body.cost;
+      const normalizedCost = cost ?? amount;
       const initial_profit = body.initialProfit ?? body.initial_profit;
       const dividend_method = body.dividendMethod ?? body.dividend_method;
       const account_id = body.accountId || body.account_id;
+      const tradeCount = await countTradesForPosition(existing.account_id, existing.fund_code);
+
+      if (tradeCount > 0) {
+        if (account_id && account_id !== existing.account_id) {
+          return jsonResponse({ code: 400, message: '该持仓已有交易记录，不能直接切换账户，请使用转出/转入交易处理' }, 400);
+        }
+
+        if (fund_name !== undefined || dividend_method !== undefined) {
+          const fields = [];
+          const values = [];
+          if (fund_name !== undefined) { fields.push('fund_name = ?'); values.push(fund_name); }
+          if (dividend_method !== undefined) { fields.push('dividend_method = ?'); values.push(dividend_method); }
+          if (fields.length > 0) {
+            values.push(id);
+            await env.DB.prepare(`UPDATE positions SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
+          }
+        }
+
+        if (shares !== undefined || normalizedCost !== undefined || initial_profit !== undefined) {
+          const calibrationTrade = normalizeTradePayload({
+            account_id: existing.account_id,
+            fund_code: existing.fund_code,
+            fund_name: fund_name ?? existing.fund_name,
+            trade_type: TRADE_TYPES.CALIBRATION,
+            trade_date: body.tradeDate || body.trade_date || new Date().toISOString().split('T')[0],
+            target_quantity: shares,
+            target_cost: normalizedCost,
+            target_initial_profit: initial_profit,
+            note: '通过持仓编辑自动生成的校准记录',
+            dividend_method: dividend_method ?? existing.dividend_method,
+          });
+          const tradeId = generateId();
+          await env.DB.prepare(
+            `INSERT INTO trades (
+              id, account_id, fund_code, fund_name, trade_type, quantity, amount, fee, trade_date, note,
+              target_quantity, target_cost, target_initial_profit, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, unixepoch(), unixepoch())`
+          ).bind(
+            tradeId,
+            calibrationTrade.account_id,
+            calibrationTrade.fund_code,
+            calibrationTrade.fund_name,
+            calibrationTrade.trade_type,
+            calibrationTrade.trade_date,
+            calibrationTrade.note,
+            calibrationTrade.target_quantity,
+            calibrationTrade.target_cost,
+            calibrationTrade.target_initial_profit,
+          ).run();
+        }
+
+        const detail = await recomputeAndPersistPosition(existing.account_id, existing.fund_code);
+        return jsonResponse({ code: 0, data: serializePositionRow(detail) });
+      }
 
       const fields = [];
       const values = [];
       if (fund_name !== undefined) { fields.push('fund_name = ?'); values.push(fund_name); }
-      if (shares !== undefined) { fields.push('quantity = ?'); values.push(shares); }
-      if (amount !== undefined) { fields.push('cost = ?'); values.push(amount); }
-      if (cost !== undefined) { fields.push('cost = ?'); values.push(cost); }
-      if (initial_profit !== undefined) { fields.push('initial_profit = ?'); values.push(initial_profit); }
+      if (shares !== undefined) { fields.push('quantity = ?'); values.push(toNumber(shares)); fields.push('opening_quantity = ?'); values.push(toNumber(shares)); }
+      if (normalizedCost !== undefined) { fields.push('cost = ?'); values.push(toNumber(normalizedCost)); fields.push('opening_cost = ?'); values.push(toNumber(normalizedCost)); }
+      if (initial_profit !== undefined) { fields.push('initial_profit = ?'); values.push(toNumber(initial_profit)); fields.push('opening_initial_profit = ?'); values.push(toNumber(initial_profit)); }
       if (dividend_method !== undefined) { fields.push('dividend_method = ?'); values.push(dividend_method); }
       if (account_id !== undefined) { fields.push('account_id = ?'); values.push(account_id); }
 
@@ -705,53 +1029,18 @@ export async function onRequest(context) {
         await env.DB.prepare(`UPDATE positions SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
       }
 
-      // 查询关联的账户和成员信息
-      const { results: posResults } = await env.DB.prepare(
-        `SELECT p.*, a.name as account_name, a.member_id, m.name as member_name, m.emoji as member_emoji 
-         FROM positions p 
-         LEFT JOIN accounts a ON p.account_id = a.id 
-         LEFT JOIN members m ON a.member_id = m.id 
-         WHERE p.id = ?`
-      ).bind(id).all();
-      
-      if (posResults.length === 0) {
-        return jsonResponse({ code: 404, message: 'Position not found' }, 404);
-      }
-      
-      const r = posResults[0];
-      // 计算当前收益和收益率（实时计算，不依赖存储字段）
-      const _shares = r.quantity || 0;
-      const _cost = r.cost || 0;
-      const estimateNav = r.nav_gsz || 0;
-      const confirmedNav = r.nav_dwjz || 0;
-      const marketNav = estimateNav || confirmedNav || 0;
-      const currentMarketValue = _shares > 0 && marketNav > 0 ? parseFloat((_shares * marketNav).toFixed(4)) : 0;
-      const currentProfit = parseFloat((currentMarketValue - _cost).toFixed(4));
-      const profitRate = _cost > 0 ? parseFloat(((currentProfit / _cost) * 100).toFixed(4)) : 0;
-      const prevNav = r.prev_nav || 0;
-      const yesterdayProfit = _shares > 0 && confirmedNav > 0 && prevNav > 0 ? parseFloat(((confirmedNav - prevNav) * _shares).toFixed(4)) : 0;
-      return jsonResponse({ code: 0, data: {
-        id: r.id,
-        account_id: r.account_id,
-        account_name: r.account_name || '',
-        member_id: r.member_id,
-        member_name: r.member_name || '',
-        member_emoji: r.member_emoji || '👤',
-        fund_code: r.fund_code,
-        fund_name: r.fund_name,
-        shares: r.quantity,
-        cost: r.cost || 0,
-        current_profit: currentProfit,
-        profit_rate: profitRate,
-        yesterday_profit: yesterdayProfit,
-        initial_profit: r.initial_profit || 0,
-        dividend_method: r.dividend_method,
-      }});
+      const detail = await fetchPositionDetailById(id);
+      return jsonResponse({ code: 0, data: serializePositionRow(detail) });
     }
 
-    // 删除持仓
+    // 删除持仓：同时清空该持仓下交易流水
     if (path.match(/^\/api\/positions\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
+      const position = await fetchPositionDetailById(id);
+      if (!position) {
+        return jsonResponse({ code: 404, message: 'Position not found' }, 404);
+      }
+      await env.DB.prepare('DELETE FROM trades WHERE account_id = ? AND fund_code = ?').bind(position.account_id, position.fund_code).run();
       await env.DB.prepare('DELETE FROM positions WHERE id = ?').bind(id).run();
       return jsonResponse({ code: 0, message: 'Position deleted' });
     }
@@ -760,15 +1049,48 @@ export async function onRequest(context) {
 
     // 获取交易列表
     if (path === '/api/trades' && method === 'GET') {
-      const { results } = await env.DB.prepare('SELECT * FROM trades ORDER BY trade_date DESC').all();
+      const accountId = url.searchParams.get('account_id') || url.searchParams.get('accountId');
+      const tradeType = url.searchParams.get('trade_type') || url.searchParams.get('tradeType');
+      let query = `
+        SELECT t.*, a.name as account_name, COALESCE(t.fund_name, s.name, p.fund_name, '') as resolved_fund_name
+        FROM trades t
+        LEFT JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN market_snapshot s ON t.fund_code = s.fund_code
+        LEFT JOIN positions p ON p.account_id = t.account_id AND p.fund_code = t.fund_code
+      `;
+      const conditions = [];
+      const values = [];
+      if (accountId) {
+        conditions.push('t.account_id = ?');
+        values.push(accountId);
+      }
+      if (tradeType) {
+        conditions.push('t.trade_type = ?');
+        values.push(normalizeTradeType(tradeType));
+      }
+      if (conditions.length > 0) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
+      }
+      query += ' ORDER BY t.trade_date DESC, t.created_at DESC, t.id DESC';
+      let stmt = env.DB.prepare(query);
+      if (values.length > 0) {
+        stmt = stmt.bind(...values);
+      }
+      const { results } = await stmt.all();
       const trades = results.map(r => ({
         id: r.id,
         account_id: r.account_id,
+        account_name: r.account_name || '',
         fund_code: r.fund_code,
-        trade_type: r.trade_type,
+        fund_name: r.resolved_fund_name || '',
+        trade_type: normalizeTradeType(r.trade_type),
         quantity: r.quantity,
         amount: r.amount,
         fee: r.fee,
+        note: r.note || '',
+        target_quantity: r.target_quantity,
+        target_cost: r.target_cost,
+        target_initial_profit: r.target_initial_profit,
         trade_date: r.trade_date,
         created_at: r.created_at,
       }));
@@ -778,28 +1100,74 @@ export async function onRequest(context) {
     // 创建交易
     if (path === '/api/trades' && method === 'POST') {
       const body = await context.request.json();
-      const id = generateId();
-      const { account_id, fund_code, trade_type, quantity, amount, fee, trade_date } = body;
+      const trade = normalizeTradePayload(body);
+      if (!trade.account_id || !trade.fund_code || !trade.trade_type) {
+        return jsonResponse({ code: 400, message: '账户、基金代码、交易类型不能为空' }, 400);
+      }
 
-      await env.DB.prepare(
-        'INSERT INTO trades (id, account_id, fund_code, trade_type, quantity, amount, fee, trade_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, fund_code, trade_type, quantity || 0, amount || 0, fee || 0, trade_date || Date.now()).run();
+      try {
+        const basePosition = await ensurePositionBaseForTrade(trade);
+        const id = generateId();
+        await env.DB.prepare(
+          `INSERT INTO trades (
+            id, account_id, fund_code, fund_name, trade_type, quantity, amount, fee, trade_date, note,
+            target_quantity, target_cost, target_initial_profit, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())`
+        ).bind(
+          id,
+          trade.account_id,
+          trade.fund_code,
+          trade.fund_name || basePosition.fund_name || '',
+          trade.trade_type,
+          trade.quantity,
+          trade.amount,
+          trade.fee,
+          trade.trade_date,
+          trade.note,
+          trade.target_quantity,
+          trade.target_cost,
+          trade.target_initial_profit,
+        ).run();
 
-      return jsonResponse({ code: 0, data: { id, account_id, fund_code, trade_type, quantity, amount, fee, trade_date } });
+        const detail = await recomputeAndPersistPosition(trade.account_id, trade.fund_code);
+        return jsonResponse({
+          code: 0,
+          data: {
+            id,
+            ...trade,
+            position: detail ? serializePositionRow(detail) : null,
+          },
+        });
+      } catch (error) {
+        return jsonResponse({ code: 400, message: error.message || '交易录入失败' }, 400);
+      }
+    }
+
+    // 删除交易
+    if (path.match(/^\/api\/trades\/[\w-]+$/) && method === 'DELETE') {
+      const id = path.split('/').pop();
+      const { results } = await env.DB.prepare('SELECT * FROM trades WHERE id = ? LIMIT 1').bind(id).all();
+      const trade = results[0];
+      if (!trade) {
+        return jsonResponse({ code: 404, message: 'Trade not found' }, 404);
+      }
+      await env.DB.prepare('DELETE FROM trades WHERE id = ?').bind(id).run();
+      const detail = await recomputeAndPersistPosition(trade.account_id, trade.fund_code);
+      return jsonResponse({ code: 0, message: 'Trade deleted', data: { position: detail ? serializePositionRow(detail) : null } });
     }
 
     // ========== 行情 API ==========
 
     // 获取行情列表
     if (path === '/api/market' && method === 'GET') {
-      const { results } = await env.DB.prepare('SELECT * FROM market ORDER BY date DESC').all();
+      const { results } = await env.DB.prepare('SELECT fund_code, name, gsz, dwjz, gszzl, jzrq FROM market_snapshot ORDER BY updated_at DESC').all();
       const markets = results.map(r => ({
-        id: r.id,
         fund_code: r.fund_code,
-        fund_name: r.fund_name,
-        nav: r.nav,
-        daily_change: r.daily_change,
-        date: r.date,
+        fund_name: r.name,
+        nav: r.gsz || r.dwjz,
+        confirmed_nav: r.dwjz,
+        daily_change: r.gszzl,
+        date: r.jzrq,
       }));
       return jsonResponse({ code: 0, data: { total: markets.length, markets } });
     }
@@ -807,12 +1175,12 @@ export async function onRequest(context) {
     // 获取单只基金行情
     if (path.match(/^\/api\/market\/[\w.]+$/) && method === 'GET') {
       const fundCode = path.split('/').pop();
-      const { results } = await env.DB.prepare('SELECT * FROM market WHERE fund_code = ? ORDER BY date DESC LIMIT 1').bind(fundCode).all();
+      const { results } = await env.DB.prepare('SELECT fund_code, name, gsz, dwjz, gszzl, jzrq FROM market_snapshot WHERE fund_code = ? LIMIT 1').bind(fundCode).all();
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Market data not found' }, 404);
       }
       const r = results[0];
-      return jsonResponse({ code: 0, data: { fund_code: r.fund_code, fund_name: r.fund_name, nav: r.nav, daily_change: r.daily_change, date: r.date } });
+      return jsonResponse({ code: 0, data: { fund_code: r.fund_code, fund_name: r.name, fundName: r.name, nav: r.gsz || r.dwjz, confirmed_nav: r.dwjz, daily_change: r.gszzl, date: r.jzrq } });
     }
 
     // ========== 统计 API ==========
@@ -820,7 +1188,7 @@ export async function onRequest(context) {
     // 收益总览
     if (path === '/api/stats/overview' && method === 'GET') {
       const memberId = url.searchParams.get('member_id');
-      await ensureAdvisoryTables();
+      await ensureAdvisorySchemaOnce();
 
       const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY created_at DESC').all();
       const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all();
@@ -845,7 +1213,8 @@ export async function onRequest(context) {
       const accountStatsMap = {};
       let totalInvested = 0;
       let totalMarketValue = 0;
-      let totalYesterdayProfit = 0;
+      let totalPositionYesterdayProfit = 0;
+      let totalAdvisoryYesterdayProfit = 0;
       let totalCumulativeProfit = positions.reduce((sum, pos) => sum + (pos.initial_profit || 0), 0);
 
       accounts.forEach(acc => {
@@ -872,8 +1241,9 @@ export async function onRequest(context) {
         accountStats.marketValue += marketValue;
         totalInvested += cost;
         totalMarketValue += marketValue;
-        if (snap && snap.gsz && snap.prev_nav && pos.quantity) {
-          totalYesterdayProfit += (snap.gsz - snap.prev_nav) * pos.quantity;
+        const confirmedNav = snap && (snap.dwjz || snap.gsz);
+        if (confirmedNav && snap && snap.prev_nav && pos.quantity) {
+          totalPositionYesterdayProfit += (confirmedNav - snap.prev_nav) * pos.quantity;
         }
       });
 
@@ -904,7 +1274,7 @@ export async function onRequest(context) {
       advisoryStats.forEach(item => {
         totalInvested += item.invested;
         totalMarketValue += item.marketValue;
-        totalYesterdayProfit += item.dailyProfit;
+        totalAdvisoryYesterdayProfit += item.dailyProfit;
         totalCumulativeProfit += item.profit;
         if (item.account_id && accountStatsMap[item.account_id]) {
           const accountStats = accountStatsMap[item.account_id];
@@ -957,6 +1327,7 @@ export async function onRequest(context) {
       const totalProfit = totalMarketValue - totalInvested;
       const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
       const totalHoldingProfit = totalProfit;
+      const dailyProfitSummary = summarizeOverviewDailyProfits(totalPositionYesterdayProfit, totalAdvisoryYesterdayProfit);
 
       return jsonResponse({
         code: 0,
@@ -966,7 +1337,9 @@ export async function onRequest(context) {
             totalMarketValue: Number(totalMarketValue.toFixed(2)),
             totalProfit: Number(totalProfit.toFixed(2)),
             totalProfitRate: Number(totalProfitRate.toFixed(2)),
-            totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
+            totalYesterdayProfit: dailyProfitSummary.totalYesterdayProfit,
+            totalPositionYesterdayProfit: dailyProfitSummary.totalPositionYesterdayProfit,
+            totalAdvisoryYesterdayProfit: dailyProfitSummary.totalAdvisoryYesterdayProfit,
             totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
             totalCumulativeProfit: Number(totalCumulativeProfit.toFixed(2)),
           },
@@ -1049,7 +1422,7 @@ export async function onRequest(context) {
           await env.DB.prepare('ALTER TABLE positions ADD COLUMN initial_profit REAL DEFAULT 0').run();
         }
 
-        await ensureAdvisoryTables();
+        await ensureAdvisorySchemaOnce();
 
         return jsonResponse({ code: 0, message: 'Migration completed' });
       } catch (error) {
@@ -1079,11 +1452,12 @@ export async function onRequest(context) {
 
         // 2. 批量调 pingzhongdata + fundgz 实时估算（并行）
         const syncResults = {};
-        await Promise.all(fundCodes.map(async (code) => {
+        for (const code of fundCodes) {
           try {
             let nav = null, navDate = null, gszzl = null, prev_nav = null, name = fundNameMap[code] || '';
             let estimateNav = null, estimateDate = null, estimateChange = null;
-            let dwjzFromFundGz = null;  // fundgz 的 dwjz（昨日确认净值），单独保存用于 INSERT
+            let dwjz = null;              // 真正要写入 market_snapshot.dwjz 的值
+            let dwjzFromFundGz = null;    // fundgz 返回的 dwjz（仅在确认需要替换时才采用）
 
             // 同时请求两个接口
             const [res2, resGz] = await Promise.all([
@@ -1153,9 +1527,10 @@ export async function onRequest(context) {
                   } else if (hasSameDayEstimate) {
                     // fundgz 有今日盘中估算（jzrq = 今日）
                     // nav 更新为估算，prev_nav 不变（正确的上一个确认日）
-                    // dwjz 也不变（保持上一个确认净值，不被 pingzhongdata nav 覆盖）
+                    // dwjz 应保持上一确认净值，避免被估算净值覆盖
                     nav = estimateNav;
                     gszzl = estimateChange;
+                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
                   }
                 }
               }
@@ -1182,15 +1557,15 @@ export async function onRequest(context) {
                 last_nav = excluded.last_nav,
                 last_gszzl = excluded.last_gszzl,
                 updated_at = unixepoch()
-            `).bind(code, name, dwjzFromFundGz || prev_nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
-            syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
+            `).bind(code, name, dwjz || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+            syncResults[code] = { ok: !!nav, gsz: nav, gszzl, prev_nav, dwjz: dwjz || nav, confirmed_nav: dwjz || nav, last_nav: oldLastNav, last_gszzl: oldLastGszzl, jzrq: navDate };
           } catch (e) {
             syncResults[code] = { ok: false, reason: e.message };
           }
-        }));
+        }
 
-        // 3. 更新每个持仓的昨日收益（实时计算，由 positions GET 时动态算出）
-        // 昨日收益 = (本次 prev_nav − 上次 last_nav) × 份额
+        // 3. 更新每个持仓的昨日收益
+        // 口径统一为：昨日收益 = (最新确认净值 - 前一交易日净值) × 份额
         for (const pos of allPositions) {
           const snap = syncResults[pos.fund_code];
           if (!snap || !snap.ok) continue;
@@ -1198,8 +1573,9 @@ export async function onRequest(context) {
           if (shares <= 0) continue;
 
           let yesterdayProfit = 0;
-          if (snap.last_nav && snap.prev_nav) {
-            yesterdayProfit = parseFloat(((snap.prev_nav - snap.last_nav) * shares).toFixed(4));
+          const confirmedNav = snap.dwjz || snap.confirmed_nav || snap.gsz || 0;
+          if (confirmedNav > 0 && snap.prev_nav > 0) {
+            yesterdayProfit = parseFloat(((confirmedNav - snap.prev_nav) * shares).toFixed(4));
           }
           await env.DB.prepare(`
             UPDATE positions SET
@@ -1321,14 +1697,16 @@ export async function onRequest(context) {
         `).bind(fundCode, name, dwjz || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
         
         // 更新该基金所有持仓的昨日收益
+        // 口径统一为：昨日收益 = (最新确认净值 - 前一交易日净值) × 份额
         const { results: positions } = await env.DB.prepare(
           'SELECT id, quantity FROM positions WHERE fund_code = ?'
         ).bind(fundCode).all();
         
         for (const pos of positions) {
           let yesterdayProfit = 0;
-          if (prev_nav && oldLastNav) {
-            yesterdayProfit = parseFloat(((prev_nav - oldLastNav) * (pos.quantity || 0)).toFixed(4));
+          const confirmedNav = dwjz || nav || 0;
+          if (prev_nav > 0 && confirmedNav > 0) {
+            yesterdayProfit = parseFloat(((confirmedNav - prev_nav) * (pos.quantity || 0)).toFixed(4));
           }
           await env.DB.prepare(`
             UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
