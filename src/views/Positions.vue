@@ -705,6 +705,10 @@ const openAddModal = () => {
     dividendMethod: '红利再投',
   }
   showAddModal.value = true
+  // 确保账户列表已加载；若为空则立即刷新
+  if (!accounts.value.length) {
+    fetchAccounts()
+  }
 }
 
 const closeModal = () => {
@@ -729,10 +733,10 @@ const ensureFreshData = async ({ force = false } = {}) => {
     ensureFreshMetaData().catch(() => {})
     return
   }
-  await fetchPositions()
+  // 并行加载持仓和元数据（成员/账户），确保添加弹窗能立即拿到账户列表
+  await Promise.all([fetchPositions(), ensureFreshMetaData({ force })])
   hasLoadedOnce.value = true
   lastLoadedAt.value = Date.now()
-  ensureFreshMetaData({ force }).catch(() => {})
 }
 
 onMounted(() => {
