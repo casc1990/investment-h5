@@ -69,6 +69,36 @@ const normalizeScopeLabel = ({ memberName = '', accountName = '', memberId = 'al
   return '全部账户'
 }
 
+const isAdvisoryPosition = (item = {}) => String(item.id || item.fund_code || '').startsWith('advisory-')
+
+const getChinaDateString = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = parts.find(part => part.type === 'year')?.value || '0000'
+  const month = parts.find(part => part.type === 'month')?.value || '00'
+  const day = parts.find(part => part.type === 'day')?.value || '00'
+
+  return `${year}-${month}-${day}`
+}
+
+const calcPositionDailyProfit = (summary = {}, positions = []) => {
+  const summaryValue = summary.totalPositionYesterdayProfit
+  if (summaryValue !== undefined && summaryValue !== null && Number.isFinite(Number(summaryValue))) {
+    return Number(safeNumber(summaryValue).toFixed(2))
+  }
+
+  const fallback = positions
+    .filter(item => !isAdvisoryPosition(item))
+    .reduce((sum, item) => sum + safeNumber(item.yesterday_profit), 0)
+
+  return Number(fallback.toFixed(2))
+}
+
 const aggregatePositions = (positions = [], { memberId = 'all', accountId = 'all' } = {}) => {
   const memberName = positions[0]?.member_name || ''
   const accountName = positions[0]?.account_name || ''
@@ -103,7 +133,6 @@ const buildDailyProfitSignatureMap = (positions = []) => new Map(
       String(item.nav_jzrq || ''),
       safeNumber(item.yesterday_profit).toFixed(4),
       safeNumber(item.nav_dwjz).toFixed(4),
-      safeNumber(item.nav_gsz).toFixed(4),
     ].join('|')
     return [key, signature]
   }),
@@ -136,6 +165,7 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
 
     if (memberId === 'all' && accountId === 'all') {
       const summary = snapshot.summary || {}
+      const positionDailyProfit = calcPositionDailyProfit(summary, filteredPositions)
       return {
         date: snapshot.date,
         member_id: 'all',
@@ -145,8 +175,8 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
         total_market_value: Number(safeNumber(summary.totalMarketValue).toFixed(2)),
         total_profit: Number(safeNumber(summary.totalHoldingProfit).toFixed(2)),
         total_profit_rate: Number(safeNumber(summary.totalProfitRate).toFixed(2)),
-        daily_profit: Number(safeNumber(summary.totalYesterdayProfit).toFixed(2)),
-        daily_profit_rate: calcDailyProfitRate(summary.totalYesterdayProfit, summary.totalMarketValue),
+        daily_profit: positionDailyProfit,
+        daily_profit_rate: calcDailyProfitRate(positionDailyProfit, summary.totalMarketValue),
       }
     }
 
@@ -176,6 +206,10 @@ export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accou
     const latest = rows[rows.length - 1]
     const periodProfit = rows.reduce((sum, item) => sum + safeNumber(item.daily_profit), 0)
     const baseMarketValue = rows[0]?.total_market_value || 0
+    const periodMaxDrawdown = rows.reduce((minValue, item) => {
+      const dailyProfit = safeNumber(item.daily_profit)
+      return dailyProfit < minValue ? dailyProfit : minValue
+    }, 0)
 
     return {
       period_key: periodKey,
@@ -193,6 +227,7 @@ export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accou
       daily_profit_rate: Number(safeNumber(latest?.daily_profit_rate).toFixed(2)),
       period_profit: Number(periodProfit.toFixed(2)),
       period_profit_rate: calcDailyProfitRate(periodProfit, baseMarketValue),
+      period_max_drawdown: Number(periodMaxDrawdown.toFixed(2)),
     }
   })
 
@@ -244,6 +279,51 @@ export const buildDisplayTrendSeries = (rows = [], { metric = 'total_profit', mo
   const period = pickAggregationPeriod(rows)
   const targetRows = period ? aggregateTrendRows(rows, period) : rows
   return buildTrendSeries(targetRows, { metric, mode: period ? 'period' : 'daily' })
+}
+
+export const getDailyProfitUpdateStatus = (positions = [], now = new Date()) => {
+  const fundPositions = positions.filter(item => !isAdvisoryPosition(item))
+  if (!fundPositions.length) {
+    return {
+      status: 'unknown',
+      helperText: '',
+      updatedCount: 0,
+      totalCount: 0,
+      today: getChinaDateString(now),
+    }
+  }
+
+  const today = getChinaDateString(now)
+  const updatedCount = fundPositions.filter(item => String(item.nav_jzrq || '') === today).length
+  const totalCount = fundPositions.length
+
+  if (updatedCount === totalCount) {
+    return {
+      status: 'updated',
+      helperText: '今日收益已更新',
+      updatedCount,
+      totalCount,
+      today,
+    }
+  }
+
+  if (updatedCount === 0) {
+    return {
+      status: 'stale',
+      helperText: '今日未更新，当前显示上一交易日收益',
+      updatedCount,
+      totalCount,
+      today,
+    }
+  }
+
+  return {
+    status: 'partial',
+    helperText: `部分基金今日已更新（${updatedCount}/${totalCount}），当前合计仍含上一交易日收益`,
+    updatedCount,
+    totalCount,
+    today,
+  }
 }
 
 export const buildMemberFilterOptions = (snapshots = []) => {
@@ -300,4 +380,5 @@ export const __test__ = {
   getPeriodKey,
   formatPeriodLabel,
   pickAggregationPeriod,
+  getChinaDateString,
 }

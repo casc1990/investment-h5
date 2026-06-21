@@ -210,7 +210,15 @@
     </div>
 
     <!-- 添加/编辑持仓弹窗 -->
-    <van-popup v-model:show="showAddModal" position="bottom" round>
+    <van-popup
+      v-model:show="showAddModal"
+      position="bottom"
+      round
+      class="position-form-popup"
+      :overlay-style="{ zIndex: 10998 }"
+      :z-index="10999"
+      safe-area-inset-bottom
+    >
       <div class="modal-content">
         <div class="modal-title">{{ editingPosition ? '✏️ 编辑持仓' : '📦 添加持仓' }}</div>
         
@@ -286,7 +294,7 @@
     </van-popup>
 
     <!-- 成员选择器 -->
-    <van-popup v-model:show="showMemberPicker" position="bottom">
+    <van-popup v-model:show="showMemberPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
       <van-picker
         :columns="memberPickerOptions"
         @confirm="onMemberConfirm"
@@ -295,7 +303,7 @@
     </van-popup>
 
     <!-- 账户选择器 -->
-    <van-popup v-model:show="showAccountPicker" position="bottom">
+    <van-popup v-model:show="showAccountPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
       <van-picker
         :columns="accountPickerOptions"
         @confirm="onAccountConfirm"
@@ -304,7 +312,7 @@
     </van-popup>
 
     <!-- 分红方式选择器 -->
-    <van-popup v-model:show="showDividendPicker" position="bottom">
+    <van-popup v-model:show="showDividendPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
       <van-picker
         :columns="dividendOptions"
         @confirm="onDividendConfirm"
@@ -315,9 +323,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onActivated, onMounted } from 'vue'
+import { ref, computed, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
+import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const syncingId = ref(null)
@@ -745,6 +754,23 @@ onMounted(() => {
 
 onActivated(() => {
   ensureFreshData()
+})
+
+watch(
+  [showAddModal, showMemberPicker, showAccountPicker, showDividendPicker],
+  ([addOpen, memberOpen, accountOpen, dividendOpen]) => {
+    const hasBottomPopupOpen = addOpen || memberOpen || accountOpen || dividendOpen
+    setAppTabbarVisible(!hasBottomPopupOpen)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  setAppTabbarVisible(true)
+})
+
+onDeactivated(() => {
+  setAppTabbarVisible(true)
 })
 </script>
 
@@ -1229,8 +1255,14 @@ onActivated(() => {
   }
 }
 
+:deep(.position-form-popup) {
+  max-height: min(88vh, calc(100vh - 24px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .modal-content {
-  padding: 20px;
+  padding: 20px 20px calc(28px + env(safe-area-inset-bottom));
 }
 
 .modal-title {

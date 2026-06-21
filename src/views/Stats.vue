@@ -50,8 +50,8 @@
     <div class="section">
       <div class="section-header">
         <div>
-          <div class="section-title">📈 业绩走势</div>
-          <div class="section-subtitle">按天看细节，按周期看节奏</div>
+          <div class="section-title">📈 收益走势</div>
+          <div class="section-subtitle">按天看日收益，按周期看阶段收益</div>
         </div>
       </div>
 
@@ -117,7 +117,7 @@
 
       <TrendChart
         :points="trendSeries"
-        summary-label="所选日期总金额"
+        :summary-label="trendSummaryLabel"
         :formatter="formatCurrencyValue"
         :y-axis-formatter="formatCompactAmount"
         @select="handleTrendSelect"
@@ -129,11 +129,11 @@
           <span class="metric-value neutral">{{ selectedTrendDateLabel }}</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">当日收益</span>
+          <span class="metric-label">日收益</span>
           <span class="metric-value" :class="profitClass(selectedTrendRow.daily_profit)">{{ formatSignedAmount(selectedTrendRow.daily_profit) }}</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">当日收益率</span>
+          <span class="metric-label">日收益率</span>
           <span class="metric-value" :class="profitClass(selectedTrendRow.daily_profit_rate)">{{ formatSignedPercent(selectedTrendRow.daily_profit_rate) }}</span>
         </div>
         <div class="metric-card">
@@ -174,16 +174,16 @@
               <div class="small-value" :class="profitClass(row.period_profit)">{{ formatSignedAmount(row.period_profit) }}</div>
             </div>
             <div>
-              <span class="small-label">总收益</span>
-              <div class="small-value" :class="profitClass(row.total_profit)">{{ formatSignedAmount(row.total_profit) }}</div>
+              <span class="small-label">当期收益率</span>
+              <div class="small-value" :class="profitClass(row.period_profit_rate)">{{ formatSignedPercent(row.period_profit_rate) }}</div>
+            </div>
+            <div>
+              <span class="small-label">当期最大亏损</span>
+              <div class="small-value" :class="profitClass(row.period_max_drawdown)">{{ formatSignedAmount(row.period_max_drawdown) }}</div>
             </div>
             <div>
               <span class="small-label">总收益率</span>
               <div class="small-value" :class="profitClass(row.total_profit_rate)">{{ formatSignedPercent(row.total_profit_rate) }}</div>
-            </div>
-            <div>
-              <span class="small-label">当日收益</span>
-              <div class="small-value" :class="profitClass(row.daily_profit)">{{ formatSignedAmount(row.daily_profit) }}</div>
             </div>
           </div>
         </div>
@@ -400,11 +400,12 @@ const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   period: periodMode.value,
 }))
 const trendRows = computed(() => (trendMode.value === 'daily' ? trendDailyRows.value : periodRows.value))
+const trendSummaryLabel = computed(() => (trendMode.value === 'daily' ? '所选日期日收益' : '所选周期阶段收益'))
 const trendSeries = computed(() => {
   if (trendMode.value === 'daily') {
-    return buildDisplayTrendSeries(trendDailyRows.value, { metric: 'total_market_value', mode: 'daily' })
+    return buildDisplayTrendSeries(trendDailyRows.value, { metric: 'daily_profit', mode: 'daily' })
   }
-  return buildTrendSeries(periodRows.value, { metric: 'total_market_value', mode: 'period' })
+  return buildTrendSeries(periodRows.value, { metric: 'period_profit', mode: 'period' })
 })
 const selectedTrendDateLabel = computed(() => {
   if (!selectedTrendRow.value) return '-'

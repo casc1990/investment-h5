@@ -99,6 +99,407 @@ export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryD
   };
 }
 
+export function parsePingzhongdataNetWorth(text = '') {
+  const navMatch = String(text).match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+  if (!navMatch) return null;
+
+  try {
+    const rows = JSON.parse(navMatch[1]);
+    if (!Array.isArray(rows) || rows.length < 2) return null;
+
+    const latest = rows[rows.length - 1] || {};
+    const previous = rows[rows.length - 2] || {};
+    const currentNAV = Number(latest.y);
+    const prevNAV = Number(previous.y);
+    if (!Number.isFinite(currentNAV) || !Number.isFinite(prevNAV)) return null;
+
+    const parsedDate = new Date(Number(latest.x) + 8 * 3600 * 1000).toISOString().split('T')[0];
+    const equityReturn = Number(latest.equityReturn);
+    const changeRate = Number.isFinite(equityReturn)
+      ? Number(equityReturn.toFixed(4))
+      : (prevNAV > 0 ? Number((((currentNAV - prevNAV) / prevNAV) * 100).toFixed(4)) : null);
+
+    return {
+      currentNAV,
+      prevNAV,
+      navDate: parsedDate,
+      changeRate,
+      unitMoney: latest.unitMoney || '',
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+export function resolveDisplayedNavGszzl({
+  storedChangeRate = null,
+  estimateNav = null,
+  confirmedNav = 0,
+  prevNav = 0,
+} = {}) {
+  if (storedChangeRate !== null && storedChangeRate !== undefined && Number.isFinite(Number(storedChangeRate))) {
+    return Number(Number(storedChangeRate).toFixed(4));
+  }
+
+  const estimate = Number(estimateNav || 0);
+  const confirmed = Number(confirmedNav || 0);
+  const previous = Number(prevNav || 0);
+  const hasIntradayEstimate = estimate > 0 && confirmed > 0
+    && Math.abs(estimate - confirmed) > 0.000001;
+
+  if (hasIntradayEstimate) {
+    return Number((((estimate - confirmed) / confirmed) * 100).toFixed(4));
+  }
+
+  if (confirmed > 0 && previous > 0) {
+    return Number((((confirmed - previous) / previous) * 100).toFixed(4));
+  }
+
+  return null;
+}
+
+export function resolveDisplayedYesterdayProfit({
+  shares = 0,
+  confirmedNav = 0,
+  prevNav = 0,
+  storedChangeRate = null,
+} = {}) {
+  const quantity = Number(shares || 0);
+  const confirmed = Number(confirmedNav || 0);
+  const previous = Number(prevNav || 0);
+  const pct = storedChangeRate !== null && storedChangeRate !== undefined && Number.isFinite(Number(storedChangeRate))
+    ? Number(storedChangeRate)
+    : null;
+
+  if (quantity > 0 && previous > 0 && pct !== null) {
+    return Number((quantity * previous * (pct / 100)).toFixed(4));
+  }
+
+  if (quantity > 0 && confirmed > 0 && previous > 0) {
+    return Number(((confirmed - previous) * quantity).toFixed(4));
+  }
+
+  return 0;
+}
+
+export function mergeFundEstimateIntoSnapshot({
+  nav = null,
+  navDate = null,
+  gszzl = null,
+  prev_nav = null,
+  estimateNav = null,
+  estimateChange = null,
+  officialNavYesterday = null,
+  fundGzNavDate = null,
+} = {}) {
+  const merged = {
+    nav,
+    navDate,
+    gszzl,
+    prev_nav,
+    dwjz: null,
+  };
+
+  const currentNav = Number(nav || 0);
+  const estimate = Number(estimateNav || 0);
+  const officialNav = Number(officialNavYesterday || 0);
+  const currentChangeRate = gszzl !== null && gszzl !== undefined && Number.isFinite(Number(gszzl))
+    ? Number(gszzl)
+    : null;
+  const shouldReplace = navDate && fundGzNavDate && estimate > 0;
+  const dateIsNewer = fundGzNavDate > navDate;
+  const hasSameDayEstimate = fundGzNavDate === navDate
+    && estimate.toFixed(4) !== officialNav.toFixed(4)
+    && estimate.toFixed(4) !== currentNav.toFixed(4);
+
+  if (!shouldReplace || (!dateIsNewer && !hasSameDayEstimate)) {
+    return merged;
+  }
+
+  if (dateIsNewer) {
+    merged.prev_nav = currentNav > 0 ? currentNav : prev_nav;
+    merged.nav = estimate;
+    merged.navDate = fundGzNavDate;
+    merged.gszzl = estimateChange;
+    merged.dwjz = officialNav > 0 ? officialNav : merged.dwjz;
+    return merged;
+  }
+
+  merged.nav = estimate;
+  merged.gszzl = currentChangeRate !== null ? currentChangeRate : estimateChange;
+  merged.dwjz = officialNav > 0 ? officialNav : merged.dwjz;
+  return merged;
+}
+
+function getChinaHour(date = new Date()) {
+  const hour = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    hour12: false,
+  }).format(date);
+
+  return Number(hour);
+}
+
+function isDelayedNavFund(fundName = '') {
+  return /QDII|纳斯达克|标普|海外|恒生|美股|港股/i.test(String(fundName || ''));
+}
+
+function normalizeSyncMode(mode = 'night') {
+  return ['night', 'morning', 'pre_report'].includes(mode) ? mode : 'night';
+}
+
+function parseBooleanLike(value, defaultValue = false) {
+  if (value === null || value === undefined || value === '') return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function normalizeBatchSize(value, defaultValue = 3) {
+  const parsed = Number.parseInt(String(value ?? defaultValue), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
+  return Math.min(parsed, 5);
+}
+
+export function getExpectedNavDateForSyncMode({ now = new Date(), mode = 'night' } = {}) {
+  const normalizedMode = normalizeSyncMode(mode);
+
+  if (normalizedMode === 'night' && getChinaHour(now) < 21) {
+    return getPreviousChinaTradingDateString(now);
+  }
+
+  return getChinaDateString(now);
+}
+
+export function buildPendingFundList({
+  positions = [],
+  snapshots = [],
+  now = new Date(),
+  mode = 'night',
+  includeQdii = false,
+} = {}) {
+  const snapshotMap = new Map(
+    (snapshots || []).map(row => [String(row.fund_code || ''), row])
+  );
+  const seen = new Set();
+  const pending = [];
+  const expectedJzrq = getExpectedNavDateForSyncMode({ now, mode });
+
+  for (const position of positions || []) {
+    const fundCode = String(position.fund_code || '').trim();
+    if (!fundCode || seen.has(fundCode)) continue;
+    seen.add(fundCode);
+
+    const fundName = position.fund_name || position.name || '';
+    const category = isDelayedNavFund(fundName) ? 'qdii' : 'normal';
+    if (category === 'qdii' && !includeQdii) continue;
+
+    const snapshot = snapshotMap.get(fundCode);
+    const currentJzrq = snapshot?.jzrq || null;
+    if (currentJzrq && currentJzrq >= expectedJzrq) continue;
+
+    pending.push({
+      fund_code: fundCode,
+      fund_name: fundName,
+      current_jzrq: currentJzrq,
+      expected_jzrq: expectedJzrq,
+      category,
+      pending_reason: currentJzrq ? 'date_not_advanced' : 'missing_snapshot',
+    });
+  }
+
+  return pending;
+}
+
+async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
+  let nav = null;
+  let navDate = null;
+  let gszzl = null;
+  let prev_nav = null;
+  let dwjz = null;
+  let name = fundNameFallback || '';
+
+  const [res2, resGz] = await Promise.all([
+    fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+    }),
+    fetch(`https://fundgz.1234567.com.cn/js/${fundCode}.js?v=${Date.now()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Referer': 'http://fundgz.1234567.com.cn/'
+      }
+    })
+  ]);
+
+  const text2 = await res2.text();
+  const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
+  if (nameMatch) name = nameMatch[1];
+  const latestNetWorth = parsePingzhongdataNetWorth(text2);
+  if (latestNetWorth) {
+    nav = latestNetWorth.currentNAV;
+    prev_nav = latestNetWorth.prevNAV;
+    navDate = latestNetWorth.navDate;
+    gszzl = latestNetWorth.changeRate;
+  }
+
+  const textGz = await resGz.text();
+  const gzMatch = textGz.match(/jsonpgz\((.+)\)/);
+  if (gzMatch) {
+    try {
+      const gzData = JSON.parse(gzMatch[1]);
+      if (gzData.gsz) {
+        const estimateNav = parseFloat(gzData.gsz);
+        const estimateChange = parseFloat(gzData.gszzl);
+        const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
+        const officialNavYesterday = parseFloat(gzData.dwjz);
+        const mergedSnapshot = mergeFundEstimateIntoSnapshot({
+          nav,
+          navDate,
+          gszzl,
+          prev_nav,
+          estimateNav,
+          estimateChange,
+          officialNavYesterday,
+          fundGzNavDate,
+        });
+        nav = mergedSnapshot.nav;
+        navDate = mergedSnapshot.navDate;
+        gszzl = mergedSnapshot.gszzl;
+        prev_nav = mergedSnapshot.prev_nav;
+        dwjz = mergedSnapshot.dwjz || dwjz;
+      }
+    } catch (_) {}
+  }
+
+  const { results: oldSnap } = await env.DB.prepare(
+    'SELECT last_nav, last_gszzl FROM market_snapshot WHERE fund_code = ?'
+  ).bind(fundCode).all();
+  const oldLastNav = oldSnap.length > 0 ? oldSnap[0].last_nav : null;
+
+  await env.DB.prepare(`
+    INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, prev_nav, last_nav, last_gszzl, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    ON CONFLICT(fund_code) DO UPDATE SET
+      name = excluded.name,
+      dwjz = excluded.dwjz,
+      gsz = excluded.gsz,
+      gszzl = excluded.gszzl,
+      jzrq = excluded.jzrq,
+      gztime = excluded.gztime,
+      prev_nav = excluded.prev_nav,
+      last_nav = excluded.last_nav,
+      last_gszzl = excluded.last_gszzl,
+      updated_at = unixepoch()
+  `).bind(fundCode, name, dwjz || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
+
+  const { results: positions } = await env.DB.prepare(
+    'SELECT id, quantity FROM positions WHERE fund_code = ?'
+  ).bind(fundCode).all();
+
+  for (const pos of positions) {
+    const yesterdayProfit = resolveDisplayedYesterdayProfit({
+      shares: pos.quantity || 0,
+      confirmedNav: dwjz || nav || 0,
+      prevNav: prev_nav || 0,
+      storedChangeRate: gszzl,
+    });
+    await env.DB.prepare(`
+      UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
+    `).bind(yesterdayProfit, pos.id).run();
+  }
+
+  return {
+    ok: !!nav,
+    fund_code: fundCode,
+    fund_name: name,
+    gsz: nav,
+    gszzl,
+    prev_nav,
+    dwjz: dwjz || nav,
+    confirmed_nav: dwjz || nav,
+    last_nav: oldLastNav,
+    jzrq: navDate,
+  };
+}
+
+async function getPendingFunds(env, {
+  now = new Date(),
+  mode = 'night',
+  includeQdii = false,
+} = {}) {
+  const { results: positions } = await env.DB.prepare(
+    'SELECT DISTINCT fund_code, fund_name FROM positions WHERE fund_code IS NOT NULL AND fund_code != ""'
+  ).all();
+
+  const { results: snapshots } = await env.DB.prepare(
+    'SELECT fund_code, jzrq FROM market_snapshot'
+  ).all();
+
+  return buildPendingFundList({
+    positions,
+    snapshots,
+    now,
+    mode,
+    includeQdii,
+  });
+}
+
+async function syncPendingFunds(env, {
+  now = new Date(),
+  mode = 'night',
+  includeQdii = false,
+  batchSize = 3,
+} = {}) {
+  const pendingFunds = await getPendingFunds(env, { now, mode, includeQdii });
+  const results = {};
+
+  for (let i = 0; i < pendingFunds.length; i += batchSize) {
+    const batch = pendingFunds.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (fund) => {
+        try {
+          const result = await syncOneFundSnapshot(env, fund.fund_code, fund.fund_name);
+          return [fund.fund_code, {
+            ...result,
+            before_jzrq: fund.current_jzrq,
+            expected_jzrq: fund.expected_jzrq,
+            category: fund.category,
+            advanced: Boolean(result.jzrq && (!fund.current_jzrq || result.jzrq > fund.current_jzrq)),
+          }];
+        } catch (error) {
+          return [fund.fund_code, {
+            ok: false,
+            fund_code: fund.fund_code,
+            fund_name: fund.fund_name,
+            before_jzrq: fund.current_jzrq,
+            expected_jzrq: fund.expected_jzrq,
+            category: fund.category,
+            reason: String(error?.message || error),
+          }];
+        }
+      })
+    );
+
+    for (const [fundCode, result] of batchResults) {
+      results[fundCode] = result;
+    }
+  }
+
+  const stillPendingFunds = await getPendingFunds(env, { now, mode, includeQdii });
+  const syncedCount = Object.values(results).filter(item => item.ok).length;
+
+  return {
+    mode: normalizeSyncMode(mode),
+    include_qdii: includeQdii,
+    batch_size: batchSize,
+    total_pending_before_sync: pendingFunds.length,
+    synced: syncedCount,
+    failed: Object.values(results).filter(item => !item.ok).length,
+    still_pending_count: stillPendingFunds.length,
+    still_pending_funds: stillPendingFunds,
+    results,
+  };
+}
+
 // 主处理函数
 export async function onRequest(context) {
   const url = new URL(context.request.url);
@@ -201,9 +602,12 @@ export async function onRequest(context) {
       // gsz 仅作为盘中估算信息保留给前端详情展示，不直接覆盖主列表金额。
       const marketNav = confirmedNav || estimateNav || 0;
       const prevNav = r.prev_nav || 0;
-      const yesterdayProfit = shares > 0 && confirmedNav > 0 && prevNav > 0
-        ? parseFloat(((confirmedNav - prevNav) * shares).toFixed(4))
-        : 0;
+      const yesterdayProfit = resolveDisplayedYesterdayProfit({
+        shares,
+        confirmedNav,
+        prevNav,
+        storedChangeRate: r.nav_gszzl,
+      });
       const currentMarketValue = shares > 0 && marketNav > 0
         ? parseFloat((shares * marketNav).toFixed(4))
         : 0;
@@ -215,13 +619,12 @@ export async function onRequest(context) {
       const profitRate = cost > 0
         ? parseFloat(((currentProfit / cost) * 100).toFixed(4))
         : 0;
-      const hasIntradayEstimate = estimateNav > 0 && confirmedNav > 0
-        && Math.abs(estimateNav - confirmedNav) > 0.000001;
-      const navGszzl = hasIntradayEstimate
-        ? parseFloat((((estimateNav - confirmedNav) / confirmedNav) * 100).toFixed(4))
-        : (confirmedNav > 0 && prevNav > 0
-          ? parseFloat((((confirmedNav - prevNav) / prevNav) * 100).toFixed(4))
-          : (r.nav_gszzl != null ? r.nav_gszzl : null));
+      const navGszzl = resolveDisplayedNavGszzl({
+        storedChangeRate: r.nav_gszzl,
+        estimateNav,
+        confirmedNav,
+        prevNav,
+      });
       const navDate = r.nav_jzrq || null;
       const dailyProfitMeta = getDailyProfitMeta(navDate, new Date(), r.fund_name || '');
 
@@ -1465,6 +1868,54 @@ export async function onRequest(context) {
       }
     }
 
+    // 查询待补同步基金列表
+    if (path === '/api/fund/pending' && method === 'GET') {
+      try {
+        const mode = normalizeSyncMode(url.searchParams.get('mode') || 'night');
+        const includeQdii = parseBooleanLike(url.searchParams.get('includeQdii'), false);
+        const now = new Date();
+        const funds = await getPendingFunds(env, { now, mode, includeQdii });
+
+        return jsonResponse({
+          code: 0,
+          mode,
+          include_qdii: includeQdii,
+          expected_jzrq: getExpectedNavDateForSyncMode({ now, mode }),
+          pending: funds.length,
+          funds,
+        });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
+    // 只同步待补基金
+    if (path === '/api/fund/sync/pending' && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !env.CLOUDFLARE_CRON_TRIGGER) {
+        return jsonResponse({ code: 403, message: 'Forbidden: cron trigger only' }, 403);
+      }
+
+      try {
+        const mode = normalizeSyncMode(url.searchParams.get('mode') || 'night');
+        const includeQdii = parseBooleanLike(url.searchParams.get('includeQdii'), false);
+        const batchSize = normalizeBatchSize(url.searchParams.get('batchSize'), 3);
+        const result = await syncPendingFunds(env, {
+          now: new Date(),
+          mode,
+          includeQdii,
+          batchSize,
+        });
+
+        return jsonResponse({
+          code: 0,
+          message: `Synced ${result.synced}/${result.total_pending_before_sync} pending funds`,
+          ...result,
+        });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
+    }
+
     // 净值同步接口
     // 支持 GET（手动触发）和 POST（cron 触发，校验 CLOUDFLARE_CRON_TRIGGER）
     if (path === '/api/fund/sync' && (method === 'GET' || method === 'POST')) {
@@ -1508,22 +1959,12 @@ export async function onRequest(context) {
             const text2 = await res2.text();
             const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
             if (nameMatch) name = nameMatch[1];
-            const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
-            if (navMatch) {
-              const allPoints = [...navMatch[1].matchAll(/"x":(\d+),\s*"y":([\d.]+)/g)];
-              if (allPoints.length >= 2) {
-                const last = allPoints[allPoints.length - 1];
-                const prev = allPoints[allPoints.length - 2];
-                const currentNAV = parseFloat(last[2]);
-                const currentDate = new Date(parseInt(last[1]) + 8 * 3600 * 1000).toISOString().split('T')[0];
-                const prevNAV = parseFloat(prev[2]);
-                if (prevNAV > 0) {
-                  gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
-                }
-                nav = currentNAV;
-                prev_nav = prevNAV;
-                navDate = currentDate;
-              }
+            const latestNetWorth = parsePingzhongdataNetWorth(text2);
+            if (latestNetWorth) {
+              nav = latestNetWorth.currentNAV;
+              prev_nav = latestNetWorth.prevNAV;
+              navDate = latestNetWorth.navDate;
+              gszzl = latestNetWorth.changeRate;
             }
 
             // 解析 fundgz 实时估算（兜底：pingzhongdata 日期非今日时用这个）
@@ -1542,32 +1983,21 @@ export async function onRequest(context) {
                 // 所以用 jzrq 做日期比较：fundgz 的 jzrq > navDate 才说明 fundgz 有更新的净值
                 const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
                 const officialNavYesterday = parseFloat(gzData.dwjz);
-                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
-                const dateIsNewer = fundGzNavDate > navDate;
-                // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
-                // 情况2：同日期且 fundgz 的 gsz 既不同于 dwjz、也不同于 pingzhongdata 最新净值 → 说明 fundgz 确实提供了额外的盘中估算
-                // 如果 gsz 与 pingzhongdata 最新净值相同，说明 pingzhongdata 已是最新确认净值，不应再把 dwjz（上一确认净值）覆盖到当前净值位置
-                const hasSameDayEstimate = fundGzNavDate === navDate
-                  && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4)
-                  && estimateNav.toFixed(4) !== nav.toFixed(4);
-                if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
-                  if (dateIsNewer) {
-                    // fundgz 有新的确认净值（前一交易日）
-                    // nav 更新为估算，prev_nav = pingzhongdata 当前 nav（上一个确认日），dwjz = officialNavYesterday（上一个确认净值）
-                    prev_nav = nav > 0 ? nav : prev_nav;
-                    nav = estimateNav;
-                    navDate = fundGzNavDate;
-                    gszzl = estimateChange;
-                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
-                  } else if (hasSameDayEstimate) {
-                    // fundgz 有今日盘中估算（jzrq = 今日）
-                    // nav 更新为估算，prev_nav 不变（正确的上一个确认日）
-                    // dwjz 应保持上一确认净值，避免被估算净值覆盖
-                    nav = estimateNav;
-                    gszzl = estimateChange;
-                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
-                  }
-                }
+                const mergedSnapshot = mergeFundEstimateIntoSnapshot({
+                  nav,
+                  navDate,
+                  gszzl,
+                  prev_nav,
+                  estimateNav,
+                  estimateChange,
+                  officialNavYesterday,
+                  fundGzNavDate,
+                });
+                nav = mergedSnapshot.nav;
+                navDate = mergedSnapshot.navDate;
+                gszzl = mergedSnapshot.gszzl;
+                prev_nav = mergedSnapshot.prev_nav;
+                dwjz = mergedSnapshot.dwjz || dwjz;
               }
               } catch (_) {}
             }
@@ -1638,125 +2068,16 @@ export async function onRequest(context) {
       const fundCode = path.split('/').pop();
       
       try {
-        let nav = null, navDate = null, gszzl = null, prev_nav = null, dwjz = null, name = '';
-
-        // 同时请求 pingzhongdata + fundgz
-        const [res2, resGz] = await Promise.all([
-          fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-          }),
-          fetch(`https://fundgz.1234567.com.cn/js/${fundCode}.js?v=${Date.now()}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Referer': 'http://fundgz.1234567.com.cn/' }
-          })
-        ]);
-
-        // 解析 pingzhongdata（官方净值）
-        const text2 = await res2.text();
-        const nameMatch = text2.match(/f_S_name\s*=\s*["']([^"']+)["']/);
-        if (nameMatch) name = nameMatch[1];
-        const navMatch = text2.match(/Data_netWorthTrend\s*=\s*\[([\s\S]*?)\];/);
-        if (navMatch) {
-          const allPoints = [...navMatch[1].matchAll(/"x":(\d+),\s*"y":([\d.]+)/g)];
-          if (allPoints.length >= 2) {
-            const last = allPoints[allPoints.length - 1];
-            const prev = allPoints[allPoints.length - 2];
-            const currentNAV = parseFloat(last[2]);
-            const currentDate = new Date(parseInt(last[1]) + 8 * 3600 * 1000).toISOString().split('T')[0];
-            const prevNAV = parseFloat(prev[2]);
-            if (prevNAV > 0) {
-              gszzl = parseFloat(((currentNAV - prevNAV) / prevNAV * 100).toFixed(4));
-            }
-            nav = currentNAV;
-            prev_nav = prevNAV;
-            navDate = currentDate;
-          }
-        }
-
-        // 解析 fundgz 实时估算（兜底）
-        const textGz = await resGz.text();
-        const gzMatch = textGz.match(/jsonpgz\((.+)\)/);
-        if (gzMatch) {
-          try {
-              const gzData = JSON.parse(gzMatch[1]);
-              if (gzData.gsz) {
-                const estimateNav = parseFloat(gzData.gsz);
-                const estimateChange = parseFloat(gzData.gszzl);
-                // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
-                const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
-                const officialNavYesterday = parseFloat(gzData.dwjz);
-                const shouldReplace = navDate && fundGzNavDate && estimateNav > 0;
-                const dateIsNewer = fundGzNavDate > navDate;
-                // 情况1：fundgz 的净值日期更新 → 直接用 fundgz 的值
-                // 情况2：同日期且 fundgz 的 gsz 既不同于 dwjz、也不同于 pingzhongdata 最新净值 → 说明 fundgz 确实提供了额外的盘中估算
-                // 如果 gsz 与 pingzhongdata 最新净值相同，说明 pingzhongdata 已是最新确认净值，不应再把 dwjz（上一确认净值）覆盖到当前净值位置
-                const hasSameDayEstimate = fundGzNavDate === navDate
-                  && estimateNav.toFixed(4) !== officialNavYesterday.toFixed(4)
-                  && estimateNav.toFixed(4) !== nav.toFixed(4);
-                if (shouldReplace && (dateIsNewer || hasSameDayEstimate)) {
-                  if (dateIsNewer) {
-                    prev_nav = nav > 0 ? nav : prev_nav;
-                    nav = estimateNav;
-                    navDate = fundGzNavDate;
-                    gszzl = estimateChange;
-                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
-                  } else if (hasSameDayEstimate) {
-                    nav = estimateNav;
-                    gszzl = estimateChange;
-                    dwjz = officialNavYesterday > 0 ? officialNavYesterday : dwjz;
-                  }
-                }
-              }
-          } catch (_) {}
-        }
-        
-        const { results: oldSnap } = await env.DB.prepare(
-          'SELECT last_nav, last_gszzl FROM market_snapshot WHERE fund_code = ?'
-        ).bind(fundCode).all();
-        const oldLastNav = oldSnap.length > 0 ? oldSnap[0].last_nav : null;
-        const oldLastGszzl = oldSnap.length > 0 ? oldSnap[0].last_gszzl : null;
-
-        await env.DB.prepare(`
-          INSERT INTO market_snapshot (fund_code, name, dwjz, gsz, gszzl, jzrq, gztime, prev_nav, last_nav, last_gszzl, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
-          ON CONFLICT(fund_code) DO UPDATE SET
-            name = excluded.name,
-            dwjz = excluded.dwjz,
-            gsz = excluded.gsz,
-            gszzl = excluded.gszzl,
-            jzrq = excluded.jzrq,
-            gztime = excluded.gztime,
-            prev_nav = excluded.prev_nav,
-            last_nav = excluded.last_nav,
-            last_gszzl = excluded.last_gszzl,
-            updated_at = unixepoch()
-        `).bind(fundCode, name, dwjz || nav, nav, gszzl, navDate, navDate ? `${navDate} 00:00:00` : null, prev_nav, prev_nav, gszzl).run();
-        
-        // 更新该基金所有持仓的昨日收益
-        // 口径统一为：昨日收益 = (最新确认净值 - 前一交易日净值) × 份额
-        const { results: positions } = await env.DB.prepare(
-          'SELECT id, quantity FROM positions WHERE fund_code = ?'
-        ).bind(fundCode).all();
-        
-        for (const pos of positions) {
-          let yesterdayProfit = 0;
-          const confirmedNav = dwjz || nav || 0;
-          if (prev_nav > 0 && confirmedNav > 0) {
-            yesterdayProfit = parseFloat(((confirmedNav - prev_nav) * (pos.quantity || 0)).toFixed(4));
-          }
-          await env.DB.prepare(`
-            UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
-          `).bind(yesterdayProfit, pos.id).run();
-        }
-        
+        const result = await syncOneFundSnapshot(env, fundCode, '');
         return jsonResponse({
           code: 0,
-          message: nav ? 'Synced successfully' : 'Fund data not found',
+          message: result.ok ? 'Synced successfully' : 'Fund data not found',
           fund_code: fundCode,
-          gsz: nav,
-          gszzl,
-          prev_nav,
-          last_nav: oldLastNav,
-          jzrq: navDate,
+          gsz: result.gsz,
+          gszzl: result.gszzl,
+          prev_nav: result.prev_nav,
+          last_nav: result.last_nav,
+          jzrq: result.jzrq,
         });
       } catch (error) {
         return jsonResponse({ code: 500, message: error.message }, 500);

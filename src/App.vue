@@ -19,7 +19,7 @@
     </div>
 
     <!-- 底部导航（仅登录后显示） -->
-    <van-tabbar v-if="isLoggedIn" v-model="activeTab" route fixed class="app-tabbar">
+    <van-tabbar v-if="isLoggedIn && appTabbarVisible" v-model="activeTab" route fixed class="app-tabbar">
       <van-tabbar-item
         v-for="tab in tabs"
         :key="tab.to"
@@ -40,7 +40,7 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { KEEP_ALIVE_ROUTE_NAMES } from './utils/appShell'
+import { KEEP_ALIVE_ROUTE_NAMES, appTabbarVisible } from './utils/appShell'
 
 const route = useRoute()
 const activeTab = ref(0)

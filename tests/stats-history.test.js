@@ -8,6 +8,7 @@ import {
   buildDisplayTrendSeries,
   buildMemberFilterOptions,
   buildAccountFilterOptions,
+  getDailyProfitUpdateStatus,
 } from '../src/utils/statsHistory.js'
 
 const snapshots = [
@@ -101,6 +102,54 @@ test('按天历史行可输出全部账户汇总', () => {
   assert.equal(rows[0].daily_profit, 44)
 })
 
+test('全部账户历史行优先使用基金昨日收益，不混入顾投昨日收益', () => {
+  const mixedSnapshots = [
+    {
+      date: '2026-06-10',
+      summary: {
+        totalMarketValue: 10000,
+        totalHoldingProfit: 800,
+        totalProfitRate: 8,
+        totalYesterdayProfit: 102.9,
+        totalPositionYesterdayProfit: 156.66,
+        totalAdvisoryYesterdayProfit: -53.76,
+      },
+      positions: [
+        { id: 'fund-a', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 5000, current_profit: 300, yesterday_profit: 100, nav_jzrq: '2026-06-10' },
+        { id: 'fund-b', fund_code: 'B', account_id: 'ali', account_name: '支付宝', member_id: 'me', member_name: '本人', cost: 3000, current_profit: 200, yesterday_profit: 56.66, nav_jzrq: '2026-06-10' },
+        { id: 'advisory-1', fund_code: 'advisory-1', account_id: 'adv', account_name: '顾投', member_id: 'me', member_name: '本人', cost: 2000, current_profit: 300, yesterday_profit: -53.76, nav_jzrq: '2026-06-10' },
+      ],
+    },
+  ]
+
+  const rows = buildDailyHistoryRows(mixedSnapshots, { memberId: 'all', accountId: 'all' })
+
+  assert.equal(rows[0].daily_profit, 156.66)
+})
+
+test('旧快照缺少基金昨日收益汇总字段时，会回退为仅累加基金昨日收益', () => {
+  const legacySnapshots = [
+    {
+      date: '2026-06-10',
+      summary: {
+        totalMarketValue: 10000,
+        totalHoldingProfit: 800,
+        totalProfitRate: 8,
+        totalYesterdayProfit: 102.9,
+      },
+      positions: [
+        { id: 'fund-a', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 5000, current_profit: 300, yesterday_profit: 100, nav_jzrq: '2026-06-10' },
+        { id: 'fund-b', fund_code: 'B', account_id: 'ali', account_name: '支付宝', member_id: 'me', member_name: '本人', cost: 3000, current_profit: 200, yesterday_profit: 56.66, nav_jzrq: '2026-06-10' },
+        { id: 'advisory-1', fund_code: 'advisory-1', account_id: 'adv', account_name: '顾投', member_id: 'me', member_name: '本人', cost: 2000, current_profit: 300, yesterday_profit: -53.76, nav_jzrq: '2026-06-10' },
+      ],
+    },
+  ]
+
+  const rows = buildDailyHistoryRows(legacySnapshots, { memberId: 'all', accountId: 'all' })
+
+  assert.equal(rows[0].daily_profit, 156.66)
+})
+
 test('基金日收益签名未变化的重复快照不会进入历史每日统计', () => {
   const rows = buildDailyHistoryRows(snapshots, { memberId: 'all', accountId: 'all' })
 
@@ -153,6 +202,39 @@ test('QDII 在下一个交易日更新上一交易日收益时，也会计入当
   assert.equal(rows[0].daily_profit, 45)
 })
 
+test('仅估算净值变化但日收益未更新时，不应把当天快照计入趋势图/历史日收益', () => {
+  const intradaySnapshots = [
+    {
+      date: '2026-06-08',
+      summary: {
+        totalMarketValue: 1000,
+        totalHoldingProfit: 100,
+        totalProfitRate: 11.11,
+        totalYesterdayProfit: 20,
+      },
+      positions: [
+        { id: 'f1', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 900, current_profit: 100, yesterday_profit: 20, nav_dwjz: 1.2, nav_gsz: 1.2, nav_jzrq: '2026-06-08' },
+      ],
+    },
+    {
+      date: '2026-06-09',
+      summary: {
+        totalMarketValue: 1010,
+        totalHoldingProfit: 110,
+        totalProfitRate: 12.22,
+        totalYesterdayProfit: 20,
+      },
+      positions: [
+        { id: 'f1', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 900, current_profit: 110, yesterday_profit: 20, nav_dwjz: 1.2, nav_gsz: 1.21, nav_jzrq: '2026-06-08' },
+      ],
+    },
+  ]
+
+  const rows = buildDailyHistoryRows(intradaySnapshots, { memberId: 'all', accountId: 'all' })
+
+  assert.deepEqual(rows.map(item => item.date), ['2026-06-08'])
+})
+
 test('按天历史行可按单账户过滤并重算收益率', () => {
   const rows = buildDailyHistoryRows(snapshots, { memberId: 'all', accountId: 'jd' })
 
@@ -183,8 +265,47 @@ test('周期历史行可按月聚合并计算当期收益', () => {
   assert.equal(rows[0].period_key, '2026-06')
   assert.equal(rows[0].period_label, '2026年06月')
   assert.equal(rows[0].period_profit, 44)
+  assert.equal(rows[0].period_profit_rate, 0.97)
+  assert.equal(rows[0].period_max_drawdown, 0)
   assert.equal(rows[1].period_key, '2026-05')
   assert.equal(rows[1].period_profit, 110)
+  assert.equal(rows[1].period_profit_rate, 2.69)
+  assert.equal(rows[1].period_max_drawdown, 0)
+})
+
+test('周期历史行可计算当期最大亏损', () => {
+  const drawdownSnapshots = [
+    {
+      date: '2026-06-10',
+      summary: {
+        totalMarketValue: 1000,
+        totalHoldingProfit: 100,
+        totalProfitRate: 11.11,
+        totalYesterdayProfit: 20,
+      },
+      positions: [
+        { id: 'f1', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 900, current_profit: 100, yesterday_profit: 20, nav_jzrq: '2026-06-10' },
+      ],
+    },
+    {
+      date: '2026-06-11',
+      summary: {
+        totalMarketValue: 970,
+        totalHoldingProfit: 70,
+        totalProfitRate: 7.78,
+        totalYesterdayProfit: -30,
+      },
+      positions: [
+        { id: 'f1', fund_code: 'A', account_id: 'jd', account_name: '京东', member_id: 'me', member_name: '本人', cost: 900, current_profit: 70, yesterday_profit: -30, nav_jzrq: '2026-06-11' },
+      ],
+    },
+  ]
+
+  const rows = buildPeriodHistoryRows(drawdownSnapshots, { memberId: 'all', accountId: 'all', period: 'month' })
+
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].period_profit, -10)
+  assert.equal(rows[0].period_max_drawdown, -30)
 })
 
 test('短周期趋势图按天展示每天一个数据点', () => {
@@ -224,4 +345,47 @@ test('基础趋势序列函数仍可按指定指标输出', () => {
 
   assert.deepEqual(series.map(item => item.label), ['05-30', '05-31', '06-02'])
   assert.deepEqual(series.map(item => item.value), [420, 610, 820])
+})
+
+test('今日收益未更新时，会明确提示当前显示上一交易日收益', () => {
+  const positions = [
+    { id: 'fund-a', fund_code: 'A', nav_jzrq: '2026-06-08' },
+    { id: 'fund-b', fund_code: 'B', nav_jzrq: '2026-06-08' },
+    { id: 'advisory-1', fund_code: 'advisory-1', nav_jzrq: '2026-06-09' },
+  ]
+
+  const status = getDailyProfitUpdateStatus(positions, new Date('2026-06-09T08:00:00+08:00'))
+
+  assert.equal(status.status, 'stale')
+  assert.equal(status.helperText, '今日未更新，当前显示上一交易日收益')
+  assert.equal(status.updatedCount, 0)
+  assert.equal(status.totalCount, 2)
+})
+
+test('今日收益全部更新时，会显示已更新状态', () => {
+  const positions = [
+    { id: 'fund-a', fund_code: 'A', nav_jzrq: '2026-06-09' },
+    { id: 'fund-b', fund_code: 'B', nav_jzrq: '2026-06-09' },
+  ]
+
+  const status = getDailyProfitUpdateStatus(positions, new Date('2026-06-09T20:00:00+08:00'))
+
+  assert.equal(status.status, 'updated')
+  assert.equal(status.helperText, '今日收益已更新')
+  assert.equal(status.updatedCount, 2)
+  assert.equal(status.totalCount, 2)
+})
+
+test('部分基金更新时，会显示部分更新状态', () => {
+  const positions = [
+    { id: 'fund-a', fund_code: 'A', nav_jzrq: '2026-06-09' },
+    { id: 'fund-b', fund_code: 'B', nav_jzrq: '2026-06-08' },
+  ]
+
+  const status = getDailyProfitUpdateStatus(positions, new Date('2026-06-09T20:00:00+08:00'))
+
+  assert.equal(status.status, 'partial')
+  assert.equal(status.helperText, '部分基金今日已更新（1/2），当前合计仍含上一交易日收益')
+  assert.equal(status.updatedCount, 1)
+  assert.equal(status.totalCount, 2)
 })

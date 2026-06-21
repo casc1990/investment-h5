@@ -34,6 +34,8 @@ const writeStore = (snapshots) => {
 const normalizeSummary = (summary = {}) => ({
   totalMarketValue: safeNumber(summary.totalMarketValue),
   totalYesterdayProfit: safeNumber(summary.totalYesterdayProfit),
+  totalPositionYesterdayProfit: safeNumber(summary.totalPositionYesterdayProfit),
+  totalAdvisoryYesterdayProfit: safeNumber(summary.totalAdvisoryYesterdayProfit),
   totalHoldingProfit: safeNumber(summary.totalHoldingProfit),
   totalCumulativeProfit: safeNumber(summary.totalCumulativeProfit ?? summary.totalHoldingProfit),
   totalProfitRate: safeNumber(summary.totalProfitRate),
