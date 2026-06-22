@@ -110,6 +110,10 @@ export const marketApi = {
   syncFund: (fundCode) => apiClient.get(`/fund/sync/${fundCode}`),
 }
 
+export const fundApi = {
+  detail: (fundCode) => apiClient.get(`/funds/${fundCode}/detail`),
+}
+
 // ============ 成员 API ============
 
 export const memberApi = {

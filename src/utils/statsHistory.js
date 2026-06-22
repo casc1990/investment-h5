@@ -71,6 +71,78 @@ const normalizeScopeLabel = ({ memberName = '', accountName = '', memberId = 'al
 
 const isAdvisoryPosition = (item = {}) => String(item.id || item.fund_code || '').startsWith('advisory-')
 
+const normalizeText = (value = '') => String(value || '').trim().toLowerCase()
+
+const containsAny = (text = '', keywords = []) => keywords.some(keyword => text.includes(keyword))
+
+const getPositionMarketValue = (item = {}) => {
+  const directValue = Number(item.current_market_value)
+  if (Number.isFinite(directValue)) return directValue
+  return safeNumber(item.cost) + safeNumber(item.current_profit)
+}
+
+const detectFundType = (item = {}) => {
+  const explicitType = normalizeText(item.fund_type)
+  if (explicitType === 'qdii') return 'QDII'
+  if (explicitType === '债券') return '债券'
+  if (explicitType === '固收') return '固收'
+  if (explicitType === '指数') return '指数'
+  if (explicitType === '其他') return '其他'
+
+  const name = normalizeText(item.fund_name)
+  const code = normalizeText(item.fund_code)
+  const text = `${name} ${code}`
+
+  if (containsAny(text, ['qdii', '纳斯达克', '纳指', '标普', '恒生', '日经', '道琼斯', 'msci', '海外', '全球'])) return 'QDII'
+  if (containsAny(text, ['固收', '理财', '稳利', '稳健增利', '固定收益'])) return '固收'
+  if (containsAny(text, ['债券', '短债', '中短债', '纯债', '可转债'])) return '债券'
+  if (containsAny(text, ['指数', 'etf', '联接', '沪深300', '中证', '创业板', '科创'])) return '指数'
+  return '其他'
+}
+
+const normalizeFundTypeValue = (value = 'all') => {
+  const text = normalizeText(value)
+  if (!text || text === 'all') return 'all'
+  if (text === 'qdii') return 'qdii'
+  if (text === '债券') return 'bond'
+  if (text === '固收') return 'fixed_income'
+  if (text === '指数') return 'index'
+  if (text === '其他') return 'other'
+  return text
+}
+
+const matchesFundType = (item = {}, fundType = 'all') => {
+  const normalized = normalizeFundTypeValue(fundType)
+  if (normalized === 'all') return true
+  const typeLabel = detectFundType(item)
+  if (normalized === 'qdii') return typeLabel === 'QDII'
+  if (normalized === 'bond') return typeLabel === '债券'
+  if (normalized === 'fixed_income') return typeLabel === '固收'
+  if (normalized === 'index') return typeLabel === '指数'
+  if (normalized === 'other') return typeLabel === '其他'
+  return true
+}
+
+const matchesFundQuery = (item = {}, fundQuery = '') => {
+  const query = normalizeText(fundQuery)
+  if (!query) return true
+  const haystack = `${normalizeText(item.fund_name)} ${normalizeText(item.fund_code)}`
+  return haystack.includes(query)
+}
+
+const matchesFundCode = (item = {}, fundCode = 'all') => {
+  const normalized = normalizeText(fundCode)
+  if (!normalized || normalized === 'all') return true
+  return normalizeText(item.fund_code) === normalized
+}
+
+const annotatePosition = (item = {}) => ({
+  ...item,
+  fund_type: item.fund_type || detectFundType(item),
+})
+
+const hasFundScopedFilters = ({ fundType = 'all', fundQuery = '' } = {}) => normalizeFundTypeValue(fundType) !== 'all' || Boolean(normalizeText(fundQuery))
+
 const getChinaDateString = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Shanghai',
@@ -102,7 +174,7 @@ const calcPositionDailyProfit = (summary = {}, positions = []) => {
 const aggregatePositions = (positions = [], { memberId = 'all', accountId = 'all' } = {}) => {
   const memberName = positions[0]?.member_name || ''
   const accountName = positions[0]?.account_name || ''
-  const totalMarketValue = positions.reduce((sum, item) => sum + safeNumber(item.cost) + safeNumber(item.current_profit), 0)
+  const totalMarketValue = positions.reduce((sum, item) => sum + getPositionMarketValue(item), 0)
   const totalProfit = positions.reduce((sum, item) => sum + safeNumber(item.current_profit), 0)
   const dailyProfit = positions.reduce((sum, item) => sum + safeNumber(item.yesterday_profit), 0)
 
@@ -118,12 +190,28 @@ const aggregatePositions = (positions = [], { memberId = 'all', accountId = 'all
   }
 }
 
-const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 'all' } = {}) => {
-  return (snapshot.positions || []).filter((item) => {
-    if (memberId !== 'all' && item.member_id !== memberId) return false
-    if (accountId !== 'all' && item.account_id !== accountId) return false
-    return true
-  })
+const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '', fundCode = 'all' } = {}) => {
+  return (snapshot.positions || [])
+    .map(annotatePosition)
+    .filter((item) => {
+      if (memberId !== 'all' && item.member_id !== memberId) return false
+      if (accountId !== 'all' && item.account_id !== accountId) return false
+      if (!matchesFundType(item, fundType)) return false
+      if (!matchesFundQuery(item, fundQuery)) return false
+      if (!matchesFundCode(item, fundCode)) return false
+      return true
+    })
+}
+
+const resolveSnapshotEffectiveDate = (snapshot = {}, positions = []) => {
+  const fundDates = positions
+    .filter(item => !isAdvisoryPosition(item))
+    .map(item => String(item.nav_jzrq || '').trim())
+    .filter(Boolean)
+
+  if (!fundDates.length) return snapshot.date
+
+  return [...fundDates].sort().at(-1) || snapshot.date
 }
 
 const buildDailyProfitSignatureMap = (positions = []) => new Map(
@@ -154,20 +242,25 @@ const hasDailyProfitUpdateForSnapshot = (positions = [], previousPositions = [])
   })
 }
 
-export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all' } = {}) => {
+export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '' } = {}) => {
   const sortedSnapshots = sortSnapshotsAsc(snapshots)
   const rows = sortedSnapshots.map((snapshot, index) => {
-    const filteredPositions = filterSnapshotPositions(snapshot, { memberId, accountId })
+    const filteredPositions = filterSnapshotPositions(snapshot, { memberId, accountId, fundType, fundQuery })
     const previousFilteredPositions = index > 0
-      ? filterSnapshotPositions(sortedSnapshots[index - 1], { memberId, accountId })
+      ? filterSnapshotPositions(sortedSnapshots[index - 1], { memberId, accountId, fundType, fundQuery })
       : []
     if (!hasDailyProfitUpdateForSnapshot(filteredPositions, previousFilteredPositions)) return null
 
-    if (memberId === 'all' && accountId === 'all') {
+    const effectiveDate = resolveSnapshotEffectiveDate(snapshot, filteredPositions)
+    const shouldUseSummary = memberId === 'all'
+      && accountId === 'all'
+      && !hasFundScopedFilters({ fundType, fundQuery })
+
+    if (shouldUseSummary) {
       const summary = snapshot.summary || {}
       const positionDailyProfit = calcPositionDailyProfit(summary, filteredPositions)
       return {
-        date: snapshot.date,
+        date: effectiveDate,
         member_id: 'all',
         member_name: '全部成员',
         account_id: 'all',
@@ -183,7 +276,7 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
     if (!filteredPositions.length) return null
 
     return {
-      date: snapshot.date,
+      date: effectiveDate,
       account_id: accountId,
       ...aggregatePositions(filteredPositions, { memberId, accountId }),
     }
@@ -192,8 +285,8 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
   return sortRowsDesc(rows)
 }
 
-export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all', period = 'week' } = {}) => {
-  const dailyRowsAsc = [...buildDailyHistoryRows(snapshots, { memberId, accountId })].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '', period = 'week' } = {}) => {
+  const dailyRowsAsc = [...buildDailyHistoryRows(snapshots, { memberId, accountId, fundType, fundQuery })].sort((a, b) => String(a.date).localeCompare(String(b.date)))
   const groups = new Map()
 
   dailyRowsAsc.forEach((row) => {
@@ -373,6 +466,113 @@ export const buildAccountFilterOptions = (snapshots = [], { memberId = 'all' } =
   ]
 }
 
+export const buildFundTypeFilterOptions = (snapshots = [], { memberId = 'all', accountId = 'all' } = {}) => {
+  const latestSnapshot = [...snapshots].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+  const typeOrder = ['QDII', '债券', '固收', '指数', '其他']
+  const seen = new Set()
+
+  const positions = filterSnapshotPositions(latestSnapshot || {}, { memberId, accountId })
+    .filter(item => !isAdvisoryPosition(item))
+
+  positions.forEach((item) => {
+    seen.add(detectFundType(item))
+  })
+
+  const options = typeOrder
+    .filter(type => seen.has(type))
+    .map((type) => ({
+      text: type,
+      value: type === 'QDII'
+        ? 'qdii'
+        : type === '债券'
+          ? '债券'
+          : type === '固收'
+            ? '固收'
+            : type === '指数'
+              ? '指数'
+              : '其他',
+    }))
+
+  return [
+    { text: '全部类型', value: 'all' },
+    ...options,
+  ]
+}
+
+export const buildFundSelectorOptions = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all' } = {}) => {
+  const rows = buildCurrentFundRows(snapshots, { memberId, accountId, fundType })
+  return [
+    { text: '全部基金', value: 'all' },
+    ...rows.map(item => ({
+      text: `${item.fund_name}（${item.fund_code}）`,
+      value: item.fund_code,
+    })),
+  ]
+}
+
+export const buildCurrentFundRows = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '', fundCode = 'all' } = {}) => {
+  const latestSnapshot = [...snapshots].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+  if (!latestSnapshot) return []
+
+  const positions = filterSnapshotPositions(latestSnapshot, { memberId, accountId, fundType, fundQuery, fundCode })
+    .filter(item => !isAdvisoryPosition(item))
+
+  const grouped = new Map()
+
+  positions.forEach((item) => {
+    const key = item.fund_code || item.fund_name || item.id
+    const existing = grouped.get(key)
+    if (!existing) {
+      grouped.set(key, {
+        fund_code: item.fund_code,
+        fund_name: item.fund_name,
+        fund_type: detectFundType(item),
+        position_count: 1,
+        account_names: new Set([item.account_name].filter(Boolean)),
+        member_names: new Set([item.member_name].filter(Boolean)),
+        total_market_value: getPositionMarketValue(item),
+        total_profit: safeNumber(item.current_profit),
+        daily_profit: safeNumber(item.yesterday_profit),
+        shares: safeNumber(item.shares),
+        cost: safeNumber(item.cost),
+        nav_jzrq: item.nav_jzrq || '',
+      })
+      return
+    }
+
+    existing.position_count += 1
+    if (item.account_name) existing.account_names.add(item.account_name)
+    if (item.member_name) existing.member_names.add(item.member_name)
+    existing.total_market_value += getPositionMarketValue(item)
+    existing.total_profit += safeNumber(item.current_profit)
+    existing.daily_profit += safeNumber(item.yesterday_profit)
+    existing.shares += safeNumber(item.shares)
+    existing.cost += safeNumber(item.cost)
+    if (String(item.nav_jzrq || '') > String(existing.nav_jzrq || '')) existing.nav_jzrq = item.nav_jzrq
+  })
+
+  return Array.from(grouped.values()).map((item) => ({
+    ...item,
+    account_name: item.account_names.size <= 1 ? (Array.from(item.account_names)[0] || '') : `${item.account_names.size}个账户`,
+    member_name: item.member_names.size <= 1 ? (Array.from(item.member_names)[0] || '') : `${item.member_names.size}位成员`,
+    total_market_value: Number(item.total_market_value.toFixed(2)),
+    total_profit: Number(item.total_profit.toFixed(2)),
+    daily_profit: Number(item.daily_profit.toFixed(2)),
+    profit_rate: calcProfitRate(item.total_profit, item.total_market_value),
+    daily_profit_rate: calcDailyProfitRate(item.daily_profit, item.total_market_value),
+  })).sort((a, b) => b.total_market_value - a.total_market_value)
+}
+
+export const getNextLoopDisplayCount = ({ total = 0, current = 2, initial = 2, batch = 10 } = {}) => {
+  const safeTotal = Math.max(0, Number(total) || 0)
+  if (safeTotal <= 0) return 0
+  if (safeTotal <= initial) return safeTotal
+
+  const safeCurrent = Math.max(initial, Number(current) || initial)
+  if (safeCurrent >= safeTotal) return Math.min(initial, safeTotal)
+  return Math.min(safeCurrent + batch, safeTotal)
+}
+
 export const __test__ = {
   safeNumber,
   calcProfitRate,
@@ -381,4 +581,7 @@ export const __test__ = {
   formatPeriodLabel,
   pickAggregationPeriod,
   getChinaDateString,
+  detectFundType,
+  normalizeFundTypeValue,
+  matchesFundQuery,
 }

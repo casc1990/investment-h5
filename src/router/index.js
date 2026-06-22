@@ -27,6 +27,11 @@ const routes = [
     component: () => import('../views/Positions.vue'),
   },
   {
+    path: '/positions/:id',
+    name: 'PositionDetail',
+    component: () => import('../views/PositionDetail.vue'),
+  },
+  {
     path: '/trades',
     name: 'Trades',
     component: () => import('../views/Trades.vue'),

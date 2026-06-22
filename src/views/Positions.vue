@@ -69,36 +69,38 @@
         :class="{ expanded: expandedIds.includes(position.id) }"
       >
         <!-- 默认折叠显示：一行三段 -->
-        <div class="fund-collapsed" @click="toggleExpand(position.id)">
-          <div class="collapsed-main">
-            <span class="collapsed-name">{{ position.fund_name || '未知基金' }}</span>
-            <span class="collapsed-tags">
-              <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
-              <span class="account-tag">{{ position.account_name }}</span>
-            </span>
-          </div>
-          <div class="collapsed-data">
-            <div class="collapsed-center">
-              <span class="collapsed-value">¥{{ formatAmount(Number(position.cost) + Number(position.current_profit)) }}</span>
-              <span class="collapsed-yesterday" :class="{ positive: Number(position.daily_profit ?? position.yesterday_profit) >= 0, negative: Number(position.daily_profit ?? position.yesterday_profit) < 0 }">
-                {{ Number(position.daily_profit ?? position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.daily_profit ?? position.yesterday_profit) }}
+        <div class="fund-collapsed">
+          <div class="fund-collapsed-main" @click="handleOpenDetail(position)">
+            <div class="collapsed-main">
+              <span class="collapsed-name">{{ position.fund_name || '未知基金' }}</span>
+              <span class="collapsed-tags">
+                <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
+                <span class="account-tag">{{ position.account_name }}</span>
               </span>
             </div>
-            <div class="collapsed-right">
-              <span v-if="position.daily_profit_updated" class="profit-update-badge">
-                {{ position.daily_profit_update_text || '今日收益更新' }}
-              </span>
-              <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
-                {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
-              </span>
-              <span class="collapsed-rate" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
-                {{ Number(position.profit_rate).toFixed(2) }}%
-              </span>
+            <div class="collapsed-data">
+              <div class="collapsed-center">
+                <span class="collapsed-value">¥{{ formatAmount(Number(position.cost) + Number(position.current_profit)) }}</span>
+                <span class="collapsed-yesterday" :class="{ positive: Number(position.daily_profit ?? position.yesterday_profit) >= 0, negative: Number(position.daily_profit ?? position.yesterday_profit) < 0 }">
+                  {{ Number(position.daily_profit ?? position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.daily_profit ?? position.yesterday_profit) }}
+                </span>
+              </div>
+              <div class="collapsed-right">
+                <span v-if="position.daily_profit_updated" class="profit-update-badge">
+                  {{ position.daily_profit_update_text || '今日收益更新' }}
+                </span>
+                <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
+                  {{ Number(position.current_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.current_profit) }}
+                </span>
+                <span class="collapsed-rate" :class="{ positive: Number(position.profit_rate) >= 0, negative: Number(position.profit_rate) < 0 }">
+                  {{ Number(position.profit_rate).toFixed(2) }}%
+                </span>
+              </div>
             </div>
           </div>
-          <div class="collapsed-arrow">
+          <button class="collapsed-arrow" type="button" @click.stop="toggleExpand(position.id)">
             <van-icon :name="expandedIds.includes(position.id) ? 'arrow-up' : 'arrow-down'" />
-          </div>
+          </button>
         </div>
 
         <!-- 展开内容 -->
@@ -174,6 +176,7 @@
 
           <!-- 操作按钮 -->
           <div class="position-actions">
+            <van-button size="small" plain type="primary" @click.stop="handleOpenDetail(position)">详情</van-button>
             <van-button
               size="small"
               type="warning"
@@ -324,10 +327,13 @@
 
 <script setup>
 import { ref, computed, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
+import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+
+const router = useRouter()
 
 const syncingId = ref(null)
 const syncingAll = ref(false)
@@ -661,6 +667,11 @@ const toggleExpand = (id) => {
   }
 }
 
+const handleOpenDetail = (position) => {
+  if (!position?.id) return
+  router.push(`/positions/${position.id}`)
+}
+
 const handleDelete = async (position) => {
   try {
     await showConfirmDialog({
@@ -934,11 +945,18 @@ onDeactivated(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  cursor: pointer;
   user-select: none;
 }
 
-.fund-collapsed:active {
+.fund-collapsed-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.fund-collapsed-main:active {
   background: #fafafa;
 }
 
@@ -1064,6 +1082,13 @@ onDeactivated(() => {
 }
 
 .collapsed-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
   color: #ccc;
   flex-shrink: 0;
   margin-left: 6px;

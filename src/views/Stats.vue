@@ -79,6 +79,18 @@
         </button>
       </div>
 
+      <div class="chip-row type-row">
+        <button
+          v-for="item in fundTypeOptions"
+          :key="item.value"
+          class="pill-chip small"
+          :class="{ active: selectedFundType === item.value }"
+          @click="selectedFundType = item.value"
+        >
+          {{ item.text }}
+        </button>
+      </div>
+
       <div class="chip-row">
         <button
           v-for="item in trendModeOptions"
@@ -160,7 +172,7 @@
       </div>
 
       <div v-if="periodRows.length" class="period-list">
-        <div v-for="row in periodRows.slice(0, 8)" :key="row.period_key" class="period-card">
+        <div v-for="row in visiblePeriodRows" :key="row.period_key" class="period-card">
           <div class="period-top">
             <div>
               <div class="period-title">{{ row.period_label }}</div>
@@ -187,8 +199,60 @@
             </div>
           </div>
         </div>
+        <button
+          v-if="periodRows.length > 2"
+          class="more-button"
+          @click="handleMorePeriodRows"
+        >
+          查询更多（已显示 {{ visiblePeriodRows.length }}/{{ periodRows.length }}）
+        </button>
       </div>
       <van-empty v-else description="周期数据还不够，先多积累几天快照" />
+
+      <div v-if="monthPeriodRows.length" class="subsection month-period-subsection">
+        <div class="section-header subsection-header">
+          <div>
+            <div class="section-title subsection-title">📅 月视角阶段表现</div>
+            <div class="section-subtitle">按月查看阶段收益、收益率和最大亏损</div>
+          </div>
+        </div>
+        <div class="period-list compact">
+          <div v-for="row in visibleMonthPeriodRows" :key="`month-${row.period_key}`" class="period-card">
+            <div class="period-top">
+              <div>
+                <div class="period-title">{{ row.period_label }}</div>
+                <div class="period-date">{{ row.start_date }} ~ {{ row.end_date }}</div>
+              </div>
+              <div class="period-amount">¥{{ formatAmount(row.total_market_value) }}</div>
+            </div>
+            <div class="period-grid">
+              <div>
+                <span class="small-label">当月收益</span>
+                <div class="small-value" :class="profitClass(row.period_profit)">{{ formatSignedAmount(row.period_profit) }}</div>
+              </div>
+              <div>
+                <span class="small-label">当月收益率</span>
+                <div class="small-value" :class="profitClass(row.period_profit_rate)">{{ formatSignedPercent(row.period_profit_rate) }}</div>
+              </div>
+              <div>
+                <span class="small-label">最大亏损</span>
+                <div class="small-value" :class="profitClass(row.period_max_drawdown)">{{ formatSignedAmount(row.period_max_drawdown) }}</div>
+              </div>
+              <div>
+                <span class="small-label">月末总收益率</span>
+                <div class="small-value" :class="profitClass(row.total_profit_rate)">{{ formatSignedPercent(row.total_profit_rate) }}</div>
+              </div>
+            </div>
+          </div>
+          <button
+            v-if="monthPeriodRows.length > 2"
+            class="more-button"
+            @click="handleMoreMonthPeriodRows"
+          >
+            查询更多（已显示 {{ visibleMonthPeriodRows.length }}/{{ monthPeriodRows.length }}）
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="section">
@@ -206,7 +270,7 @@
 
       <template v-if="dailyHistoryRows.length">
         <div v-if="dailyHistoryDisplay === 'card'" class="daily-card-list">
-          <div v-for="row in dailyHistoryRows.slice(0, 60)" :key="`${row.date}-${row.account_id}`" class="daily-history-card">
+          <div v-for="row in visibleDailyHistoryRows" :key="`${row.date}-${row.account_id}`" class="daily-history-card">
             <div class="daily-card-top">
               <div>
                 <div class="period-title">{{ row.date }}</div>
@@ -245,7 +309,7 @@
             <span>昨日收益</span>
           </div>
           <div class="daily-table-body">
-            <div v-for="row in dailyHistoryRows.slice(0, 60)" :key="`${row.date}-${row.account_id}`" class="daily-table-row daily-table-grid">
+            <div v-for="row in visibleDailyHistoryRows" :key="`${row.date}-${row.account_id}`" class="daily-table-row daily-table-grid">
               <span class="table-date">{{ row.date }}</span>
               <span class="table-scope">{{ row.account_name }}</span>
               <span class="table-value neutral">¥{{ formatAmount(row.total_market_value) }}</span>
@@ -255,8 +319,62 @@
             </div>
           </div>
         </div>
+
+        <div v-if="dailyHistoryRows.length > 2" class="more-actions">
+          <button
+            v-if="visibleDailyHistoryRows.length < dailyHistoryRows.length"
+            class="more-button"
+            @click="handleMoreDailyHistoryRows"
+          >
+            查询更多（已显示 {{ visibleDailyHistoryRows.length }}/{{ dailyHistoryRows.length }}）
+          </button>
+          <button
+            v-if="visibleDailyHistoryRows.length > 2"
+            class="more-button collapse-button"
+            @click="handleCollapseDailyHistoryRows"
+          >
+            收起
+          </button>
+        </div>
       </template>
       <van-empty v-else description="暂无历史快照，点一次刷新统计即可开始积累" />
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🔎 单基金收益</div>
+          <div class="section-subtitle">按成员、账户、类型后，再用下拉选择单只基金</div>
+        </div>
+      </div>
+
+      <div class="fund-select-row">
+        <select v-model="selectedFundCode" class="fund-select">
+          <option v-for="item in fundSelectorOptions" :key="item.value" :value="item.value">
+            {{ item.text }}
+          </option>
+        </select>
+      </div>
+
+      <div v-if="currentFundRows.length" class="position-list">
+        <div v-for="fund in currentFundRows.slice(0, 50)" :key="`${fund.fund_code}-${fund.account_name}`" class="position-item">
+          <div class="position-info">
+            <div class="fund-name">{{ fund.fund_name }}</div>
+            <div class="fund-meta">
+              <span class="fund-code">{{ fund.fund_code }}</span>
+              <span class="member-tag">{{ fund.fund_type }}</span>
+              <span v-if="fund.account_name" class="account-tag">{{ fund.account_name }}</span>
+              <span v-if="fund.nav_jzrq" class="account-tag">{{ fund.nav_jzrq }}</span>
+            </div>
+          </div>
+          <div class="position-profit" :class="profitClass(fund.total_profit)">
+            <div class="profit">{{ formatSignedAmount(fund.total_profit) }}</div>
+            <div class="rate">{{ formatSignedPercent(fund.profit_rate || 0) }}</div>
+            <div class="rate" :class="profitClass(fund.daily_profit)">日收益 {{ formatSignedAmount(fund.daily_profit) }}</div>
+          </div>
+        </div>
+      </div>
+      <van-empty v-else description="当前筛选下暂无基金数据" />
     </div>
 
     <div class="section">
@@ -295,11 +413,15 @@ import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { getProfitSnapshots } from '../utils/profitLedger'
 import {
   buildAccountFilterOptions,
+  buildCurrentFundRows,
   buildDailyHistoryRows,
   buildDisplayTrendSeries,
+  buildFundSelectorOptions,
+  buildFundTypeFilterOptions,
   buildMemberFilterOptions,
   buildPeriodHistoryRows,
   buildTrendSeries,
+  getNextLoopDisplayCount,
 } from '../utils/statsHistory'
 
 const loading = ref(false)
@@ -311,11 +433,22 @@ const hasLoadedOnce = ref(false)
 
 const selectedMember = ref('all')
 const selectedAccount = ref('all')
+const selectedFundType = ref('all')
+const selectedFundCode = ref('all')
 const selectedTrendRow = ref(null)
 const trendMode = ref('daily')
 const dailyRange = ref(30)
-const periodMode = ref('month')
+const periodMode = ref('week')
+const periodVisibleCountMap = ref({
+  week: 2,
+  month: 2,
+  quarter: 2,
+  halfyear: 2,
+  year: 2,
+})
 const dailyHistoryDisplay = ref('card')
+const dailyHistoryVisibleCount = ref(2)
+const monthPeriodVisibleCount = ref(2)
 
 const analysisLinks = [
   { label: '统计', to: '/stats', icon: '📈' },
@@ -376,10 +509,26 @@ const handleRefresh = async () => {
 
 const memberOptions = computed(() => buildMemberFilterOptions(allSnapshots.value))
 const accountOptions = computed(() => buildAccountFilterOptions(allSnapshots.value, { memberId: selectedMember.value }))
+const fundTypeOptions = computed(() => buildFundTypeFilterOptions(allSnapshots.value, {
+  memberId: selectedMember.value,
+  accountId: selectedAccount.value,
+}))
+const fundSelectorOptions = computed(() => buildFundSelectorOptions(allSnapshots.value, {
+  memberId: selectedMember.value,
+  accountId: selectedAccount.value,
+  fundType: selectedFundType.value,
+}))
 const activeAccountName = computed(() => accountOptions.value.find(item => item.value === selectedAccount.value)?.text || '全部账户')
 const activeMemberName = computed(() => memberOptions.value.find(item => item.value === selectedMember.value)?.text || '全部成员')
-const activeScopeName = computed(() => selectedAccount.value === 'all' ? activeAccountName.value : `${activeMemberName.value} · ${activeAccountName.value}`)
-const currentPeriodLabel = computed(() => periodOptions.find(item => item.value === periodMode.value)?.text || '月')
+const activeFundTypeName = computed(() => fundTypeOptions.value.find(item => item.value === selectedFundType.value)?.text || '全部类型')
+const activeFundName = computed(() => fundSelectorOptions.value.find(item => item.value === selectedFundCode.value)?.text || '全部基金')
+const activeScopeName = computed(() => {
+  const parts = [selectedAccount.value === 'all' ? activeAccountName.value : `${activeMemberName.value} · ${activeAccountName.value}`]
+  if (selectedFundType.value !== 'all') parts.push(activeFundTypeName.value)
+  if (selectedFundCode.value !== 'all') parts.push(activeFundName.value)
+  return parts.join(' / ')
+})
+const currentPeriodLabel = computed(() => periodOptions.find(item => item.value === periodMode.value)?.text || '周')
 const yesterdayProfitRate = computed(() => {
   const marketValue = Number(overview.value?.summary?.totalMarketValue) || 0
   const yesterdayProfit = Number(overview.value?.summary?.totalPositionYesterdayProfit) || 0
@@ -391,13 +540,33 @@ const yesterdayProfitRate = computed(() => {
 const allDailyHistoryRows = computed(() => buildDailyHistoryRows(allSnapshots.value, {
   memberId: selectedMember.value,
   accountId: selectedAccount.value,
+  fundType: selectedFundType.value,
 }))
 const dailyHistoryRows = computed(() => allDailyHistoryRows.value)
+const visibleDailyHistoryRows = computed(() => dailyHistoryRows.value.slice(0, dailyHistoryVisibleCount.value))
 const trendDailyRows = computed(() => allDailyHistoryRows.value.slice(0, dailyRange.value))
 const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   memberId: selectedMember.value,
   accountId: selectedAccount.value,
+  fundType: selectedFundType.value,
   period: periodMode.value,
+}))
+const monthPeriodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
+  memberId: selectedMember.value,
+  accountId: selectedAccount.value,
+  fundType: selectedFundType.value,
+  period: 'month',
+}))
+const visiblePeriodRows = computed(() => {
+  const count = periodVisibleCountMap.value[periodMode.value] || 2
+  return periodRows.value.slice(0, count)
+})
+const visibleMonthPeriodRows = computed(() => monthPeriodRows.value.slice(0, monthPeriodVisibleCount.value))
+const currentFundRows = computed(() => buildCurrentFundRows(allSnapshots.value, {
+  memberId: selectedMember.value,
+  accountId: selectedAccount.value,
+  fundType: selectedFundType.value,
+  fundCode: selectedFundCode.value,
 }))
 const trendRows = computed(() => (trendMode.value === 'daily' ? trendDailyRows.value : periodRows.value))
 const trendSummaryLabel = computed(() => (trendMode.value === 'daily' ? '所选日期日收益' : '所选周期阶段收益'))
@@ -432,9 +601,55 @@ const handleTrendSelect = (row) => {
   selectedTrendRow.value = row
 }
 
+const handleMorePeriodRows = () => {
+  periodVisibleCountMap.value = {
+    ...periodVisibleCountMap.value,
+    [periodMode.value]: getNextLoopDisplayCount({
+      total: periodRows.value.length,
+      current: periodVisibleCountMap.value[periodMode.value] || 2,
+    }),
+  }
+}
+
+const handleMoreDailyHistoryRows = () => {
+  dailyHistoryVisibleCount.value = getNextLoopDisplayCount({
+    total: dailyHistoryRows.value.length,
+    current: dailyHistoryVisibleCount.value,
+  })
+}
+
+const handleMoreMonthPeriodRows = () => {
+  monthPeriodVisibleCount.value = getNextLoopDisplayCount({
+    total: monthPeriodRows.value.length,
+    current: monthPeriodVisibleCount.value,
+  })
+}
+
+const handleCollapseDailyHistoryRows = () => {
+  dailyHistoryVisibleCount.value = Math.min(2, dailyHistoryRows.value.length)
+}
+
 watch(trendRows, (rows) => {
   selectedTrendRow.value = rows[0] || null
 }, { immediate: true })
+
+watch(dailyHistoryRows, (rows) => {
+  if (rows.length <= 2) {
+    dailyHistoryVisibleCount.value = rows.length
+    return
+  }
+  if (dailyHistoryVisibleCount.value > rows.length) {
+    dailyHistoryVisibleCount.value = rows.length
+  }
+  if (dailyHistoryVisibleCount.value < 2) {
+    dailyHistoryVisibleCount.value = 2
+  }
+}, { immediate: true })
+
+watch([selectedMember, selectedAccount, selectedFundType, selectedFundCode], () => {
+  dailyHistoryVisibleCount.value = 2
+  monthPeriodVisibleCount.value = 2
+})
 
 watch(memberOptions, (options) => {
   const exists = options.some(item => item.value === selectedMember.value)
@@ -444,6 +659,16 @@ watch(memberOptions, (options) => {
 watch(accountOptions, (options) => {
   const exists = options.some(item => item.value === selectedAccount.value)
   if (!exists) selectedAccount.value = 'all'
+}, { immediate: true })
+
+watch(fundTypeOptions, (options) => {
+  const exists = options.some(item => item.value === selectedFundType.value)
+  if (!exists) selectedFundType.value = 'all'
+}, { immediate: true })
+
+watch(fundSelectorOptions, (options) => {
+  const exists = options.some(item => item.value === selectedFundCode.value)
+  if (!exists) selectedFundCode.value = 'all'
 }, { immediate: true })
 
 onMounted(() => {
@@ -601,8 +826,24 @@ onActivated(() => {
 
 .member-row,
 .account-row,
+.type-row,
 .display-row {
   margin-top: 4px;
+}
+
+.fund-select-row {
+  margin-bottom: 12px;
+}
+
+.fund-select {
+  width: 100%;
+  height: 40px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: #f8fbff;
+  color: #222;
+  font-size: 14px;
 }
 
 .pill-chip {
@@ -677,6 +918,36 @@ onActivated(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.subsection {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.compact {
+  margin-top: 10px;
+}
+
+.more-button {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f3f6fb;
+  color: #1e80ff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.more-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.collapse-button {
+  color: #64748b;
 }
 
 .daily-table-wrap {

@@ -18,6 +18,7 @@
       <div class="chart-body">
         <div class="y-axis-labels">
           <span v-for="guide in guides" :key="guide.value">{{ yAxisFormatter(guide.value) }}</span>
+          <span v-if="hasZeroBaseline" class="zero-axis-label" :style="zeroAxisLabelStyle">0</span>
         </div>
 
         <div class="chart-main">
@@ -28,7 +29,31 @@
                 <stop offset="100%" stop-color="#1e80ff" stop-opacity="0.02" />
               </linearGradient>
             </defs>
+            <template v-if="hasZeroBaseline">
+              <rect
+                x="0"
+                :y="padding.top"
+                :width="width"
+                :height="Math.max(0, zeroBaselineY - padding.top)"
+                class="positive-zone"
+              />
+              <rect
+                x="0"
+                :y="zeroBaselineY"
+                :width="width"
+                :height="Math.max(0, height - padding.bottom - zeroBaselineY)"
+                class="negative-zone"
+              />
+            </template>
             <line v-for="guide in guides" :key="guide.value" x1="0" :y1="yFor(guide.value)" x2="320" :y2="yFor(guide.value)" class="guide-line" />
+            <line
+              v-if="hasZeroBaseline"
+              x1="0"
+              :y1="zeroBaselineY"
+              x2="320"
+              :y2="zeroBaselineY"
+              class="zero-baseline"
+            />
             <path :d="areaPath" fill="url(#trendArea)" />
             <polyline :points="polylinePoints" fill="none" stroke="#1e80ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
             <line
@@ -139,6 +164,14 @@ const areaPath = computed(() => {
 })
 
 const guides = computed(() => buildTrendChartGuides(values.value))
+const hasZeroBaseline = computed(() => normalizedMin.value < 0 && normalizedMax.value > 0)
+const zeroBaselineY = computed(() => hasZeroBaseline.value ? yFor(0) : null)
+const zeroAxisLabelStyle = computed(() => {
+  if (!hasZeroBaseline.value) return {}
+  return {
+    top: `${zeroBaselineY.value}px`,
+  }
+})
 
 const visibleLabels = computed(() => {
   if (svgPoints.value.length <= 4) return svgPoints.value
@@ -235,6 +268,7 @@ watch(selectedPoint, (point) => {
   color: #8a94a6;
   text-align: right;
   flex-shrink: 0;
+  position: relative;
 }
 
 .chart-main {
@@ -252,6 +286,30 @@ watch(selectedPoint, (point) => {
   stroke: rgba(30, 128, 255, 0.12);
   stroke-width: 1;
   stroke-dasharray: 4 4;
+}
+
+.positive-zone {
+  fill: rgba(238, 10, 36, 0.06);
+}
+
+.negative-zone {
+  fill: rgba(7, 193, 96, 0.06);
+}
+
+.zero-baseline {
+  stroke: rgba(238, 10, 36, 0.48);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.zero-axis-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  color: rgba(238, 10, 36, 0.82);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .focus-line {

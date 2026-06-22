@@ -99,6 +99,20 @@ export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryD
   };
 }
 
+export function calculateOverviewPositionDailyProfit(position = {}, snapshot = null) {
+  const quantity = Number(position.quantity || position.shares || 0);
+  const confirmedNav = Number(snapshot?.dwjz || snapshot?.gsz || position.nav_dwjz || position.nav_gsz || 0);
+  const prevNav = Number(snapshot?.prev_nav || position.prev_nav || 0);
+  const storedChangeRate = snapshot?.gszzl ?? position.nav_gszzl ?? null;
+
+  return resolveDisplayedYesterdayProfit({
+    shares: quantity,
+    confirmedNav,
+    prevNav,
+    storedChangeRate,
+  });
+}
+
 export function parsePingzhongdataNetWorth(text = '') {
   const navMatch = String(text).match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
   if (!navMatch) return null;
@@ -129,6 +143,133 @@ export function parsePingzhongdataNetWorth(text = '') {
   } catch (_) {
     return null;
   }
+}
+
+
+function parsePingzhongdataJsonVar(text, varName) {
+  const source = String(text || '');
+  const match = source.match(new RegExp(`${varName}\s*=\s*(\[[\s\S]*?\]);`));
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function toHistoryDateKey(timestamp) {
+  const date = new Date(Number(timestamp));
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().split('T')[0];
+}
+
+function buildFundPerformanceStats(rows = []) {
+  if (!rows.length) return [];
+
+  const latest = rows[rows.length - 1];
+  const latestTime = latest.time;
+  const first = rows[0];
+  const ranges = [
+    { key: '1m', label: '近1月', days: 30 },
+    { key: '3m', label: '近3月', days: 90 },
+    { key: '6m', label: '近6月', days: 180 },
+    { key: '1y', label: '近1年', days: 365 },
+    { key: '3y', label: '近3年', days: 365 * 3 },
+  ];
+
+  const stats = ranges.map((range) => {
+    const targetTime = latestTime - (range.days * 24 * 60 * 60 * 1000);
+    if (first.time > targetTime) {
+      return {
+        key: range.key,
+        label: range.label,
+        return_pct: null,
+        start_date: null,
+        end_date: latest.date,
+      };
+    }
+
+    const startRow = [...rows].reverse().find((item) => item.time <= targetTime) || first;
+    const baseNav = Number(startRow.nav || 0);
+    const returnPct = baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null;
+    return {
+      key: range.key,
+      label: range.label,
+      return_pct: returnPct,
+      start_date: startRow.date,
+      end_date: latest.date,
+    };
+  });
+
+  const baseNav = Number(first.nav || 0);
+  stats.push({
+    key: 'all',
+    label: '成立以来',
+    return_pct: baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null,
+    start_date: first.date,
+    end_date: latest.date,
+  });
+
+  return stats;
+}
+
+export function parsePingzhongdataFundHistory(text) {
+  const source = String(text || '');
+  const fundNameMatch = source.match(/f_S_name\s*=\s*["']([^"']+)["']/);
+  const trendMatch = source.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+  const fundName = fundNameMatch ? fundNameMatch[1] : '';
+
+  if (!trendMatch) {
+    return {
+      fund_name: fundName,
+      net_worth_trend: [],
+      performance_stats: [],
+    };
+  }
+
+  let parsedRows = [];
+  try {
+    parsedRows = JSON.parse(trendMatch[1]);
+  } catch (_) {
+    parsedRows = [];
+  }
+
+  const trendRows = parsedRows
+    .map((item) => {
+      const nav = Number(item?.y);
+      const time = Number(item?.x);
+      if (!Number.isFinite(nav) || !Number.isFinite(time)) return null;
+      return {
+        time,
+        date: toHistoryDateKey(time),
+        nav: Number(nav.toFixed(4)),
+        daily_return_pct: Number.isFinite(Number(item?.equityReturn)) ? Number(Number(item.equityReturn).toFixed(2)) : null,
+        unit_money: item?.unitMoney || '',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+
+  const baseNav = Number(trendRows[0]?.nav || 0);
+  const netWorthTrend = trendRows.map((row, index) => {
+    const prev = trendRows[index - 1];
+    const fallbackDaily = prev && prev.nav > 0 ? Number((((row.nav - prev.nav) / prev.nav) * 100).toFixed(2)) : 0;
+    return {
+      date: row.date,
+      nav: row.nav,
+      daily_return_pct: row.daily_return_pct ?? fallbackDaily,
+      cumulative_return_pct: baseNav > 0 ? Number((((row.nav - baseNav) / baseNav) * 100).toFixed(2)) : 0,
+      unit_money: row.unit_money,
+      time: row.time,
+    };
+  });
+
+  return {
+    fund_name: fundName,
+    net_worth_trend: netWorthTrend,
+    performance_stats: buildFundPerformanceStats(netWorthTrend),
+  };
 }
 
 export function resolveDisplayedNavGszzl({
@@ -1679,10 +1820,8 @@ export async function onRequest(context) {
         accountStats.marketValue += marketValue;
         totalInvested += cost;
         totalMarketValue += marketValue;
-        const confirmedNav = snap && (snap.dwjz || snap.gsz);
-        if (confirmedNav && snap && snap.prev_nav && pos.quantity) {
-          totalPositionYesterdayProfit += (confirmedNav - snap.prev_nav) * pos.quantity;
-        }
+        const positionDailyProfit = calculateOverviewPositionDailyProfit(pos, snap);
+        totalPositionYesterdayProfit += positionDailyProfit;
       });
 
       const advisoryStats = advisoryProducts.map(product => {
@@ -1802,6 +1941,30 @@ export async function onRequest(context) {
           'Access-Control-Allow-Origin': '*',
         },
       });
+    }
+
+    if (path.match(/^\/api\/funds\/[\w.-]+\/detail$/) && method === 'GET') {
+      try {
+        const fundCode = path.split('/')[3];
+        const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
+        });
+        if (!response.ok) {
+          return jsonResponse({ code: 502, message: `Fetch fund detail failed: ${response.status}` }, 502);
+        }
+
+        const text = await response.text();
+        const parsed = parsePingzhongdataFundHistory(text);
+        return jsonResponse({
+          code: 0,
+          data: {
+            fund_code: fundCode,
+            ...parsed,
+          },
+        });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message }, 500);
+      }
     }
 
     // 数据库迁移接口（确保表结构完整）
