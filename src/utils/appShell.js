@@ -6,6 +6,7 @@ export const KEEP_ALIVE_ROUTE_NAMES = [
   'Positions',
   'Trades',
   'Stats',
+  'Allocation',
   'Advisory',
   'Members',
 ]

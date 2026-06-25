@@ -42,6 +42,11 @@ const routes = [
     component: () => import('../views/Stats.vue'),
   },
   {
+    path: '/allocation',
+    name: 'Allocation',
+    component: () => import('../views/Allocation.vue'),
+  },
+  {
     path: '/ledger',
     name: 'ProfitLedger',
     redirect: '/stats',

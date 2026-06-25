@@ -41,27 +41,17 @@
 import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { KEEP_ALIVE_ROUTE_NAMES, appTabbarVisible } from './utils/appShell'
+import { MAIN_TABS, MAIN_TAB_INDEX_MAP } from './utils/navigation'
 
 const route = useRoute()
 const activeTab = ref(0)
 const isLoggedIn = computed(() => !!localStorage.getItem('auth_token'))
 const keepAliveInclude = KEEP_ALIVE_ROUTE_NAMES
 
-const tabs = [
-  { to: '/', label: '首页', icon: 'wap-home-o' },
-  { to: '/positions', label: '持仓', icon: 'bag-o' },
-  { to: '/trades', label: '交易', icon: 'balance-o' },
-  { to: '/stats', label: '统计', icon: 'chart-trending-o' },
-  { to: '/accounts', label: '账户', icon: 'friends-o' },
-  { to: '/advisory', label: '顾投', icon: 'apps-o' },
-  { to: '/members', label: '成员', icon: 'contact-o' },
-]
-
-const tabMap = Object.fromEntries(tabs.map((tab, index) => [tab.to, index]))
-tabMap['/ledger'] = tabMap['/stats']
+const tabs = MAIN_TABS
 
 watch(() => route.path, (path) => {
-  activeTab.value = tabMap[path] ?? 0
+  activeTab.value = MAIN_TAB_INDEX_MAP[path] ?? 0
 }, { immediate: true })
 </script>
 
@@ -110,7 +100,7 @@ html, body {
 }
 
 .app-tabbar {
-  z-index: 9999 !important;
+  z-index: 100 !important;
   pointer-events: auto;
   left: 10px !important;
   right: 10px !important;
@@ -132,6 +122,7 @@ html, body {
 
 .app-tabbar .van-tabbar-item {
   min-width: 0;
+  padding: 0 2px;
   color: #94a3b8;
 }
 
@@ -172,7 +163,7 @@ html, body {
 .tab-label {
   display: block;
   width: 100%;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1.1;
   white-space: nowrap;

@@ -10,6 +10,7 @@ test('keep-alive 路由白名单覆盖底部 tab 页面', () => {
     'Positions',
     'Trades',
     'Stats',
+    'Allocation',
     'Advisory',
     'Members',
   ])
