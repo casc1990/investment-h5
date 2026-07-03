@@ -104,12 +104,14 @@ export function calculateOverviewPositionDailyProfit(position = {}, snapshot = n
   const confirmedNav = Number(snapshot?.dwjz || snapshot?.gsz || position.nav_dwjz || position.nav_gsz || 0);
   const prevNav = Number(snapshot?.prev_nav || position.prev_nav || 0);
   const storedChangeRate = snapshot?.gszzl ?? position.nav_gszzl ?? null;
+  const navDate = snapshot?.jzrq ?? position.nav_jzrq ?? null;
 
   return resolveDisplayedYesterdayProfit({
     shares: quantity,
     confirmedNav,
     prevNav,
     storedChangeRate,
+    navDate,
   });
 }
 
@@ -164,7 +166,29 @@ function toHistoryDateKey(timestamp) {
   return date.toISOString().split('T')[0];
 }
 
-function buildFundPerformanceStats(rows = []) {
+function parseOfficialPerformanceStatsFromHtml(htmlText = '') {
+  const source = String(htmlText || '');
+  const labelMap = {
+    '近1月': '1m',
+    '近3月': '3m',
+    '近6月': '6m',
+    '近1年': '1y',
+    '近3年': '3y',
+    '成立来': 'all',
+  };
+  const result = {};
+  const matches = source.matchAll(/<dd><span>(近1月|近3月|近6月|近1年|近3年|成立来)：<\/span><span class="ui-font-middle ui-color-red ui-num">([^<]+)<\/span><\/dd>/g);
+  for (const match of matches) {
+    const key = labelMap[match[1]];
+    const value = Number(String(match[2] || '').replace('%', '').trim());
+    if (key && Number.isFinite(value)) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function buildFundPerformanceStats(rows = [], officialReturns = {}) {
   if (!rows.length) return [];
 
   const latest = rows[rows.length - 1];
@@ -180,11 +204,12 @@ function buildFundPerformanceStats(rows = []) {
 
   const stats = ranges.map((range) => {
     const targetTime = latestTime - (range.days * 24 * 60 * 60 * 1000);
+    const officialReturnPct = Number(officialReturns?.[range.key]);
     if (first.time > targetTime) {
       return {
         key: range.key,
         label: range.label,
-        return_pct: null,
+        return_pct: Number.isFinite(officialReturnPct) ? Number(officialReturnPct.toFixed(2)) : null,
         start_date: null,
         end_date: latest.date,
       };
@@ -192,7 +217,8 @@ function buildFundPerformanceStats(rows = []) {
 
     const startRow = [...rows].reverse().find((item) => item.time <= targetTime) || first;
     const baseNav = Number(startRow.nav || 0);
-    const returnPct = baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null;
+    const fallbackReturnPct = baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null;
+    const returnPct = Number.isFinite(officialReturnPct) ? Number(officialReturnPct.toFixed(2)) : fallbackReturnPct;
     return {
       key: range.key,
       label: range.label,
@@ -203,10 +229,12 @@ function buildFundPerformanceStats(rows = []) {
   });
 
   const baseNav = Number(first.nav || 0);
+  const allFallbackReturnPct = baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null;
+  const allOfficialReturnPct = Number(officialReturns?.all);
   stats.push({
     key: 'all',
     label: '成立以来',
-    return_pct: baseNav > 0 ? Number((((latest.nav - baseNav) / baseNav) * 100).toFixed(2)) : null,
+    return_pct: Number.isFinite(allOfficialReturnPct) ? Number(allOfficialReturnPct.toFixed(2)) : allFallbackReturnPct,
     start_date: first.date,
     end_date: latest.date,
   });
@@ -214,11 +242,18 @@ function buildFundPerformanceStats(rows = []) {
   return stats;
 }
 
-export function parsePingzhongdataFundHistory(text) {
+export function parsePingzhongdataFundHistory(text, htmlText = '') {
   const source = String(text || '');
   const fundNameMatch = source.match(/f_S_name\s*=\s*["']([^"']+)["']/);
   const trendMatch = source.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
   const fundName = fundNameMatch ? fundNameMatch[1] : '';
+  const officialReturns = {
+    ...parseOfficialPerformanceStatsFromHtml(htmlText),
+    '1m': Number(source.match(/syl_1y\s*=\s*["']([^"']+)["']/)?.[1]),
+    '3m': Number(source.match(/syl_3y\s*=\s*["']([^"']+)["']/)?.[1]),
+    '6m': Number(source.match(/syl_6y\s*=\s*["']([^"']+)["']/)?.[1]),
+    '1y': Number(source.match(/syl_1n\s*=\s*["']([^"']+)["']/)?.[1]),
+  };
 
   if (!trendMatch) {
     return {
@@ -268,7 +303,7 @@ export function parsePingzhongdataFundHistory(text) {
   return {
     fund_name: fundName,
     net_worth_trend: netWorthTrend,
-    performance_stats: buildFundPerformanceStats(netWorthTrend),
+    performance_stats: buildFundPerformanceStats(netWorthTrend, officialReturns),
   };
 }
 
@@ -304,8 +339,20 @@ export function resolveDisplayedYesterdayProfit({
   confirmedNav = 0,
   prevNav = 0,
   storedChangeRate = null,
+  navDate = null,
 } = {}) {
   const quantity = Number(shares || 0);
+
+  // 如果有净值日期，判断是否为最新（今天或 QDII 上一交易日），未更新则返回 0
+  if (navDate !== null && navDate !== undefined && navDate !== '') {
+    const today = getChinaDateString(new Date());
+    const previousTradingDate = getPreviousChinaTradingDateString(new Date());
+    const isCurrentDate = navDate === today || navDate === previousTradingDate;
+    if (!isCurrentDate) {
+      return 0;
+    }
+  }
+
   const confirmed = Number(confirmedNav || 0);
   const previous = Number(prevNav || 0);
   const pct = storedChangeRate !== null && storedChangeRate !== undefined && Number.isFinite(Number(storedChangeRate))
@@ -347,28 +394,38 @@ export function mergeFundEstimateIntoSnapshot({
   const currentChangeRate = gszzl !== null && gszzl !== undefined && Number.isFinite(Number(gszzl))
     ? Number(gszzl)
     : null;
-  const shouldReplace = navDate && fundGzNavDate && estimate > 0;
+  const hasEstimate = estimate > 0;
+  const hasOfficialNav = officialNav > 0;
+  const hasUsableFundGz = navDate && fundGzNavDate && (hasEstimate || hasOfficialNav);
   const dateIsNewer = fundGzNavDate > navDate;
-  const hasSameDayEstimate = fundGzNavDate === navDate
+  const hasSameDayEstimate = hasEstimate
+    && fundGzNavDate === navDate
     && estimate.toFixed(4) !== officialNav.toFixed(4)
     && estimate.toFixed(4) !== currentNav.toFixed(4);
 
-  if (!shouldReplace || (!dateIsNewer && !hasSameDayEstimate)) {
+  if (!hasUsableFundGz || (!dateIsNewer && !hasSameDayEstimate)) {
     return merged;
   }
 
   if (dateIsNewer) {
+    const nextConfirmedNav = hasOfficialNav ? officialNav : estimate;
+    const nextDisplayedNav = hasEstimate ? estimate : nextConfirmedNav;
+    const hasEstimateChange = estimateChange !== null && estimateChange !== undefined && Number.isFinite(Number(estimateChange));
+    const fallbackChangeRate = currentNav > 0 && nextConfirmedNav > 0
+      ? Number((((nextConfirmedNav - currentNav) / currentNav) * 100).toFixed(4))
+      : currentChangeRate;
+
     merged.prev_nav = currentNav > 0 ? currentNav : prev_nav;
-    merged.nav = estimate;
+    merged.nav = nextDisplayedNav;
     merged.navDate = fundGzNavDate;
-    merged.gszzl = estimateChange;
-    merged.dwjz = officialNav > 0 ? officialNav : merged.dwjz;
+    merged.gszzl = hasEstimateChange ? Number(estimateChange) : fallbackChangeRate;
+    merged.dwjz = hasOfficialNav ? officialNav : merged.dwjz;
     return merged;
   }
 
   merged.nav = estimate;
   merged.gszzl = currentChangeRate !== null ? currentChangeRate : estimateChange;
-  merged.dwjz = officialNav > 0 ? officialNav : merged.dwjz;
+  merged.dwjz = hasOfficialNav ? officialNav : merged.dwjz;
   return merged;
 }
 
@@ -487,7 +544,7 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
   if (gzMatch) {
     try {
       const gzData = JSON.parse(gzMatch[1]);
-      if (gzData.gsz) {
+      if (gzData && (gzData.gsz || gzData.dwjz || gzData.jzrq)) {
         const estimateNav = parseFloat(gzData.gsz);
         const estimateChange = parseFloat(gzData.gszzl);
         const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
@@ -542,6 +599,7 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
       confirmedNav: dwjz || nav || 0,
       prevNav: prev_nav || 0,
       storedChangeRate: gszzl,
+      navDate: navDate || null,
     });
     await env.DB.prepare(`
       UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
@@ -748,6 +806,7 @@ export async function onRequest(context) {
         confirmedNav,
         prevNav,
         storedChangeRate: r.nav_gszzl,
+        navDate: r.nav_jzrq || null,
       });
       const currentMarketValue = shares > 0 && marketNav > 0
         ? parseFloat((shares * marketNav).toFixed(4))
@@ -1946,15 +2005,18 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/funds\/[\w.-]+\/detail$/) && method === 'GET') {
       try {
         const fundCode = path.split('/')[3];
-        const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-        });
+        const headers = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
+        const [response, htmlResponse] = await Promise.all([
+          fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, { headers }),
+          fetch(`https://fund.eastmoney.com/${fundCode}.html`, { headers }),
+        ]);
         if (!response.ok) {
           return jsonResponse({ code: 502, message: `Fetch fund detail failed: ${response.status}` }, 502);
         }
 
         const text = await response.text();
-        const parsed = parsePingzhongdataFundHistory(text);
+        const htmlText = htmlResponse.ok ? await htmlResponse.text() : '';
+        const parsed = parsePingzhongdataFundHistory(text, htmlText);
         return jsonResponse({
           code: 0,
           data: {
@@ -2136,7 +2198,7 @@ export async function onRequest(context) {
             if (gzMatch) {
               try {
                 const gzData = JSON.parse(gzMatch[1]);
-                if (gzData.gsz) {
+                if (gzData && (gzData.gsz || gzData.dwjz || gzData.jzrq)) {
                   estimateNav = parseFloat(gzData.gsz);
                   estimateChange = parseFloat(gzData.gszzl);
                   dwjzFromFundGz = parseFloat(gzData.dwjz);
@@ -2193,18 +2255,19 @@ export async function onRequest(context) {
         }
 
         // 3. 更新每个持仓的昨日收益
-        // 口径统一为：昨日收益 = (最新确认净值 - 前一交易日净值) × 份额
         for (const pos of allPositions) {
           const snap = syncResults[pos.fund_code];
           if (!snap || !snap.ok) continue;
           const shares = pos.quantity || 0;
           if (shares <= 0) continue;
 
-          let yesterdayProfit = 0;
-          const confirmedNav = snap.dwjz || snap.confirmed_nav || snap.gsz || 0;
-          if (confirmedNav > 0 && snap.prev_nav > 0) {
-            yesterdayProfit = parseFloat(((confirmedNav - snap.prev_nav) * shares).toFixed(4));
-          }
+          const yesterdayProfit = resolveDisplayedYesterdayProfit({
+            shares,
+            confirmedNav: snap.dwjz || snap.confirmed_nav || snap.gsz || 0,
+            prevNav: snap.prev_nav || 0,
+            storedChangeRate: snap.gszzl,
+            navDate: snap.jzrq || null,
+          });
           await env.DB.prepare(`
             UPDATE positions SET
               yesterday_profit = ?,
