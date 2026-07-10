@@ -65,6 +65,25 @@ function getPreviousChinaTradingDateString(now = new Date()) {
   }
 }
 
+function getNthPreviousChinaTradingDateString(now = new Date(), n = 1) {
+  let cursor = new Date(now);
+  let remaining = Math.max(1, Number(n || 1));
+
+  while (remaining > 0) {
+    cursor = addDays(cursor, -1);
+    const weekday = new Intl.DateTimeFormat('en', {
+      timeZone: 'Asia/Shanghai',
+      weekday: 'short',
+    }).format(cursor);
+
+    if (weekday !== 'Sat' && weekday !== 'Sun') {
+      remaining -= 1;
+    }
+  }
+
+  return getChinaDateString(cursor);
+}
+
 function isQdiiFund(fundName = '') {
   return /QDII/i.test(String(fundName || ''));
 }
@@ -112,6 +131,7 @@ export function calculateOverviewPositionDailyProfit(position = {}, snapshot = n
     prevNav,
     storedChangeRate,
     navDate,
+    fundName: position.fund_name || snapshot?.name || '',
   });
 }
 
@@ -340,15 +360,20 @@ export function resolveDisplayedYesterdayProfit({
   prevNav = 0,
   storedChangeRate = null,
   navDate = null,
+  fundName = '',
 } = {}) {
   const quantity = Number(shares || 0);
 
-  // 如果有净值日期，判断是否为最新（今天或 QDII 上一交易日），未更新则返回 0
+  // 如果有净值日期，判断是否为最新（普通基金：今天/上一交易日；QDII 允许额外晚一个交易日）
   if (navDate !== null && navDate !== undefined && navDate !== '') {
     const today = getChinaDateString(new Date());
     const previousTradingDate = getPreviousChinaTradingDateString(new Date());
-    const isCurrentDate = navDate === today || navDate === previousTradingDate;
-    if (!isCurrentDate) {
+    const secondPreviousTradingDate = getNthPreviousChinaTradingDateString(new Date(), 2);
+    const thirdPreviousTradingDate = getNthPreviousChinaTradingDateString(new Date(), 3);
+    const isLatestDate = navDate === today || navDate === previousTradingDate;
+    const isQdiiLaggedLatestDate = isQdiiFund(fundName)
+      && (navDate === previousTradingDate || navDate === secondPreviousTradingDate || navDate === thirdPreviousTradingDate);
+    if (!isLatestDate && !isQdiiLaggedLatestDate) {
       return 0;
     }
   }
@@ -600,6 +625,7 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
       prevNav: prev_nav || 0,
       storedChangeRate: gszzl,
       navDate: navDate || null,
+      fundName: name || '',
     });
     await env.DB.prepare(`
       UPDATE positions SET yesterday_profit = ?, updated_at = unixepoch() WHERE id = ?
@@ -807,6 +833,7 @@ export async function onRequest(context) {
         prevNav,
         storedChangeRate: r.nav_gszzl,
         navDate: r.nav_jzrq || null,
+        fundName: r.fund_name || '',
       });
       const currentMarketValue = shares > 0 && marketNav > 0
         ? parseFloat((shares * marketNav).toFixed(4))
@@ -2267,6 +2294,7 @@ export async function onRequest(context) {
             prevNav: snap.prev_nav || 0,
             storedChangeRate: snap.gszzl,
             navDate: snap.jzrq || null,
+            fundName: pos.fund_name || snap.fund_name || '',
           });
           await env.DB.prepare(`
             UPDATE positions SET

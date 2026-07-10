@@ -115,30 +115,46 @@
       </div>
     </div>
 
-    <!-- 快捷操作 -->
-    <div class="section">
-      <div class="section-title">⚡ 高频入口</div>
-      <div class="quick-actions">
-        <div class="action-item" @click="$router.push('/trades?type=buy')">
-          <div class="icon green">💵</div>
-          <span>买入</span>
+    <!-- 事件中心 -->
+    <div class="section event-section">
+      <div class="section-heading">
+        <div class="section-title">🛎️ 事件中心</div>
+        <span v-if="pendingEventTotal" class="event-count-badge">{{ pendingEventTotal }}项</span>
+      </div>
+
+      <div v-if="pendingEventCards.length" class="event-list">
+        <div
+          v-for="card in pendingEventCards"
+          :key="card.id"
+          class="event-card"
+          :class="[`level-${card.level}`]"
+        >
+          <div class="event-card-top">
+            <div class="event-main">
+              <div class="event-title-row">
+                <span class="event-title">{{ card.title }}</span>
+                <span class="event-impact-tag">{{ card.impactLabel }}</span>
+              </div>
+              <div class="event-description">{{ card.description }}</div>
+            </div>
+            <span class="event-level-tag">{{ card.level === 'urgent' ? '立即处理' : '提示关注' }}</span>
+          </div>
+
+          <div class="event-actions">
+            <button
+              class="event-action-btn primary"
+              :disabled="eventSyncing"
+              @click="handleEventAction(card)"
+            >
+              {{ eventSyncing && card.action === 'sync_pending' ? '补同步中...' : card.actionLabel }}
+            </button>
+          </div>
         </div>
-        <div class="action-item" @click="$router.push('/trades?type=sell')">
-          <div class="icon red">💰</div>
-          <span>卖出</span>
-        </div>
-        <div class="action-item" @click="$router.push('/positions')">
-          <div class="icon blue">📦</div>
-          <span>持仓</span>
-        </div>
-        <div class="action-item" @click="$router.push('/stats')">
-          <div class="icon purple">📈</div>
-          <span>统计</span>
-        </div>
-        <div class="action-item" @click="$router.push('/advisory')">
-          <div class="icon orange">🤖</div>
-          <span>顾投</span>
-        </div>
+      </div>
+
+      <div v-else class="event-empty">
+        <div class="event-empty-title">暂无净值待处理事项</div>
+        <div class="event-empty-desc">当前首页先聚焦“净值未更新”，如有异常会优先在这里提醒。</div>
       </div>
     </div>
 
@@ -153,14 +169,17 @@
 import { ref, computed, onActivated, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { authApi, statsApi } from '../api'
+import { authApi, fundApi, statsApi } from '../api'
 import { formatAmount as formatNumber } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+import { buildPendingNavEventCards, summarizePendingNavEvents } from '../utils/homeEventCenter'
 
 const router = useRouter()
 const loading = ref(false)
 const overview = ref(null)
 const expandedMemberIds = ref([])
+const pendingFunds = ref([])
+const eventSyncing = ref(false)
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
 
@@ -173,6 +192,9 @@ const homePositionDailyProfit = computed(() => (
   Number(overview.value?.summary?.totalPositionYesterdayProfit ?? overview.value?.summary?.totalYesterdayProfit) || 0
 ))
 
+const pendingEventCards = computed(() => buildPendingNavEventCards(pendingFunds.value))
+const pendingEventTotal = computed(() => summarizePendingNavEvents(pendingEventCards.value))
+
 const isMemberExpanded = (memberId) => expandedMemberIds.value.includes(memberId)
 
 const toggleMember = (memberId) => {
@@ -181,11 +203,30 @@ const toggleMember = (memberId) => {
     : [...expandedMemberIds.value, memberId]
 }
 
+const fetchPendingFunds = async () => {
+  const data = await fundApi.pending({ mode: 'night', includeQdii: true })
+  pendingFunds.value = Array.isArray(data?.funds) ? data.funds : []
+}
+
 const fetchData = async () => {
   loading.value = true
   try {
-    const data = await statsApi.overview()
-    overview.value = data
+    const [overviewResult, pendingResult] = await Promise.allSettled([
+      statsApi.overview(),
+      fetchPendingFunds(),
+    ])
+
+    if (overviewResult.status === 'fulfilled') {
+      overview.value = overviewResult.value
+    } else {
+      throw overviewResult.reason
+    }
+
+    if (pendingResult.status === 'rejected') {
+      console.error('Failed to fetch pending funds:', pendingResult.reason)
+      pendingFunds.value = []
+    }
+
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
   } catch (error) {
@@ -193,6 +234,27 @@ const fetchData = async () => {
     showToast('数据加载失败: ' + (error.message || '网络错误'))
   } finally {
     loading.value = false
+  }
+}
+
+const handleEventAction = async (card) => {
+  if (card.action === 'view_positions') {
+    router.push('/positions')
+    return
+  }
+
+  if (card.action !== 'sync_pending' || eventSyncing.value) return
+
+  eventSyncing.value = true
+  try {
+    const result = await fundApi.syncPending({ mode: 'night', includeQdii: false, batchSize: 5 })
+    await fetchData()
+    showToast(`已补同步 ${result?.synced || 0} 只，剩余 ${result?.still_pending_count || 0} 只`)
+  } catch (error) {
+    console.error('Failed to sync pending funds:', error)
+    showToast('补同步失败: ' + (error.message || '网络错误'))
+  } finally {
+    eventSyncing.value = false
   }
 }
 
@@ -570,36 +632,147 @@ onActivated(() => {
   border-radius: 6px;
 }
 
-/* 快捷操作 */
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+/* 事件中心 */
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.section-heading .section-title {
+  margin-bottom: 0;
+}
+
+.event-count-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.action-item {
+.event-card {
+  border-radius: 16px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.event-card.level-urgent {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff7f7 0%, #fff1f2 100%);
+}
+
+.event-card.level-notice {
+  border-color: #fde68a;
+  background: linear-gradient(180deg, #fffdf5 0%, #fffbeb 100%);
+}
+
+.event-card-top {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.event-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.event-title-row {
+  display: flex;
   align-items: center;
-  padding: 16px 8px;
-  background: #f9f9f9;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: transform 0.2s;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.action-item:active {
-  transform: scale(0.95);
+.event-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
 }
 
-.action-item .icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+.event-impact-tag,
+.event-level-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.action-item span {
+.event-impact-tag {
+  background: rgba(255, 255, 255, 0.8);
+  color: #92400e;
+}
+
+.event-level-tag {
+  flex-shrink: 0;
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.86);
+  color: #b45309;
+}
+
+.event-card.level-urgent .event-level-tag {
+  color: #dc2626;
+}
+
+.event-description {
+  margin-top: 8px;
   font-size: 13px;
-  color: #666;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.event-actions {
+  margin-top: 12px;
+}
+
+.event-action-btn {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.event-action-btn.primary {
+  background: #4f46e5;
+  color: white;
+}
+
+.event-action-btn:disabled {
+  opacity: 0.7;
+}
+
+.event-empty {
+  padding: 8px 0 2px;
+}
+
+.event-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.event-empty-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #94a3b8;
 }
 
 .loading-overlay {

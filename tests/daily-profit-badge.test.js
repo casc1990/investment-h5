@@ -21,6 +21,15 @@ test('QDII 在北京时间今天补出上一交易日净值时，显示最新收
   assert.equal(meta.daily_profit_update_text, '最新收益已更新')
 })
 
+test('QDII 的最新收益已更新提示只在补出上一交易日净值的当天显示，次日凌晨自动消失', () => {
+  const meta = getDailyProfitMeta('2026-07-07', new Date('2026-07-08T16:36:00Z'), '景顺长城纳斯达克科技市值加权ETF联接(QDII)E')
+
+  assert.equal(meta.daily_profit_label, '昨日收益')
+  assert.equal(meta.daily_profit_rate_label, '昨日收益率')
+  assert.equal(meta.daily_profit_updated, false)
+  assert.equal(meta.daily_profit_update_text, '')
+})
+
 test('普通基金净值日期不是北京时间今天时，不显示今日收益更新标签', () => {
   const meta = getDailyProfitMeta('2026-05-22', new Date('2026-05-25T14:10:00Z'), '中欧瑾通灵活配置混合C')
 

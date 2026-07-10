@@ -112,6 +112,8 @@ export const marketApi = {
 
 export const fundApi = {
   detail: (fundCode) => apiClient.get(`/funds/${fundCode}/detail`),
+  pending: (params) => apiClient.get('/fund/pending', { params }),
+  syncPending: (params) => apiClient.get('/fund/sync/pending', { params }),
 }
 
 // ============ 成员 API ============

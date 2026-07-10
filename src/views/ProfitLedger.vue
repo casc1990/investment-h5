@@ -124,6 +124,7 @@ const loading = ref(false)
 
 const analysisLinks = [
   { label: '统计', to: '/stats', icon: '📈' },
+  { label: '配置', to: '/allocation', icon: '🎯' },
   { label: '台账', to: '/ledger', icon: '📒' },
   { label: '顾投', to: '/advisory', icon: '🤖' },
 ]

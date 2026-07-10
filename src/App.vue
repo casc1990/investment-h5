@@ -41,7 +41,7 @@
 import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { KEEP_ALIVE_ROUTE_NAMES, appTabbarVisible } from './utils/appShell'
-import { MAIN_TABS, MAIN_TAB_INDEX_MAP } from './utils/navigation'
+import { MAIN_TABS, resolveMainTabIndex } from './utils/navigation'
 
 const route = useRoute()
 const activeTab = ref(0)
@@ -51,7 +51,7 @@ const keepAliveInclude = KEEP_ALIVE_ROUTE_NAMES
 const tabs = MAIN_TABS
 
 watch(() => route.path, (path) => {
-  activeTab.value = MAIN_TAB_INDEX_MAP[path] ?? 0
+  activeTab.value = resolveMainTabIndex(path)
 }, { immediate: true })
 </script>
 

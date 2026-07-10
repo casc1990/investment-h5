@@ -44,3 +44,24 @@ test('fundgz 日期更新时，沿用估算涨幅并把旧确认净值下沉到 
     dwjz: 2.773,
   })
 })
+
+test('fundgz 已有更新净值日期但缺少估算净值时，仍采用新的确认净值而不是继续卡旧日期', () => {
+  const result = mergeFundEstimateIntoSnapshot({
+    nav: 1.25,
+    navDate: '2026-07-01',
+    gszzl: 0.8,
+    prev_nav: 1.24,
+    estimateNav: null,
+    estimateChange: null,
+    officialNavYesterday: 1.266,
+    fundGzNavDate: '2026-07-02',
+  })
+
+  assert.deepEqual(result, {
+    nav: 1.266,
+    navDate: '2026-07-02',
+    gszzl: 1.28,
+    prev_nav: 1.25,
+    dwjz: 1.266,
+  })
+})

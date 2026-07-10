@@ -2,6 +2,12 @@ import { normalizeAllocationProfile } from './allocation.js'
 
 const STORAGE_KEY = 'allocation_profiles_v1'
 const SELECTED_PROFILE_KEY = 'allocation_selected_profile_id_v1'
+export const ALLOCATION_PROFILES_UPDATED_EVENT = 'allocation-profiles-updated'
+
+const dispatchAllocationProfilesUpdated = (detail) => {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+  window.dispatchEvent(new CustomEvent(ALLOCATION_PROFILES_UPDATED_EVENT, { detail }))
+}
 
 const safeJsonParse = (value, fallback) => {
   try {
@@ -22,6 +28,7 @@ export const loadAllocationProfiles = () => {
 export const saveAllocationProfiles = (profiles = []) => {
   if (typeof localStorage === 'undefined') return
   localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles))
+  dispatchAllocationProfilesUpdated({ type: 'profiles' })
 }
 
 export const loadSelectedAllocationProfileId = () => {
@@ -33,7 +40,9 @@ export const saveSelectedAllocationProfileId = (profileId = '') => {
   if (typeof localStorage === 'undefined') return
   if (!profileId) {
     localStorage.removeItem(SELECTED_PROFILE_KEY)
+    dispatchAllocationProfilesUpdated({ type: 'selected', profileId: '' })
     return
   }
   localStorage.setItem(SELECTED_PROFILE_KEY, profileId)
+  dispatchAllocationProfilesUpdated({ type: 'selected', profileId })
 }

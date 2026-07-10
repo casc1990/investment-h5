@@ -43,8 +43,32 @@ const routes = [
   },
   {
     path: '/allocation',
+    name: 'AllocationStrategies',
+    component: () => import('../views/AllocationStrategies.vue'),
+  },
+  {
+    path: '/allocation/:profileId',
     name: 'Allocation',
     component: () => import('../views/Allocation.vue'),
+  },
+  {
+    path: '/allocation/:profileId/bucket/:assetType',
+    redirect: to => `/allocation/${to.params.profileId}/bucket/${to.params.assetType}/select`,
+  },
+  {
+    path: '/allocation/:profileId/bucket/:assetType/select',
+    name: 'AllocationBucketSelector',
+    component: () => import('../views/AllocationBucketSelector.vue'),
+  },
+  {
+    path: '/allocation/:profileId/bucket/:assetType/suggestion',
+    name: 'AllocationBucketSuggestion',
+    component: () => import('../views/AllocationBucketSuggestion.vue'),
+  },
+  {
+    path: '/allocation/:profileId/bucket/:assetType/holdings',
+    name: 'AllocationBucketHoldings',
+    component: () => import('../views/AllocationBucketHoldings.vue'),
   },
   {
     path: '/ledger',

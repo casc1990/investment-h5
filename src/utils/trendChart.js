@@ -3,6 +3,23 @@ const toNumber = (value) => {
   return Number.isFinite(num) ? num : 0
 }
 
+export const normalizeTrendChartBounds = (values = [], includeZero = false, referenceValues = []) => {
+  const numericValues = values.map(toNumber)
+  const numericReferences = referenceValues.map(toNumber)
+  const mergedValues = [...numericValues, ...numericReferences]
+  if (!mergedValues.length) return { min: 0, max: 0 }
+
+  let min = Math.min(...mergedValues)
+  let max = Math.max(...mergedValues)
+
+  if (includeZero) {
+    min = Math.min(min, 0)
+    max = Math.max(max, 0)
+  }
+
+  return { min, max }
+}
+
 export const buildTrendChartGuides = (values = []) => {
   const numericValues = values.map(toNumber)
   if (!numericValues.length) return []
@@ -28,3 +45,14 @@ export const findNearestTrendPoint = (points = [], x) => {
     return Math.abs(point.x - x) < Math.abs(nearest.x - x) ? point : nearest
   }, null)
 }
+
+export const normalizeTrendReferenceLines = (referenceLines = [], axisFormatter = value => String(value ?? '-')) => referenceLines
+  .map((item, index) => ({
+    key: item?.key || `reference-${index}`,
+    label: item?.label || '',
+    value: Number(item?.value) || 0,
+    color: item?.color || '#f59e0b',
+    dasharray: item?.dasharray || '6 4',
+    showAxisLabel: Boolean(item?.showAxisLabel),
+    axisLabel: item?.axisLabel || axisFormatter(Number(item?.value) || 0),
+  }))

@@ -48,6 +48,37 @@ const INDEX_KEYWORDS = ['指数', 'etf', '沪深300', '中证500', '中证1000',
 const round2 = (value) => Number((Number(value) || 0).toFixed(2))
 const safeNumber = (value) => Number(value) || 0
 
+export const ALLOCATION_BUCKET_TREND_COLORS = {
+  [ALLOCATION_ASSET_TYPES.PURE_BOND]: '#3b82f6',
+  [ALLOCATION_ASSET_TYPES.FIXED_INCOME]: '#8b5cf6',
+  [ALLOCATION_ASSET_TYPES.DIVIDEND]: '#f59e0b',
+  [ALLOCATION_ASSET_TYPES.INDEX]: '#10b981',
+  [ALLOCATION_ASSET_TYPES.QDII]: '#ef4444',
+  [ALLOCATION_ASSET_TYPES.OTHER]: '#64748b',
+}
+
+export const getPositionCurrentProfit = (position = {}) => round2(safeNumber(position.current_profit))
+export const getPositionCost = (position = {}) => round2(safeNumber(position.cost))
+export const getPositionYesterdayProfit = (position = {}) => round2(
+  safeNumber(position.daily_profit)
+  || safeNumber(position.yesterday_profit)
+  || safeNumber(position.totalYesterdayProfit)
+  || 0
+)
+export const getPositionTotalProfitRate = (position = {}) => {
+  const cost = getPositionCost(position)
+  if (cost <= 0) return 0
+  return round2(getPositionCurrentProfit(position) / cost * 100)
+}
+
+export const getPositionDailyProfitRate = (position = {}) => {
+  const dailyProfit = getPositionYesterdayProfit(position)
+  const marketValue = getPositionMarketValue(position)
+  const previousMarketValue = round2(marketValue - dailyProfit)
+  if (previousMarketValue <= 0) return 0
+  return round2(dailyProfit / previousMarketValue * 100)
+}
+
 export const createDefaultAllocationBuckets = () => ALLOCATION_ASSET_TYPE_ORDER.map(assetType => ({
   assetType,
   targetPct: 0,
@@ -56,7 +87,17 @@ export const createDefaultAllocationBuckets = () => ALLOCATION_ASSET_TYPE_ORDER.
 
 export const buildAllocationPositionKey = (position = {}) => `${position.account_id || ''}::${position.fund_code || ''}`
 
-export const getPositionMarketValue = (position = {}) => round2(safeNumber(position.cost) + safeNumber(position.current_profit))
+export const getAllocationPositionOwner = (position = {}) => ({
+  memberName: String(position.member_name || position.memberName || '').trim() || '未分配用户',
+  accountName: String(position.account_name || position.accountName || '').trim() || '未命名账户',
+})
+
+export const getAllocationPositionOwnerText = (position = {}) => {
+  const { memberName, accountName } = getAllocationPositionOwner(position)
+  return `用户：${memberName} · 账户：${accountName}`
+}
+
+export const getPositionMarketValue = (position = {}) => round2(getPositionCost(position) + getPositionCurrentProfit(position))
 
 export const guessAllocationAssetType = (position = {}) => {
   const fundName = String(position.fund_name || position.fundName || '').toLowerCase()
@@ -85,12 +126,26 @@ export const normalizeAllocationProfile = (profile = {}) => ({
   id: profile.id || `allocation-${Date.now()}`,
   name: profile.name || '未命名配置方案',
   note: profile.note || '',
+  totalAsset: round2(profile.totalAsset ?? profile.total_asset ?? 0),
+  targetProfitRate: round2(profile.targetProfitRate ?? profile.target_profit_rate ?? 0),
   createdAt: profile.createdAt || profile.created_at || null,
   updatedAt: profile.updatedAt || profile.updated_at || null,
   buckets: (profile.buckets || createDefaultAllocationBuckets()).map(normalizeBucket),
   funds: (profile.funds || []).map(normalizeFund),
   defaultFundByType: { ...(profile.defaultFundByType || {}) },
 })
+
+export const isAllocationBucketConfigured = ({ bucket = {}, funds = [] } = {}) => {
+  const targetPct = round2(bucket?.targetPct)
+  if (targetPct > 0) return true
+  const assetType = bucket?.assetType
+  if (!assetType) return false
+  return (funds || []).some(fund => fund?.assetType === assetType)
+}
+
+export const filterConfiguredAllocationBuckets = ({ buckets = [], funds = [] } = {}) => (
+  (buckets || []).filter(bucket => isAllocationBucketConfigured({ bucket, funds }))
+)
 
 export const buildAllocationOccupancyMap = (profiles = [], positions = []) => {
   const positionById = new Map((positions || []).map(position => [position.id, position]))
@@ -116,6 +171,88 @@ export const getPositionOccupancy = (occupancyMap, position) => {
   return occupancyMap.get(buildAllocationPositionKey(position)) || []
 }
 
+export const buildAllocationSelectablePositions = ({
+  positions = [],
+  profiles = [],
+  currentProfile = null,
+  assetType,
+}) => {
+  const normalizedProfile = currentProfile ? normalizeAllocationProfile(currentProfile) : null
+  const occupancyMap = buildAllocationOccupancyMap(profiles, positions)
+
+  return [...(positions || [])]
+    .map(position => {
+      const config = normalizedProfile?.funds?.find(item => item.positionId === position.id) || null
+      const occupancy = getPositionOccupancy(occupancyMap, position)
+      const lockedByOtherProfile = occupancy.some(item => item.profileId !== normalizedProfile?.id)
+      const includedInCurrentBucket = config?.assetType === assetType
+      const lockedByCurrentProfileOtherBucket = Boolean(config?.assetType) && config.assetType !== assetType
+      const selectionDisabled = (lockedByOtherProfile || lockedByCurrentProfileOtherBucket) && !includedInCurrentBucket
+      const guessMatched = guessAllocationAssetType(position) === assetType
+      return {
+        position,
+        config,
+        occupancy,
+        lockedByOtherProfile,
+        lockedByCurrentProfileOtherBucket,
+        selectionDisabled,
+        includedInCurrentBucket,
+        includedInCurrentProfile: Boolean(config),
+        guessMatched,
+        marketValue: getPositionMarketValue(position),
+        currentProfit: getPositionCurrentProfit(position),
+        totalProfitRate: getPositionTotalProfitRate(position),
+      }
+    })
+    .sort((a, b) => {
+      if (a.includedInCurrentBucket !== b.includedInCurrentBucket) return a.includedInCurrentBucket ? -1 : 1
+      if (a.guessMatched !== b.guessMatched) return a.guessMatched ? -1 : 1
+      if (a.lockedByOtherProfile !== b.lockedByOtherProfile) return a.lockedByOtherProfile ? 1 : -1
+      if (a.includedInCurrentProfile !== b.includedInCurrentProfile) return a.includedInCurrentProfile ? -1 : 1
+      return b.marketValue - a.marketValue
+    })
+}
+
+export const applyAllocationBucketSelection = ({
+  profile: rawProfile,
+  assetType,
+  selectedPositionIds = [],
+}) => {
+  const profile = normalizeAllocationProfile(rawProfile)
+  const selectedSet = new Set(selectedPositionIds)
+  const currentFunds = profile.funds || []
+  const nextFunds = []
+
+  for (const fund of currentFunds) {
+    if (fund.assetType === assetType && !selectedSet.has(fund.positionId)) {
+      continue
+    }
+    if (selectedSet.has(fund.positionId)) {
+      nextFunds.push({
+        ...fund,
+        assetType,
+      })
+      selectedSet.delete(fund.positionId)
+      continue
+    }
+    nextFunds.push(fund)
+  }
+
+  for (const positionId of selectedSet) {
+    nextFunds.push({
+      positionId,
+      assetType,
+      status: ALLOCATION_FUND_STATUSES.KEEP,
+    })
+  }
+
+  return normalizeAllocationProfile({
+    ...profile,
+    funds: nextFunds,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 const buildBucketMap = (buckets = []) => {
   const map = new Map()
   for (const bucket of buckets) {
@@ -138,15 +275,186 @@ const buildFundRowsInternal = ({ profile, positions }) => {
       const position = positionById.get(fund.positionId)
       if (!position) return null
       const marketValue = getPositionMarketValue(position)
+      const currentProfit = getPositionCurrentProfit(position)
+      const dailyProfit = getPositionYesterdayProfit(position)
       return {
         positionId: fund.positionId,
         assetType: fund.assetType || guessAllocationAssetType(position),
         status: fund.status || ALLOCATION_FUND_STATUSES.KEEP,
         position,
         marketValue,
+        cost: getPositionCost(position),
+        currentProfit,
+        dailyProfit,
+        dailyProfitRate: getPositionDailyProfitRate(position),
+        totalProfitRate: getPositionTotalProfitRate(position),
       }
     })
     .filter(Boolean)
+}
+
+const buildHoldingDistribution = (funds = [], bucketMarketValue = 0) => {
+  if (bucketMarketValue <= 0) return []
+  return funds
+    .map(item => ({
+      positionId: item.positionId,
+      fundName: item.position?.fund_name || '未知基金',
+      marketValue: item.marketValue,
+      amountPct: round2(item.marketValue / bucketMarketValue * 100),
+      totalProfitRate: item.totalProfitRate,
+      currentProfit: item.currentProfit,
+    }))
+    .sort((a, b) => b.marketValue - a.marketValue)
+}
+
+export const buildAllocationProfitTrend = ({ profile: rawProfile, snapshots = [] }) => {
+  const profile = normalizeAllocationProfile(rawProfile)
+  const trackedIds = new Set((profile.funds || []).map(item => item.positionId).filter(Boolean))
+  if (!trackedIds.size || !Array.isArray(snapshots) || !snapshots.length) return []
+
+  return [...snapshots]
+    .map(snapshot => {
+      const matchedPositions = (snapshot?.positions || []).filter(position => trackedIds.has(position.id))
+      if (!matchedPositions.length) return null
+
+      const totalCost = round2(matchedPositions.reduce((sum, position) => sum + safeNumber(position.cost), 0))
+      const totalProfit = round2(matchedPositions.reduce((sum, position) => sum + safeNumber(position.current_profit), 0))
+      const totalMarketValue = round2(totalCost + totalProfit)
+      const totalProfitRate = totalCost > 0 ? round2(totalProfit / totalCost * 100) : 0
+      const targetProfitRate = round2(profile.targetProfitRate)
+
+      const row = {
+        key: snapshot.date,
+        date: snapshot.date,
+        label: String(snapshot.date || '').slice(5),
+        value: totalProfitRate,
+        totalCost,
+        totalProfit,
+        totalMarketValue,
+        totalProfitRate,
+        targetProfitRate,
+        targetGapRate: round2(totalProfitRate - targetProfitRate),
+      }
+
+      return {
+        ...row,
+        raw: row,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+}
+
+export const buildAllocationBucketDailyProfitTrend = ({ profile: rawProfile, snapshots = [], assetTypes = null }) => {
+  const profile = normalizeAllocationProfile(rawProfile)
+  const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item?.assetType)
+  if (!trackedFunds.length || !Array.isArray(snapshots) || !snapshots.length) return []
+
+  const trackedIds = new Set(trackedFunds.map(item => item.positionId))
+  const assetTypeByPositionId = new Map(trackedFunds.map(item => [item.positionId, item.assetType]))
+  const allowedAssetTypes = Array.isArray(assetTypes) && assetTypes.length
+    ? ALLOCATION_ASSET_TYPE_ORDER.filter(assetType => assetTypes.includes(assetType))
+    : ALLOCATION_ASSET_TYPE_ORDER
+  const includedAssetTypes = allowedAssetTypes.filter(assetType => trackedFunds.some(item => item.assetType === assetType))
+  if (!includedAssetTypes.length) return []
+
+  const rows = [...snapshots]
+    .map(snapshot => {
+      const matchedPositions = (snapshot?.positions || []).filter(position => trackedIds.has(position.id))
+      if (!matchedPositions.length) return null
+
+      const valuesByAssetType = includedAssetTypes.reduce((acc, assetType) => {
+        acc[assetType] = 0
+        return acc
+      }, {})
+
+      for (const position of matchedPositions) {
+        const assetType = assetTypeByPositionId.get(position.id)
+        if (!assetType || !includedAssetTypes.includes(assetType)) continue
+        valuesByAssetType[assetType] = round2(valuesByAssetType[assetType] + getPositionYesterdayProfit(position))
+      }
+
+      const totalValue = round2(Object.values(valuesByAssetType).reduce((sum, value) => sum + safeNumber(value), 0))
+      const row = {
+        key: snapshot.date,
+        date: snapshot.date,
+        label: String(snapshot.date || '').slice(5),
+        valuesByAssetType,
+        totalValue,
+      }
+
+      return row
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+
+  return includedAssetTypes.map(assetType => ({
+    key: assetType,
+    assetType,
+    label: ALLOCATION_ASSET_TYPE_LABELS[assetType] || assetType,
+    color: ALLOCATION_BUCKET_TREND_COLORS[assetType] || '#64748b',
+    points: rows.map(row => ({
+      key: `${assetType}-${row.date}`,
+      date: row.date,
+      label: row.label,
+      value: round2(row.valuesByAssetType[assetType]),
+      raw: {
+        ...row,
+        assetType,
+        value: round2(row.valuesByAssetType[assetType]),
+      },
+    })),
+  })).filter(series => series.points.some(point => point.value !== 0))
+}
+
+export const buildAllocationDailyProfitTrend = ({ profile: rawProfile, snapshots = [] }) => {
+  const profile = normalizeAllocationProfile(rawProfile)
+  const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item?.assetType)
+  if (!trackedFunds.length || !Array.isArray(snapshots) || !snapshots.length) return []
+
+  const includedAssetTypes = ALLOCATION_ASSET_TYPE_ORDER.filter(assetType => trackedFunds.some(item => item.assetType === assetType))
+  const bucketSeries = buildAllocationBucketDailyProfitTrend({ profile, snapshots, assetTypes: includedAssetTypes })
+  if (!bucketSeries.length) return []
+
+  const rowsByDate = new Map()
+  for (const series of bucketSeries) {
+    for (const point of series.points || []) {
+      const existing = rowsByDate.get(point.date) || {
+        key: point.date,
+        date: point.date,
+        label: point.label,
+        totalValue: 0,
+        valuesByAssetType: {},
+      }
+      existing.totalValue = round2(existing.totalValue + safeNumber(point.value))
+      existing.valuesByAssetType[series.assetType] = round2(point.value)
+      rowsByDate.set(point.date, existing)
+    }
+  }
+
+  const points = [...rowsByDate.values()]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .map(row => ({
+      key: `total-${row.date}`,
+      date: row.date,
+      label: row.label,
+      value: round2(row.totalValue),
+      raw: {
+        ...row,
+        assetType: 'total',
+        value: round2(row.totalValue),
+      },
+    }))
+
+  if (!points.some(point => point.value !== 0)) return []
+
+  return [{
+    key: 'total-daily-profit',
+    assetType: 'total',
+    label: '每日总收益',
+    color: '#4f46e5',
+    points,
+  }]
 }
 
 const getBucketStatus = ({ currentPct, targetPct, maxDeviationPct }) => {
@@ -175,11 +483,12 @@ export const buildAllocationProfileSummary = ({ profile: rawProfile, positions =
   const bucketMap = buildBucketMap(profile.buckets)
   const fundRows = buildFundRowsInternal({ profile, positions })
   const totalMarketValue = round2(fundRows.reduce((sum, item) => sum + item.marketValue, 0))
+  const allocationBaseMarketValue = profile.totalAsset > 0 ? round2(profile.totalAsset) : totalMarketValue
   const occupancyMap = buildAllocationOccupancyMap(allProfiles.length ? allProfiles : [profile], positions)
 
   const fundRowsWithPct = fundRows.map(item => ({
     ...item,
-    portfolioPct: totalMarketValue > 0 ? round2(item.marketValue / totalMarketValue * 100) : 0,
+    portfolioPct: allocationBaseMarketValue > 0 ? round2(item.marketValue / allocationBaseMarketValue * 100) : 0,
     occupancy: getPositionOccupancy(occupancyMap, item.position),
   }))
 
@@ -187,17 +496,33 @@ export const buildAllocationProfileSummary = ({ profile: rawProfile, positions =
     const bucket = bucketMap.get(assetType)
     const funds = fundRowsWithPct.filter(item => item.assetType === assetType)
     const marketValue = round2(funds.reduce((sum, item) => sum + item.marketValue, 0))
-    const currentPct = totalMarketValue > 0 ? round2(marketValue / totalMarketValue * 100) : 0
+    const totalCost = round2(funds.reduce((sum, item) => sum + item.cost, 0))
+    const totalProfit = round2(funds.reduce((sum, item) => sum + item.currentProfit, 0))
+    const totalProfitRate = totalCost > 0 ? round2(totalProfit / totalCost * 100) : 0
+    const dailyProfit = round2(funds.reduce((sum, item) => sum + item.dailyProfit, 0))
+    const previousMarketValue = round2(marketValue - dailyProfit)
+    const dailyProfitRate = previousMarketValue > 0 ? round2(dailyProfit / previousMarketValue * 100) : 0
+    const currentPct = allocationBaseMarketValue > 0 ? round2(marketValue / allocationBaseMarketValue * 100) : 0
+    const targetAmount = allocationBaseMarketValue > 0 ? round2(allocationBaseMarketValue * bucket.targetPct / 100) : 0
     const deviationPct = round2(currentPct - bucket.targetPct)
+    const deviationAmount = round2(marketValue - targetAmount)
     const status = getBucketStatus({ currentPct, targetPct: bucket.targetPct, maxDeviationPct: bucket.maxDeviationPct })
     return {
       ...bucket,
       label: ALLOCATION_ASSET_TYPE_LABELS[assetType],
       marketValue,
+      totalCost,
+      totalProfit,
+      totalProfitRate,
+      dailyProfit,
+      dailyProfitRate,
       currentPct,
+      targetAmount,
       deviationPct,
+      deviationAmount,
       status,
       funds,
+      holdingDistribution: buildHoldingDistribution(funds, marketValue),
     }
   })
 
@@ -212,11 +537,26 @@ export const buildAllocationProfileSummary = ({ profile: rawProfile, positions =
 
   const coveredPositionIds = new Set(fundRowsFinal.map(item => item.positionId))
   const uncoveredPositions = (positions || []).filter(position => !coveredPositionIds.has(position.id))
-  const uncoveredMarketValue = round2(uncoveredPositions.reduce((sum, position) => sum + getPositionMarketValue(position), 0))
+  const uncoveredMarketValue = profile.totalAsset > 0
+    ? round2(Math.max(allocationBaseMarketValue - totalMarketValue, 0))
+    : round2(uncoveredPositions.reduce((sum, position) => sum + getPositionMarketValue(position), 0))
+
+  const totalCost = round2(fundRowsFinal.reduce((sum, item) => sum + item.cost, 0))
+  const totalProfit = round2(fundRowsFinal.reduce((sum, item) => sum + item.currentProfit, 0))
+  const totalProfitRate = totalCost > 0 ? round2(totalProfit / totalCost * 100) : 0
+  const totalDailyProfit = round2(fundRowsFinal.reduce((sum, item) => sum + item.dailyProfit, 0))
+  const totalPreviousMarketValue = round2(totalMarketValue - totalDailyProfit)
+  const totalDailyProfitRate = totalPreviousMarketValue > 0 ? round2(totalDailyProfit / totalPreviousMarketValue * 100) : 0
 
   return {
     profile,
     totalMarketValue,
+    totalCost,
+    totalProfit,
+    totalProfitRate,
+    totalDailyProfit,
+    totalDailyProfitRate,
+    allocationBaseMarketValue,
     coveredPositionCount: fundRowsFinal.length,
     uncoveredPositionCount: uncoveredPositions.length,
     uncoveredMarketValue,
@@ -253,9 +593,9 @@ const pickRecommendedFunds = ({ bucketSummary, defaultFundByType = {} }) => {
 
 export const buildAllocationSuggestions = ({ profile: rawProfile, positions = [], newCashAmount = 0 }) => {
   const summary = buildAllocationProfileSummary({ profile: rawProfile, positions })
-  const totalMarketValue = summary.totalMarketValue
+  const allocationBaseMarketValue = summary.allocationBaseMarketValue
   const investAmount = round2(newCashAmount)
-  const postInvestMarketValue = round2(totalMarketValue + investAmount)
+  const postInvestMarketValue = round2(allocationBaseMarketValue + investAmount)
 
   const deficitBuckets = summary.bucketSummaries
     .map(bucket => {

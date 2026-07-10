@@ -132,6 +132,7 @@
         :summary-label="trendSummaryLabel"
         :formatter="formatCurrencyValue"
         :y-axis-formatter="formatCompactAmount"
+        :show-zero-baseline="true"
         @select="handleTrendSelect"
       />
 

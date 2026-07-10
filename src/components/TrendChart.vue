@@ -18,6 +18,12 @@
       <div class="chart-body">
         <div class="y-axis-labels">
           <span v-for="guide in guides" :key="guide.value">{{ yAxisFormatter(guide.value) }}</span>
+          <span
+            v-for="line in axisLabelReferenceLines"
+            :key="`${line.key}-axis-label`"
+            class="reference-axis-label"
+            :style="buildReferenceAxisLabelStyle(line)"
+          >{{ line.axisLabel }}</span>
           <span v-if="hasZeroBaseline" class="zero-axis-label" :style="zeroAxisLabelStyle">0</span>
         </div>
 
@@ -46,6 +52,25 @@
               />
             </template>
             <line v-for="guide in guides" :key="guide.value" x1="0" :y1="yFor(guide.value)" x2="320" :y2="yFor(guide.value)" class="guide-line" />
+            <g v-for="line in normalizedReferenceLines" :key="line.key">
+              <line
+                x1="0"
+                :y1="yFor(line.value)"
+                x2="320"
+                :y2="yFor(line.value)"
+                class="reference-line"
+                :stroke="line.color"
+                :stroke-dasharray="line.dasharray"
+              />
+              <text
+                v-if="line.label"
+                x="314"
+                :y="yFor(line.value) - 4"
+                class="reference-line-label"
+                text-anchor="end"
+                :fill="line.color"
+              >{{ line.label }}</text>
+            </g>
             <line
               v-if="hasZeroBaseline"
               x1="0"
@@ -65,6 +90,7 @@
               class="focus-line"
             />
             <circle
+              v-if="showPointMarkers"
               v-for="point in svgPoints"
               :key="point.key"
               :cx="point.x"
@@ -88,7 +114,13 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { buildTrendChartGuides, findNearestTrendPoint, formatTrendXAxisLabel } from '../utils/trendChart'
+import {
+  buildTrendChartGuides,
+  findNearestTrendPoint,
+  formatTrendXAxisLabel,
+  normalizeTrendChartBounds,
+  normalizeTrendReferenceLines,
+} from '../utils/trendChart'
 
 const emit = defineEmits(['select'])
 
@@ -109,6 +141,18 @@ const props = defineProps({
     type: Function,
     default: value => String(value ?? '-'),
   },
+  showZeroBaseline: {
+    type: Boolean,
+    default: false,
+  },
+  referenceLines: {
+    type: Array,
+    default: () => [],
+  },
+  showPointMarkers: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const width = 320
@@ -117,8 +161,10 @@ const padding = { top: 18, right: 12, bottom: 18, left: 12 }
 const selectedKey = ref('')
 
 const values = computed(() => props.points.map(item => Number(item.value) || 0))
-const minValue = computed(() => values.value.length ? Math.min(...values.value) : 0)
-const maxValue = computed(() => values.value.length ? Math.max(...values.value) : 0)
+const referenceValues = computed(() => props.referenceLines.map(item => Number(item?.value) || 0))
+const bounds = computed(() => normalizeTrendChartBounds(values.value, props.showZeroBaseline, referenceValues.value))
+const minValue = computed(() => bounds.value.min)
+const maxValue = computed(() => bounds.value.max)
 
 const normalizedMax = computed(() => {
   if (maxValue.value === minValue.value) return maxValue.value + 1
@@ -163,8 +209,8 @@ const areaPath = computed(() => {
   return `${linePath} L ${last.x} ${height - padding.bottom} L ${first.x} ${height - padding.bottom} Z`
 })
 
-const guides = computed(() => buildTrendChartGuides(values.value))
-const hasZeroBaseline = computed(() => normalizedMin.value < 0 && normalizedMax.value > 0)
+const guides = computed(() => buildTrendChartGuides([minValue.value, maxValue.value]))
+const hasZeroBaseline = computed(() => props.points.length > 0 && props.showZeroBaseline)
 const zeroBaselineY = computed(() => hasZeroBaseline.value ? yFor(0) : null)
 const zeroAxisLabelStyle = computed(() => {
   if (!hasZeroBaseline.value) return {}
@@ -182,6 +228,14 @@ const visibleLabels = computed(() => {
     svgPoints.value.length - 1,
   ]))
   return indexes.map(index => svgPoints.value[index])
+})
+
+const normalizedReferenceLines = computed(() => normalizeTrendReferenceLines(props.referenceLines, props.yAxisFormatter))
+const axisLabelReferenceLines = computed(() => normalizedReferenceLines.value.filter(line => line.showAxisLabel))
+
+const buildReferenceAxisLabelStyle = (line) => ({
+  top: `${yFor(line.value)}px`,
+  color: line.color,
 })
 
 const handlePointerSelect = (event) => {
@@ -302,14 +356,32 @@ watch(selectedPoint, (point) => {
   stroke-dasharray: 6 4;
 }
 
-.zero-axis-label {
+.reference-line {
+  stroke-width: 1.5;
+}
+
+.reference-line-label {
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.zero-axis-label,
+.reference-axis-label {
   position: absolute;
   right: 0;
   transform: translateY(-50%);
-  color: rgba(238, 10, 36, 0.82);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
+}
+
+.zero-axis-label {
+  color: rgba(238, 10, 36, 0.82);
+}
+
+.reference-axis-label {
+  max-width: 52px;
+  text-align: right;
 }
 
 .focus-line {

@@ -24,3 +24,17 @@ test('普通场景在缺少存储涨跌幅时，回退为净值差乘份额', ()
 
   assert.equal(result, 1)
 })
+
+test('QDII 在北京时间次日凌晨仍停留前两个交易日净值时，不应把昨日收益清零', () => {
+  const result = resolveDisplayedYesterdayProfit({
+    shares: 3633.07,
+    confirmedNav: 2.775,
+    prevNav: 2.816687,
+    storedChangeRate: -1.48,
+    navDate: '2026-07-07',
+    fundName: '景顺长城纳斯达克科技市值加权ETF联接(QDII)E',
+  })
+
+  assert.notEqual(result, 0)
+  assert.equal(result, -151.4517)
+})
