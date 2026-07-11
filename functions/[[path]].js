@@ -1194,7 +1194,10 @@ export async function onRequest(context) {
           JSON.stringify({ trade_type: tradeType, quantity, amount, trade_date: trade.trade_date, note: trade.note || '' }),
         ).run();
       }
+    }
 
+    async function scanUpcomingDividendEvents() {
+      const now = new Date();
       const scanKey = 'upcoming_dividends';
       await env.DB.prepare('INSERT OR IGNORE INTO event_scan_status (scan_key, last_scanned_at) VALUES (?, 0)').bind(scanKey).run();
       const scanLock = await env.DB.prepare(`
@@ -2475,6 +2478,7 @@ export async function onRequest(context) {
           includeQdii,
           batchSize,
         });
+        await scanUpcomingDividendEvents();
 
         return jsonResponse({
           code: 0,
@@ -2619,6 +2623,7 @@ export async function onRequest(context) {
         }
 
         const successCount = Object.values(syncResults).filter(r => r.ok).length;
+        await scanUpcomingDividendEvents();
         return jsonResponse({
           code: 0,
           message: `Synced ${successCount}/${fundCodes.length} funds`,

@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { parseUpcomingDividendRows } from '../functions/[[path]].js'
+import { readFile } from 'node:fs/promises'
+
+const apiSource = await readFile(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 
 const html = `
   <table><tbody>
@@ -30,4 +33,16 @@ test('分红解析兼容表格标签之间的空白', () => {
   const rows = parseUpcomingDividendRows(spacedHtml, { now: new Date('2026-07-11T00:00:00+08:00') })
   assert.equal(rows.length, 1)
   assert.equal(rows[0].dividend_per_share, 0.005)
+})
+
+test('近期分红扫描由净值同步触发而不是首页事件读取触发', () => {
+  const eventRouteStart = apiSource.indexOf("if (path === '/api/events' && method === 'GET')")
+  const memberRouteStart = apiSource.indexOf('// ========== 成员 API ==========', eventRouteStart)
+  const eventRouteSource = apiSource.slice(eventRouteStart, memberRouteStart)
+  assert.doesNotMatch(eventRouteSource, /scanUpcomingDividendEvents/)
+
+  const pendingSyncStart = apiSource.indexOf("if (path === '/api/fund/sync/pending'")
+  const singleSyncStart = apiSource.indexOf('// 单基金净值同步接口', pendingSyncStart)
+  const syncRouteSource = apiSource.slice(pendingSyncStart, singleSyncStart)
+  assert.equal((syncRouteSource.match(/await scanUpcomingDividendEvents\(\)/g) || []).length, 2)
 })
