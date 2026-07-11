@@ -43,3 +43,11 @@ test('后端事件表包含业务字段并通过来源唯一键幂等去重', ()
   assert.match(apiSource, /UNIQUE\(source_type, source_id, event_type\)/)
   assert.match(apiSource, /INSERT OR IGNORE INTO events/)
 })
+
+test('近期分红事件展示登记日、除息日、预计金额和发放日', () => {
+  assert.match(homeSource, /权益登记日/)
+  assert.match(homeSource, /除息日/)
+  assert.match(homeSource, /预计分红/)
+  assert.match(homeSource, /红利发放日/)
+  assert.match(apiSource, /dividend_announcement/)
+})

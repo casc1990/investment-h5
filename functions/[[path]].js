@@ -56,6 +56,25 @@ export function isAuthorizedCronRequest(request, env = {}) {
   return configuredSecret.length >= 32 && safeEqualStrings(configuredSecret, providedSecret);
 }
 
+export function parseUpcomingDividendRows(html = '', { now = new Date(), daysAhead = 30 } = {}) {
+  const today = getChinaDateString(now);
+  const endDate = getChinaDateString(addDays(now, Math.max(0, Number(daysAhead || 0))));
+  const rows = [];
+  const rowPattern = /<tr>\s*<td>\d{4}年<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>每份派现金([\d.]+)元<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<\/tr>/g;
+  let match;
+  while ((match = rowPattern.exec(String(html || ''))) !== null) {
+    const [, recordDate, exDate, dividendPerShare, paymentDate] = match;
+    if (recordDate < today || recordDate > endDate) continue;
+    rows.push({
+      record_date: recordDate,
+      ex_date: exDate,
+      dividend_per_share: Number(dividendPerShare),
+      payment_date: paymentDate,
+    });
+  }
+  return rows;
+}
+
 function getChinaDateString(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Shanghai',
@@ -1098,6 +1117,12 @@ export async function onRequest(context) {
             )
           `).run();
           await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_events_status_time ON events(status, event_time DESC)').run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS event_scan_status (
+              scan_key TEXT PRIMARY KEY,
+              last_scanned_at INTEGER NOT NULL DEFAULT 0
+            )
+          `).run();
         })().catch(error => {
           runtimeSchemaInitPromise = null;
           throw error;
@@ -1168,6 +1193,50 @@ export async function onRequest(context) {
           trade.fund_name || '', trade.account_id, trade.account_name || '', trade.id,
           JSON.stringify({ trade_type: tradeType, quantity, amount, trade_date: trade.trade_date, note: trade.note || '' }),
         ).run();
+      }
+
+      const scanKey = 'upcoming_dividends';
+      await env.DB.prepare('INSERT OR IGNORE INTO event_scan_status (scan_key, last_scanned_at) VALUES (?, 0)').bind(scanKey).run();
+      const scanLock = await env.DB.prepare(`
+        UPDATE event_scan_status SET last_scanned_at = unixepoch()
+        WHERE scan_key = ? AND last_scanned_at < unixepoch() - 21600
+      `).bind(scanKey).run();
+      if (Number(scanLock?.meta?.changes || 0) > 0) {
+        const { results: positions } = await env.DB.prepare(`
+          SELECT p.fund_code, MAX(p.fund_name) AS fund_name, SUM(p.quantity) AS quantity
+          FROM positions p
+          WHERE p.quantity > 0 AND p.fund_code IS NOT NULL AND p.fund_code != ''
+          GROUP BY p.fund_code
+        `).all();
+        const headers = { 'User-Agent': 'Mozilla/5.0 (compatible; InvestmentEventCenter/1.0)' };
+        for (let index = 0; index < (positions || []).length; index += 5) {
+          const batch = positions.slice(index, index + 5);
+          await Promise.all(batch.map(async position => {
+            try {
+              const response = await fetch(`https://fundf10.eastmoney.com/fhsp_${position.fund_code}.html`, { headers });
+              if (!response.ok) return;
+              const dividendRows = parseUpcomingDividendRows(await response.text(), { now, daysAhead: 30 });
+              for (const dividend of dividendRows) {
+                const estimatedAmount = Number((Number(position.quantity || 0) * dividend.dividend_per_share).toFixed(2));
+                const eventTime = Math.floor(Date.parse(`${dividend.record_date}T09:00:00+08:00`) / 1000);
+                await env.DB.prepare(`
+                  INSERT OR IGNORE INTO events (
+                    id, event_type, status, event_time, title, description, fund_code, fund_name,
+                    source_type, source_id, detail_json
+                  ) VALUES (?, 'dividend', 'pending', ?, ?, ?, ?, ?, 'dividend_announcement', ?, ?)
+                `).bind(
+                  generateId(), eventTime, `${position.fund_name || position.fund_code}即将分红`,
+                  `每份派现金 ${dividend.dividend_per_share.toFixed(4)} 元，预计分红 ${estimatedAmount.toFixed(2)} 元。`,
+                  position.fund_code, position.fund_name || '',
+                  `${position.fund_code}:${dividend.record_date}:${dividend.dividend_per_share}`,
+                  JSON.stringify({ ...dividend, estimated_amount: estimatedAmount, shares: Number(position.quantity || 0) }),
+                ).run();
+              }
+            } catch (error) {
+              console.error(`Failed to scan dividend for ${position.fund_code}:`, error);
+            }
+          }));
+        }
       }
     }
 

@@ -169,6 +169,13 @@
           <div class="event-detail-row"><span>目标净值日期</span><b>{{ selectedEvent.detail?.target_nav_date || '—' }}</b></div>
           <div class="event-detail-row"><span>当前净值日期</span><b>{{ selectedEvent.detail?.current_nav_date || '—' }}</b></div>
         </template>
+        <template v-else-if="selectedEvent.event_type === 'dividend' && selectedEvent.source_type === 'dividend_announcement'">
+          <div class="event-detail-row"><span>权益登记日</span><b>{{ selectedEvent.detail?.record_date || '—' }}</b></div>
+          <div class="event-detail-row"><span>除息日</span><b>{{ selectedEvent.detail?.ex_date || '—' }}</b></div>
+          <div class="event-detail-row"><span>每份分红</span><b>{{ formatNumber(selectedEvent.detail?.dividend_per_share || 0) }} 元</b></div>
+          <div class="event-detail-row"><span>预计分红</span><b>{{ formatNumber(selectedEvent.detail?.estimated_amount || 0) }} 元</b></div>
+          <div class="event-detail-row"><span>红利发放日</span><b>{{ selectedEvent.detail?.payment_date || '—' }}</b></div>
+        </template>
         <template v-else>
           <div class="event-detail-row"><span>业务类型</span><b>{{ selectedEvent.detail?.trade_type || '—' }}</b></div>
           <div class="event-detail-row"><span>{{ selectedEvent.event_type === 'dividend' ? '分红金额' : '变动份额' }}</span><b>{{ selectedEvent.event_type === 'dividend' ? `${formatNumber(selectedEvent.detail?.amount || 0)} 元` : `${formatNumber(selectedEvent.detail?.quantity || 0)} 份` }}</b></div>
