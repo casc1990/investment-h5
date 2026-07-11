@@ -90,14 +90,12 @@
                   <span v-if="account.channel" class="account-channel">{{ account.channel }}</span>
                 </div>
                 <div class="account-subtitle">持有金额 ¥{{ formatNumber(account.marketValue || 0) }}</div>
+                <div class="account-holding-profit" :class="profitClass(account.profit)">持有收益 {{ displaySignedMoney(account.profit) }}</div>
               </div>
               <div class="account-side">
                 <div class="account-daily-label">日收益</div>
                 <div class="account-profit" :class="profitClass(account.dailyProfit)">
                   {{ displaySignedMoney(account.dailyProfit) }}
-                </div>
-                <div class="account-holding" :class="profitClass(account.profit)">
-                  持有收益 {{ displaySignedMoney(account.profit) }}
                 </div>
                 <div class="account-holding-rate" :class="profitClass(account.profitRate)">
                   持有收益率 {{ displayPercent(account.profitRate) }}
@@ -829,6 +827,7 @@ onActivated(() => {
   font-size: 12px;
   color: #94a3b8;
 }
+.account-holding-profit { margin-top: 5px; font-family: 'Courier New', monospace; font-size: 11px; font-weight: 700; }
 
 .account-side {
   text-align: right;
@@ -837,27 +836,25 @@ onActivated(() => {
 .account-daily-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
 
 .account-profit,
-.account-holding,
 .account-holding-rate {
   font-family: 'Courier New', monospace;
   font-size: 13px;
   font-weight: 700;
 }
 
-.account-holding,
 .account-holding-rate {
   margin-top: 4px;
   font-size: 10px;
 }
 
 .account-profit.positive,
-.account-holding.positive,
+.account-holding-profit.positive,
 .account-holding-rate.positive {
   color: #f87171;
 }
 
 .account-profit.negative,
-.account-holding.negative,
+.account-holding-profit.negative,
 .account-holding-rate.negative {
   color: #4ade80;
 }
