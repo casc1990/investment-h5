@@ -100,12 +100,13 @@
             </div>
           </div>
 
-          <div v-if="member.accounts?.length" class="member-stats three-column">
+          <div v-if="member.accounts?.length" class="member-stats four-metrics">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
               <span class="stat-value">¥{{ formatNumber(member.marketValue || 0) }}</span>
             </div>
             <div class="stat-item align-right"><span class="stat-label">日收益</span><span class="stat-value profit" :class="profitClass(member.dailyProfit)">{{ displaySignedMoney(member.dailyProfit) }}</span></div>
+            <div class="stat-item"><span class="stat-label">总收益</span><span class="stat-value profit" :class="profitClass(member.profit)">{{ displaySignedMoney(member.profit) }}</span></div>
             <div class="stat-item align-right">
               <span class="stat-label">总收益率</span>
               <span class="stat-value profit" :class="{ positive: member.profit > 0, negative: member.profit < 0 }">
@@ -769,7 +770,7 @@ onActivated(() => {
   padding-top: 12px;
   border-top: 1px solid #edf2f7;
 }
-.member-stats.three-column { display: grid; grid-template-columns: repeat(3, 1fr); }
+.member-stats.four-metrics { display: grid; grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
 
 .stat-item {
   display: flex;
