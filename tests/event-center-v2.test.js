@@ -84,3 +84,14 @@ test('分红公告详情按账户分红方式预览份额或现金', () => {
   assert.match(homeSource, /预计现金分红/)
   assert.match(homeSource, /account\.dividend_method === '红利再投'/)
 })
+
+test('首页升级为带净值进度和收益贡献的每日收益看板', () => {
+  for (const text of ['确认总资产', '每日收益贡献', '累计收益', '持仓收益率', '立即分配']) {
+    assert.match(homeSource, new RegExp(text))
+  }
+  for (const field of ['dailyProfitDate', 'updatedFundCount', 'totalFundCount', 'staleFundCount', 'dailyContributions']) {
+    assert.match(apiSource, new RegExp(field))
+  }
+  assert.match(homeSource, /home-skeleton/)
+  assert.match(homeSource, /amountsHidden/)
+})

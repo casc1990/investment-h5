@@ -4,34 +4,66 @@
     <div class="header-card">
       <div class="header-top">
         <div class="total-info">
-          <div class="label">💰 总资产</div>
-          <div class="amount">¥{{ formatNumber(overview?.summary?.totalMarketValue || 0) }}</div>
+          <div class="label">确认总资产</div>
+          <div class="amount">{{ displayMoney(overview?.summary?.totalMarketValue) }}</div>
           <div class="profit" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
-            <span>{{ overview?.summary?.totalProfit >= 0 ? '+' : '' }}¥{{ formatNumber(overview?.summary?.totalProfit || 0) }}</span>
+            <span>持有收益 {{ displaySignedMoney(overview?.summary?.totalProfit) }}</span>
             <span class="rate">({{ overview?.summary?.totalProfitRate || 0 }}%)</span>
           </div>
         </div>
-        <button class="logout-btn" @click="handleLogout">退出</button>
+        <div class="header-actions">
+          <button @click="amountsHidden = !amountsHidden">{{ amountsHidden ? '显示' : '隐藏' }}</button>
+          <button :disabled="refreshing" @click="refreshHome">{{ refreshing ? '刷新中' : '刷新' }}</button>
+          <button @click="handleLogout">退出</button>
+        </div>
+      </div>
+      <div class="freshness-row">
+        <span>{{ dailyProfitLabel }}</span>
+        <span>{{ freshnessText }}</span>
       </div>
     </div>
 
-    <div class="today-strip">
+    <div class="today-grid">
       <div class="today-card">
-        <div class="today-label">持仓日收益</div>
+        <div class="today-label">{{ dailyProfitLabel }}</div>
         <div class="today-value" :class="{ positive: homePositionDailyProfit > 0, negative: homePositionDailyProfit < 0 }">
-          {{ homePositionDailyProfit >= 0 ? '+' : '' }}¥{{ formatNumber(homePositionDailyProfit) }}
+          {{ displaySignedMoney(homePositionDailyProfit) }}
         </div>
       </div>
       <div class="today-card">
         <div class="today-label">持有收益</div>
         <div class="today-value" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
-          {{ overview?.summary?.totalProfit >= 0 ? '+' : '' }}¥{{ formatNumber(overview?.summary?.totalProfit || 0) }}
+          {{ displaySignedMoney(overview?.summary?.totalProfit) }}
         </div>
       </div>
       <div class="today-card">
-        <div class="today-label">未分配账户</div>
-        <div class="today-value neutral">{{ unassignedAccounts?.length || 0 }}个</div>
+        <div class="today-label">累计收益</div>
+        <div class="today-value" :class="profitClass(overview?.summary?.totalCumulativeProfit)">{{ displaySignedMoney(overview?.summary?.totalCumulativeProfit) }}</div>
       </div>
+      <div class="today-card">
+        <div class="today-label">持仓收益率</div>
+        <div class="today-value" :class="profitClass(overview?.summary?.totalProfitRate)">{{ displayPercent(overview?.summary?.totalProfitRate) }}</div>
+      </div>
+    </div>
+
+    <div v-if="dailyContributions.length" class="section contribution-section">
+      <div class="section-heading">
+        <div>
+          <div class="section-title">每日收益贡献</div>
+          <div class="section-subtitle">按收益影响绝对值排序</div>
+        </div>
+        <button class="section-more" @click="router.push('/positions')">全部持仓</button>
+      </div>
+      <button v-for="item in dailyContributions" :key="`${item.accountId}:${item.fundCode}`" class="contribution-item" @click="openPosition(item)">
+        <div class="contribution-main">
+          <strong>{{ item.fundName }}</strong>
+          <span>{{ item.accountName }} · {{ item.fundCode }}</span>
+        </div>
+        <div class="contribution-value" :class="profitClass(item.dailyProfit)">
+          <strong>{{ displaySignedMoney(item.dailyProfit) }}</strong>
+          <span>{{ displayPercent(item.dailyChangeRate) }}</span>
+        </div>
+      </button>
     </div>
 
     <!-- 成员分布 -->
@@ -48,18 +80,19 @@
               </div>
             </div>
             <div class="member-overview">
-              <div class="member-overview-profit" :class="{ positive: member.profit > 0, negative: member.profit < 0 }">
-                {{ member.profit >= 0 ? '+' : '' }}¥{{ formatNumber(member.profit || 0) }}
+              <div class="member-overview-profit" :class="profitClass(member.dailyProfit)">
+                {{ displaySignedMoney(member.dailyProfit) }}
               </div>
               <div class="member-overview-arrow">{{ isMemberExpanded(member.member_id) ? '收起' : '展开' }}</div>
             </div>
           </div>
 
-          <div v-if="member.accounts?.length" class="member-stats">
+          <div v-if="member.accounts?.length" class="member-stats three-column">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
               <span class="stat-value">¥{{ formatNumber(member.marketValue || 0) }}</span>
             </div>
+            <div class="stat-item align-right"><span class="stat-label">日收益</span><span class="stat-value profit" :class="profitClass(member.dailyProfit)">{{ displaySignedMoney(member.dailyProfit) }}</span></div>
             <div class="stat-item align-right">
               <span class="stat-label">总收益率</span>
               <span class="stat-value profit" :class="{ positive: member.profit > 0, negative: member.profit < 0 }">
@@ -69,7 +102,7 @@
           </div>
 
           <div v-if="member.accounts?.length && isMemberExpanded(member.member_id)" class="member-account-list">
-            <div v-for="account in member.accounts" :key="account.accountId" class="member-account-item">
+            <button v-for="account in member.accounts" :key="account.accountId" class="member-account-item" @click="openAccount(account)">
               <div class="account-main">
                 <div class="account-title-row">
                   <span class="account-name">{{ account.accountName }}</span>
@@ -79,13 +112,13 @@
               </div>
               <div class="account-side">
                 <div class="account-profit" :class="{ positive: account.profit > 0, negative: account.profit < 0 }">
-                  {{ account.profit >= 0 ? '+' : '' }}¥{{ formatNumber(account.profit || 0) }}
+                  {{ displaySignedMoney(account.dailyProfit) }}
                 </div>
                 <div class="account-rate" :class="{ positive: account.profit > 0, negative: account.profit < 0 }">
-                  {{ account.profitRate || 0 }}%
+                  持有收益率 {{ displayPercent(account.profitRate) }}
                 </div>
               </div>
-            </div>
+            </button>
           </div>
 
           <div v-else class="member-empty">
@@ -97,22 +130,9 @@
     </div>
 
     <!-- 无成员账户（未分配） -->
-    <div v-if="unassignedAccounts?.length" class="section">
-      <div class="section-title">📦 未分配账户</div>
-      <div class="account-list">
-        <div v-for="account in unassignedAccounts" :key="account.accountId" class="account-item">
-          <div class="account-info">
-            <span class="account-name">{{ account.accountName }}</span>
-            <span class="account-channel">{{ account.channel }}</span>
-          </div>
-          <div class="account-value">
-            <span class="value">¥{{ formatNumber(account.marketValue || 0) }}</span>
-            <span class="profit" :class="{ positive: account.profit > 0 }">
-              {{ account.profit >= 0 ? '+' : '' }}{{ account.profitRate }}%
-            </span>
-          </div>
-        </div>
-      </div>
+    <div v-if="unassignedAccounts?.length" class="section unassigned-callout">
+      <div><div class="section-title">{{ unassignedAccounts.length }} 个账户尚未分配成员</div><div class="section-subtitle">涉及资产 {{ displayMoney(unassignedMarketValue) }}</div></div>
+      <button @click="router.push('/accounts')">立即分配</button>
     </div>
 
     <!-- 事件中心 -->
@@ -207,8 +227,10 @@
     </van-popup>
 
     <!-- 加载状态 -->
-    <div v-if="loading" class="loading-overlay">
-      <van-loading size="24px">加载中...</van-loading>
+    <div v-if="loading && !overview" class="home-skeleton" aria-label="首页数据加载中">
+      <div class="skeleton-hero"></div>
+      <div class="skeleton-grid"><i v-for="index in 4" :key="index"></i></div>
+      <div class="skeleton-section"><i></i><i></i><i></i></div>
     </div>
   </div>
 </template>
@@ -223,6 +245,8 @@ import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const router = useRouter()
 const loading = ref(false)
+const refreshing = ref(false)
+const amountsHidden = ref(false)
 const overview = ref(null)
 const expandedMemberIds = ref([])
 const eventSyncing = ref(false)
@@ -245,6 +269,21 @@ const homePositionDailyProfit = computed(() => (
 ))
 
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
+const dailyContributions = computed(() => (overview.value?.dailyContributions || []).slice(0, 3))
+const unassignedMarketValue = computed(() => unassignedAccounts.value.reduce((sum, account) => sum + Number(account.marketValue || 0), 0))
+const dailyProfitLabel = computed(() => {
+  const date = overview.value?.summary?.dailyProfitDate
+  if (!date) return '最近日收益'
+  const today = new Date().toLocaleDateString('en-CA')
+  return date === today ? '今日收益' : `${date.slice(5).replace('-', '/')} 收益`
+})
+const freshnessText = computed(() => {
+  const summary = overview.value?.summary || {}
+  if (!summary.totalFundCount) return '暂无持仓净值'
+  return summary.staleFundCount > 0
+    ? `${summary.updatedFundCount}/${summary.totalFundCount} 只已更新`
+    : `${summary.totalFundCount} 只基金已更新`
+})
 
 const isMemberExpanded = (memberId) => expandedMemberIds.value.includes(memberId)
 
@@ -276,6 +315,10 @@ const fetchData = async () => {
 
     if (overviewResult.status === 'fulfilled') {
       overview.value = overviewResult.value
+      if (!expandedMemberIds.value.length) {
+        const first = [...(overview.value?.members || [])].sort((a, b) => Math.abs(Number(b.dailyProfit || 0)) - Math.abs(Number(a.dailyProfit || 0)))[0]
+        if (first) expandedMemberIds.value = [first.member_id]
+      }
     } else {
       throw overviewResult.reason
     }
@@ -308,6 +351,19 @@ const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh
 const formatDividendPerShare = value => Number(value || 0).toFixed(4)
 const formatShareQuantity = value => Number(value || 0).toFixed(4)
 const isReinvestDividendEvent = event => event?.event_type === 'dividend' && ['红利再投', '分红再投'].includes(event?.detail?.trade_type)
+const profitClass = value => ({ positive: Number(value || 0) > 0, negative: Number(value || 0) < 0, neutral: Number(value || 0) === 0 })
+const displayMoney = value => amountsHidden.value ? '¥••••••' : `¥${formatNumber(value || 0)}`
+const displaySignedMoney = value => {
+  if (amountsHidden.value) return '¥••••'
+  const amount = Number(value || 0)
+  return `${amount >= 0 ? '+' : '-'}¥${formatNumber(Math.abs(amount))}`
+}
+const displayPercent = value => {
+  const amount = Number(value || 0)
+  return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`
+}
+const openPosition = item => item.positionId ? router.push(`/positions/${item.positionId}`) : router.push('/positions')
+const openAccount = account => router.push({ path: '/positions', query: { account_id: account.accountId } })
 const eventDetailDescription = event => {
   if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
   const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)
@@ -389,6 +445,17 @@ const ensureFreshData = async ({ force = false } = {}) => {
   await fetchData()
 }
 
+const refreshHome = async () => {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await ensureFreshData({ force: true })
+    showToast('首页数据已刷新')
+  } finally {
+    refreshing.value = false
+  }
+}
+
 const handleLogout = async () => {
   try {
     await showConfirmDialog({
@@ -397,7 +464,7 @@ const handleLogout = async () => {
     })
     await authApi.logout()
   } catch (e) {
-    // user cancelled
+    return
   }
   localStorage.removeItem('auth_token')
   localStorage.removeItem('auth_username')
@@ -417,7 +484,7 @@ onActivated(() => {
 .home {
   min-height: 100vh;
   background: #f5f5f5;
-  padding-bottom: 70px;
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
 .header-card {
@@ -432,19 +499,20 @@ onActivated(() => {
   align-items: flex-start;
 }
 
-.logout-btn {
+.header-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.header-actions button {
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
   border-radius: 20px;
-  padding: 6px 16px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .total-info {
-  text-align: center;
+  text-align: left;
 }
 
 .total-info .label {
@@ -476,9 +544,11 @@ onActivated(() => {
   margin-left: 4px;
 }
 
-.today-strip {
+.freshness-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.18); font-size: 12px; opacity: .9; }
+
+.today-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
   margin: 12px;
 }
@@ -528,6 +598,17 @@ onActivated(() => {
   margin-bottom: 12px;
   color: #333;
 }
+
+.section-subtitle { margin-top: -6px; font-size: 12px; color: #94a3b8; }
+.section-more { border: 0; background: transparent; color: #2563eb; font-size: 13px; }
+.contribution-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border: 0; border-top: 1px solid #f1f5f9; background: transparent; text-align: left; }
+.contribution-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.contribution-main strong { max-width: 230px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #1f2937; font-size: 14px; }
+.contribution-main span, .contribution-value span { color: #94a3b8; font-size: 11px; }
+.contribution-value { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.positive { color: #ef4444 !important; }
+.negative { color: #16a34a !important; }
+.neutral { color: #64748b !important; }
 
 /* 成员卡片 */
 .member-list {
@@ -626,6 +707,7 @@ onActivated(() => {
   padding-top: 12px;
   border-top: 1px solid #edf2f7;
 }
+.member-stats.three-column { display: grid; grid-template-columns: repeat(3, 1fr); }
 
 .stat-item {
   display: flex;
@@ -664,6 +746,7 @@ onActivated(() => {
 }
 
 .member-account-item {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -672,6 +755,7 @@ onActivated(() => {
   background: rgba(255, 255, 255, 0.88);
   border-radius: 14px;
   border: 1px solid #edf2ff;
+  text-align: left;
 }
 
 .account-main {
@@ -740,21 +824,17 @@ onActivated(() => {
   padding: 8px 0 2px;
 }
 
-/* 未分配账户列表 */
-.account-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.account-list .account-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px;
-  background: #fff3e0;
-  border-radius: 6px;
-}
+.unassigned-callout { display: flex; align-items: center; justify-content: space-between; gap: 14px; background: #fff7ed; border: 1px solid #fed7aa; }
+.unassigned-callout .section-title { margin-bottom: 8px; font-size: 14px; }
+.unassigned-callout button { flex-shrink: 0; border: 0; border-radius: 9px; background: #f97316; color: white; padding: 9px 12px; font-weight: 600; }
+.home-skeleton { position: fixed; inset: 0 0 calc(68px + env(safe-area-inset-bottom)); z-index: 30; padding: 18px 12px; background: #f5f5f5; }
+.home-skeleton i, .skeleton-hero { display: block; border-radius: 12px; background: linear-gradient(90deg, #e9edf3 25%, #f7f9fc 50%, #e9edf3 75%); background-size: 200% 100%; animation: skeleton-wave 1.25s infinite; }
+.skeleton-hero { height: 150px; }
+.skeleton-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.skeleton-grid i { height: 76px; }
+.skeleton-section { margin-top: 12px; padding: 16px; border-radius: 12px; background: white; }
+.skeleton-section i { height: 48px; margin-bottom: 10px; }
+@keyframes skeleton-wave { to { background-position: -200% 0; } }
 
 /* 事件中心 */
 .section-heading {

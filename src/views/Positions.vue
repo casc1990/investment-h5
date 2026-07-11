@@ -327,13 +327,14 @@
 
 <script setup>
 import { ref, computed, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const router = useRouter()
+const route = useRoute()
 
 const syncingId = ref(null)
 const syncingAll = ref(false)
@@ -759,11 +760,18 @@ const ensureFreshData = async ({ force = false } = {}) => {
   lastLoadedAt.value = Date.now()
 }
 
+const applyRouteFilters = () => {
+  selectedAccountId.value = route.query.account_id ? String(route.query.account_id) : null
+  selectedMemberId.value = route.query.member_id ? String(route.query.member_id) : null
+}
+
 onMounted(() => {
+  applyRouteFilters()
   ensureFreshData({ force: true })
 })
 
 onActivated(() => {
+  applyRouteFilters()
   ensureFreshData()
 })
 

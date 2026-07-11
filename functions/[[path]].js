@@ -2334,7 +2334,7 @@ export async function onRequest(context) {
       let totalMarketValue = 0;
       let totalPositionYesterdayProfit = 0;
       let totalAdvisoryYesterdayProfit = 0;
-      let totalCumulativeProfit = positions.reduce((sum, pos) => sum + (pos.initial_profit || 0), 0);
+      let totalCumulativeProfit = 0;
 
       accounts.forEach(acc => {
         accountStatsMap[acc.id] = {
@@ -2346,6 +2346,7 @@ export async function onRequest(context) {
           marketValue: 0,
           profit: 0,
           profitRate: 0,
+          dailyProfit: 0,
         };
       });
 
@@ -2354,13 +2355,15 @@ export async function onRequest(context) {
         if (!accountStats) return;
         const cost = pos.cost || 0;
         const snap = snapshotMap[pos.fund_code];
-        const nav = (snap && snap.gsz) ? snap.gsz : (snap && snap.dwjz) ? snap.dwjz : null;
+        // 首页主资产与持仓页保持一致：优先使用确认净值，估算净值只在缺少确认值时兜底。
+        const nav = (snap && snap.dwjz) ? snap.dwjz : (snap && snap.gsz) ? snap.gsz : null;
         const marketValue = (nav && pos.quantity) ? (pos.quantity * nav) : cost;
         accountStats.invested += cost;
         accountStats.marketValue += marketValue;
         totalInvested += cost;
         totalMarketValue += marketValue;
         const positionDailyProfit = calculateOverviewPositionDailyProfit(pos, snap);
+        accountStats.dailyProfit += positionDailyProfit;
         totalPositionYesterdayProfit += positionDailyProfit;
       });
 
@@ -2392,11 +2395,11 @@ export async function onRequest(context) {
         totalInvested += item.invested;
         totalMarketValue += item.marketValue;
         totalAdvisoryYesterdayProfit += item.dailyProfit;
-        totalCumulativeProfit += item.profit;
         if (item.account_id && accountStatsMap[item.account_id]) {
           const accountStats = accountStatsMap[item.account_id];
           accountStats.invested += item.invested;
           accountStats.marketValue += item.marketValue;
+          accountStats.dailyProfit += item.dailyProfit;
         } else if (item.account_id) {
           const account = accounts.find(acc => acc.id === item.account_id);
           accountStatsMap[item.account_id] = {
@@ -2408,6 +2411,7 @@ export async function onRequest(context) {
             marketValue: item.marketValue,
             profit: 0,
             profitRate: 0,
+            dailyProfit: item.dailyProfit,
           };
         }
       });
@@ -2415,6 +2419,7 @@ export async function onRequest(context) {
       Object.values(accountStatsMap).forEach(accountStats => {
         accountStats.profit = Number((accountStats.marketValue - accountStats.invested).toFixed(2));
         accountStats.profitRate = Number((accountStats.invested > 0 ? (accountStats.profit / accountStats.invested * 100) : 0).toFixed(2));
+        accountStats.dailyProfit = Number(accountStats.dailyProfit.toFixed(2));
         accountStats.invested = Number(accountStats.invested.toFixed(2));
         accountStats.marketValue = Number(accountStats.marketValue.toFixed(2));
       });
@@ -2426,6 +2431,7 @@ export async function onRequest(context) {
           const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
           const memberProfit = memberMarketValue - memberInvested;
           const memberProfitRate = memberInvested > 0 ? (memberProfit / memberInvested * 100) : 0;
+          const memberDailyProfit = memberAccounts.reduce((sum, account) => sum + account.dailyProfit, 0);
           return {
             member_id: member.id,
             member_name: member.name,
@@ -2435,6 +2441,7 @@ export async function onRequest(context) {
             invested: Number(memberInvested.toFixed(2)),
             profit: Number(memberProfit.toFixed(2)),
             profitRate: Number(memberProfitRate.toFixed(2)),
+            dailyProfit: Number(memberDailyProfit.toFixed(2)),
           };
         })
         .filter(member => !memberId || member.member_id === memberId);
@@ -2444,7 +2451,35 @@ export async function onRequest(context) {
       const totalProfit = totalMarketValue - totalInvested;
       const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
       const totalHoldingProfit = totalProfit;
+      totalCumulativeProfit = totalProfit + positions.reduce((sum, position) => sum + Number(position.realized_profit || 0), 0);
       const dailyProfitSummary = summarizeOverviewDailyProfits(totalPositionYesterdayProfit, totalAdvisoryYesterdayProfit);
+      const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
+      const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
+      const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;
+      const updatedFundCount = dailyProfitDate
+        ? heldFundCodes.filter(code => snapshotMap[code]?.jzrq === dailyProfitDate).length
+        : 0;
+      const contributionMap = new Map();
+      positions.forEach(position => {
+        if (Number(position.quantity || 0) <= 0) return;
+        const account = accountStatsMap[position.account_id];
+        const dailyProfit = calculateOverviewPositionDailyProfit(position, snapshotMap[position.fund_code]);
+        const key = `${position.account_id}:${position.fund_code}`;
+        const current = contributionMap.get(key) || {
+          positionId: position.id,
+          fundCode: position.fund_code,
+          fundName: position.fund_name || position.fund_code,
+          accountId: position.account_id,
+          accountName: account?.accountName || '',
+          dailyProfit: 0,
+          dailyChangeRate: Number(snapshotMap[position.fund_code]?.gszzl || 0),
+        };
+        current.dailyProfit += dailyProfit;
+        contributionMap.set(key, current);
+      });
+      const dailyContributions = [...contributionMap.values()]
+        .map(item => ({ ...item, dailyProfit: Number(item.dailyProfit.toFixed(2)) }))
+        .sort((a, b) => Math.abs(b.dailyProfit) - Math.abs(a.dailyProfit));
 
       return jsonResponse({
         code: 0,
@@ -2459,10 +2494,15 @@ export async function onRequest(context) {
             totalAdvisoryYesterdayProfit: dailyProfitSummary.totalAdvisoryYesterdayProfit,
             totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
             totalCumulativeProfit: Number(totalCumulativeProfit.toFixed(2)),
+            dailyProfitDate,
+            updatedFundCount,
+            totalFundCount: heldFundCodes.length,
+            staleFundCount: Math.max(0, heldFundCodes.length - updatedFundCount),
           },
           members: memberStats,
           accounts: filteredAccounts,
           unassignedAccounts,
+          dailyContributions,
         },
       });
     }
