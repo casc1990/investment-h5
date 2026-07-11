@@ -301,11 +301,12 @@ const openEventDetail = async event => {
 const changeEventStatus = async status => {
   if (!selectedEvent.value) return
   try {
-    await eventApi.updateStatus(selectedEvent.value.id, { status })
+    const result = await eventApi.updateStatus(selectedEvent.value.id, { status })
     eventDetailVisible.value = false
     await fetchEvents()
     activeEventTab.value = status === 'pending' ? 'pending' : 'confirmed'
-    showToast(status === 'pending' ? '事件已重新打开' : status === 'ignored' ? '事件已忽略' : '事件已处理')
+    const bookingCount = Number(result?.booking_result?.created || 0)
+    showToast(status === 'pending' ? '事件已重新打开' : status === 'ignored' ? '事件已忽略' : bookingCount > 0 ? `事件已处理，已生成 ${bookingCount} 笔分红流水` : '事件已处理')
   } catch (error) {
     showToast('状态更新失败: ' + (error.message || '网络错误'))
   }

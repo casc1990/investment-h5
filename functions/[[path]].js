@@ -3,7 +3,7 @@
  * 不依赖外部 API，中国可直接访问
  */
 
-import { rebuildPositionFromTrades, normalizeTradeType, toNumber, TRADE_TYPES } from '../shared/tradeEngine.js'
+import { buildDividendTrade, rebuildPositionFromTrades, normalizeTradeType, toNumber, TRADE_TYPES } from '../shared/tradeEngine.js'
 
 let runtimeSchemaInitPromise = null;
 let advisorySchemaInitPromise = null;
@@ -1049,6 +1049,9 @@ export async function onRequest(context) {
       await ensureColumn('trades', 'target_cost', 'target_cost REAL');
       await ensureColumn('trades', 'target_initial_profit', 'target_initial_profit REAL');
       await ensureColumn('trades', 'updated_at', 'updated_at INTEGER');
+      await ensureColumn('trades', 'source_type', 'source_type TEXT');
+      await ensureColumn('trades', 'source_id', 'source_id TEXT');
+      await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_source ON trades(source_type, source_id)').run();
 
       await env.DB.prepare(`
         UPDATE positions
@@ -1395,6 +1398,65 @@ export async function onRequest(context) {
       return fetchPositionDetailById(seededPosition.id);
     }
 
+    async function bookDividendAnnouncement(event) {
+      let detail = {};
+      try { detail = JSON.parse(event.detail_json || '{}'); } catch { detail = {}; }
+
+      const { results: positions } = await env.DB.prepare(`
+        SELECT p.*
+        FROM positions p
+        WHERE p.fund_code = ? AND p.quantity > 0
+        ORDER BY p.account_id, p.id
+      `).bind(event.fund_code).all();
+      if (!positions.length) throw new Error('当前没有该基金的有效持仓，无法处理分红');
+
+      let reinvestNav = toNumber(detail.reinvest_nav);
+      if (positions.some(position => (position.dividend_method || '红利再投') === '红利再投') && reinvestNav <= 0) {
+        const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${event.fund_code}.js?v=${Date.now()}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; InvestmentEventCenter/1.0)' },
+        });
+        if (response.ok) {
+          const history = parsePingzhongdataFundHistory(await response.text()).net_worth_trend;
+          reinvestNav = toNumber(history.find(row => row.date === detail.ex_date)?.nav);
+        }
+      }
+
+      const drafts = positions.map(position => ({
+        position,
+        trade: buildDividendTrade({ position, detail, confirmedNav: reinvestNav }),
+      }));
+      let created = 0;
+      const bookings = [];
+      for (const { position, trade } of drafts) {
+        const sourceId = `${event.id}:${position.id}`;
+        const result = await env.DB.prepare(`
+          INSERT OR IGNORE INTO trades (
+            id, account_id, fund_code, fund_name, trade_type, quantity, amount, fee, trade_date, note,
+            source_type, source_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'dividend_event', ?, unixepoch(), unixepoch())
+        `).bind(
+          generateId(), position.account_id, position.fund_code, position.fund_name || event.fund_name || '',
+          trade.trade_type, trade.quantity, trade.amount, trade.trade_date,
+          trade.trade_type === TRADE_TYPES.REINVEST_DIVIDEND
+            ? `分红事件自动入账，折算净值 ${trade.reinvest_nav}`
+            : '分红事件自动入账',
+          sourceId,
+        ).run();
+        created += Number(result?.meta?.changes || 0);
+        await recomputeAndPersistPosition(position.account_id, position.fund_code);
+        bookings.push({
+          position_id: position.id,
+          account_id: position.account_id,
+          dividend_method: position.dividend_method || '红利再投',
+          trade_type: trade.trade_type,
+          amount: trade.amount,
+          added_quantity: trade.quantity || 0,
+          reinvest_nav: trade.reinvest_nav,
+        });
+      }
+      return { created, bookings };
+    }
+
     await ensureRuntimeSchemaOnce();
 
     // ========== 公开接口（无需认证）==========
@@ -1525,12 +1587,22 @@ export async function onRequest(context) {
         return jsonResponse({ code: 400, message: '无效的事件状态' }, 400);
       }
       const note = String(body.note || '').trim();
+      const { results: existingRows } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+      if (!existingRows.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
+      const existingEvent = existingRows[0];
+      let bookingResult = null;
+      if (status === 'processed' && existingEvent.source_type === 'dividend_announcement') {
+        try {
+          bookingResult = await bookDividendAnnouncement(existingEvent);
+        } catch (error) {
+          return jsonResponse({ code: 400, message: error.message || '分红入账失败' }, 400);
+        }
+      }
       await env.DB.prepare(`
         UPDATE events SET status = ?, handle_note = ?, handled_at = ?, updated_at = unixepoch() WHERE id = ?
       `).bind(status, note, status === 'pending' ? null : Math.floor(Date.now() / 1000), id).run();
       const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
-      if (!results.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
-      return jsonResponse({ code: 0, data: results[0] });
+      return jsonResponse({ code: 0, data: { ...results[0], booking_result: bookingResult } });
     }
 
     // ========== 成员 API ==========

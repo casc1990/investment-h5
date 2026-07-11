@@ -23,6 +23,38 @@ export function nearlyZero(value) {
   return Math.abs(toNumber(value)) < EPS
 }
 
+export function buildDividendTrade({ position = {}, detail = {}, confirmedNav = 0 } = {}) {
+  const heldQuantity = toNumber(position.quantity)
+  const dividendPerShare = toNumber(detail.dividend_per_share)
+  if (heldQuantity <= 0) throw new Error('当前没有可分红的持有份额')
+  if (dividendPerShare <= 0) throw new Error('分红事件缺少有效的每份分红金额')
+
+  const amount = round4(heldQuantity * dividendPerShare)
+  const dividendMethod = position.dividend_method || '红利再投'
+  const tradeDate = detail.ex_date || detail.payment_date || detail.record_date
+  if (!tradeDate) throw new Error('分红事件缺少入账日期')
+
+  if (dividendMethod === '红利再投') {
+    const reinvestNav = toNumber(detail.reinvest_nav || confirmedNav)
+    if (reinvestNav <= 0) throw new Error('红利再投尚缺可用净值，请先同步基金净值后再处理')
+    return {
+      trade_type: TRADE_TYPES.REINVEST_DIVIDEND,
+      quantity: round4(amount / reinvestNav),
+      amount,
+      trade_date: tradeDate,
+      reinvest_nav: reinvestNav,
+    }
+  }
+
+  return {
+    trade_type: TRADE_TYPES.CASH_DIVIDEND,
+    quantity: null,
+    amount,
+    trade_date: tradeDate,
+    reinvest_nav: null,
+  }
+}
+
 export function normalizeTradeType(type) {
   const value = String(type || '').trim()
   switch (value) {

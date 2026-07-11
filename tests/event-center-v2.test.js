@@ -51,3 +51,11 @@ test('近期分红事件展示登记日、除息日、预计金额和发放日',
   assert.match(homeSource, /红利发放日/)
   assert.match(apiSource, /dividend_announcement/)
 })
+
+test('处理分红公告会按持仓分红方式生成幂等交易流水', () => {
+  assert.match(apiSource, /bookDividendAnnouncement/)
+  assert.match(apiSource, /buildDividendTrade/)
+  assert.match(apiSource, /'dividend_event'/)
+  assert.match(apiSource, /CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_source/)
+  assert.match(apiSource, /booking_result/)
+})
