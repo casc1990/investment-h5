@@ -45,78 +45,45 @@
       </div>
     </div>
 
-    <div v-if="contributionMemberTabs.length" class="section contribution-section">
-      <div class="section-heading">
-        <div>
-          <div class="section-title">每日收益贡献</div>
-          <div class="section-subtitle">每个账户展示当日收益率最高和最低基金</div>
-        </div>
-        <button class="section-more" @click="router.push('/positions')">全部持仓</button>
-      </div>
-      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员">
-        <button
-          v-for="member in contributionMemberTabs"
-          :key="member.member_id"
-          :class="{ active: selectedContributionMemberId === member.member_id }"
-          role="tab"
-          @click="selectedContributionMemberId = member.member_id"
-        >{{ member.emoji }} {{ member.member_name }}</button>
-      </div>
-      <div v-if="!accountContributionGroups.length" class="contribution-empty">该成员暂无基金日收益数据</div>
-      <div v-for="group in accountContributionGroups" :key="group.accountId" class="contribution-account-group">
-        <div class="contribution-account-head"><strong>{{ group.accountName }}</strong><span>{{ group.items.length }} 项</span></div>
-        <button v-for="item in group.items" :key="`${item.accountId}:${item.fundCode}:${item.rankLabel}`" class="contribution-item" @click="openPosition(item)">
-          <span class="contribution-rank" :class="item.rankType">{{ item.rankLabel }}</span>
-          <div class="contribution-main">
-            <strong>{{ item.fundName }}</strong>
-            <span>{{ item.fundCode }}</span>
-          </div>
-          <div class="contribution-value" :class="profitClass(item.dailyProfit)">
-            <strong>{{ displaySignedMoney(item.dailyProfit) }}</strong>
-            <span :class="profitClass(item.dailyChangeRate)">{{ displayPercent(item.dailyChangeRate) }}</span>
-          </div>
-        </button>
-      </div>
-    </div>
-
     <!-- 成员分布 -->
-    <div class="section">
-      <div class="section-title">👥 成员分布</div>
-      <div class="member-list">
-        <div v-for="member in overview?.members" :key="member.member_id" class="member-card" :class="{ expanded: isMemberExpanded(member.member_id) }">
-          <div class="member-header" @click="toggleMember(member.member_id)">
+    <div v-if="contributionMemberTabs.length" class="section member-distribution-section">
+      <div class="section-heading"><div><div class="section-title">成员分布</div><div class="section-subtitle">查看成员资产与账户日收益</div></div></div>
+      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看资产分布">
+        <button v-for="member in contributionMemberTabs" :key="member.member_id" :class="{ active: selectedContributionMemberId === member.member_id }" role="tab" @click="selectedContributionMemberId = member.member_id">{{ member.emoji }} {{ member.member_name }}</button>
+      </div>
+      <div v-if="selectedOverviewMember" class="member-list">
+        <div class="member-card expanded">
+          <div class="member-header">
             <div class="member-identity">
-              <span class="member-emoji">{{ member.emoji }}</span>
+              <span class="member-emoji">{{ selectedOverviewMember.emoji }}</span>
               <div class="member-title-wrap">
-                <span class="member-name">{{ member.member_name }}</span>
-                <span class="member-count">{{ member.accounts?.length || 0 }}个账户</span>
+                <span class="member-name">{{ selectedOverviewMember.member_name }}</span>
+                <span class="member-count">{{ selectedOverviewMember.accounts?.length || 0 }}个账户</span>
               </div>
             </div>
             <div class="member-overview">
-              <div class="member-overview-profit" :class="profitClass(member.dailyProfit)">
-                {{ displaySignedMoney(member.dailyProfit) }}
-              </div>
-              <div class="member-overview-arrow">{{ isMemberExpanded(member.member_id) ? '收起' : '展开' }}</div>
+              <div class="member-overview-label">日收益</div>
+              <div class="member-overview-profit" :class="profitClass(selectedOverviewMember.dailyProfit)">{{ displaySignedMoney(selectedOverviewMember.dailyProfit) }}</div>
             </div>
           </div>
 
-          <div v-if="member.accounts?.length" class="member-stats four-metrics">
+          <div v-if="selectedOverviewMember.accounts?.length" class="member-stats four-metrics">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
-              <span class="stat-value">¥{{ formatNumber(member.marketValue || 0) }}</span>
+              <span class="stat-value">¥{{ formatNumber(selectedOverviewMember.marketValue || 0) }}</span>
             </div>
-            <div class="stat-item align-right"><span class="stat-label">日收益</span><span class="stat-value profit" :class="profitClass(member.dailyProfit)">{{ displaySignedMoney(member.dailyProfit) }}</span></div>
-            <div class="stat-item"><span class="stat-label">总收益</span><span class="stat-value profit" :class="profitClass(member.profit)">{{ displaySignedMoney(member.profit) }}</span></div>
+            <div class="stat-item align-right"><span class="stat-label">日收益</span><span class="stat-value profit" :class="profitClass(selectedOverviewMember.dailyProfit)">{{ displaySignedMoney(selectedOverviewMember.dailyProfit) }}</span></div>
+            <div class="stat-item"><span class="stat-label">总收益</span><span class="stat-value profit" :class="profitClass(selectedOverviewMember.profit)">{{ displaySignedMoney(selectedOverviewMember.profit) }}</span></div>
             <div class="stat-item align-right">
               <span class="stat-label">总收益率</span>
-              <span class="stat-value profit" :class="{ positive: member.profit > 0, negative: member.profit < 0 }">
-                {{ member.profitRate || 0 }}%
+              <span class="stat-value profit" :class="profitClass(selectedOverviewMember.profit)">
+                {{ selectedOverviewMember.profitRate || 0 }}%
               </span>
             </div>
           </div>
 
-          <div v-if="member.accounts?.length && isMemberExpanded(member.member_id)" class="member-account-list">
-            <button v-for="account in member.accounts" :key="account.accountId" class="member-account-item" @click="openAccount(account)">
+          <div v-if="selectedOverviewMember.accounts?.length" class="member-account-list">
+            <button v-for="account in selectedOverviewMember.accounts" :key="account.accountId" class="member-account-item" @click="openAccount(account)">
               <div class="account-main">
                 <div class="account-title-row">
                   <span class="account-name">{{ account.accountName }}</span>
@@ -140,7 +107,25 @@
             <span>暂无账户或持仓</span>
           </div>
         </div>
-        <van-empty v-if="!overview?.members?.length" description="暂无成员数据" />
+      </div>
+    </div>
+
+    <div v-if="contributionMemberTabs.length" class="section contribution-section">
+      <div class="section-heading">
+        <div><div class="section-title">每日收益贡献</div><div class="section-subtitle">每个账户展示当日收益率最高和最低基金</div></div>
+        <button class="section-more" @click="router.push('/positions')">全部持仓</button>
+      </div>
+      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看每日收益贡献">
+        <button v-for="member in contributionMemberTabs" :key="member.member_id" :class="{ active: selectedContributionMemberId === member.member_id }" role="tab" @click="selectedContributionMemberId = member.member_id">{{ member.emoji }} {{ member.member_name }}</button>
+      </div>
+      <div v-if="!accountContributionGroups.length" class="contribution-empty">该成员暂无基金日收益数据</div>
+      <div v-for="group in accountContributionGroups" :key="group.accountId" class="contribution-account-group">
+        <div class="contribution-account-head"><strong>{{ group.accountName }}</strong><span>{{ group.items.length }} 项</span></div>
+        <button v-for="item in group.items" :key="`${item.accountId}:${item.fundCode}:${item.rankLabel}`" class="contribution-item" @click="openPosition(item)">
+          <span class="contribution-rank" :class="item.rankType">{{ item.rankLabel }}</span>
+          <div class="contribution-main"><strong>{{ item.fundName }}</strong><span>{{ item.fundCode }}</span></div>
+          <div class="contribution-value" :class="profitClass(item.dailyProfit)"><strong>{{ displaySignedMoney(item.dailyProfit) }}</strong><span :class="profitClass(item.dailyChangeRate)">{{ displayPercent(item.dailyChangeRate) }}</span></div>
+        </button>
       </div>
     </div>
 
@@ -263,7 +248,6 @@ const loading = ref(false)
 const refreshing = ref(false)
 const amountsHidden = ref(false)
 const overview = ref(null)
-const expandedMemberIds = ref([])
 const eventSyncing = ref(false)
 const eventProcessing = ref(false)
 const activeEventTab = ref('pending')
@@ -291,6 +275,7 @@ const homeDailyProfitRate = computed(() => {
 
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
 const contributionMemberTabs = computed(() => overview.value?.members || [])
+const selectedOverviewMember = computed(() => contributionMemberTabs.value.find(member => member.member_id === selectedContributionMemberId.value) || null)
 const accountContributionGroups = computed(() => {
   const groups = new Map()
   const memberId = selectedContributionMemberId.value
@@ -323,14 +308,6 @@ const freshnessText = computed(() => {
     : `${summary.totalFundCount} 只基金已更新`
 })
 
-const isMemberExpanded = (memberId) => expandedMemberIds.value.includes(memberId)
-
-const toggleMember = (memberId) => {
-  expandedMemberIds.value = isMemberExpanded(memberId)
-    ? expandedMemberIds.value.filter(id => id !== memberId)
-    : [...expandedMemberIds.value, memberId]
-}
-
 const fetchEvents = async () => {
   const [pending, confirmed] = await Promise.all([
     eventApi.list({ group: 'pending', limit: 5 }),
@@ -356,10 +333,6 @@ const fetchData = async () => {
       const memberIds = (overview.value?.members || []).map(member => member.member_id)
       if (!selectedContributionMemberId.value || !memberIds.includes(selectedContributionMemberId.value)) {
         selectedContributionMemberId.value = memberIds[0] || null
-      }
-      if (!expandedMemberIds.value.length) {
-        const first = [...(overview.value?.members || [])].sort((a, b) => Math.abs(Number(b.dailyProfit || 0)) - Math.abs(Number(a.dailyProfit || 0)))[0]
-        if (first) expandedMemberIds.value = [first.member_id]
       }
     } else {
       throw overviewResult.reason
@@ -742,6 +715,7 @@ onActivated(() => {
   text-align: right;
   flex-shrink: 0;
 }
+.member-overview-label { margin-bottom: 4px; font-size: 10px; color: #94a3b8; }
 
 .member-overview-profit {
   font-size: 14px;
