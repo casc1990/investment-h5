@@ -7,9 +7,28 @@ const formatFundNames = (funds = [], limit = 2) => safeArray(funds)
 
 export const buildPendingNavEventCards = (funds = []) => {
   const pendingFunds = safeArray(funds)
-  const normalFunds = pendingFunds.filter(item => item?.category !== 'qdii')
-  const qdiiFunds = pendingFunds.filter(item => item?.category === 'qdii')
+  const overdueFunds = pendingFunds.filter(item => item?.overdue || item?.sync_state === 'error')
+  const overdueCodes = new Set(overdueFunds.map(item => item?.fund_code))
+  const normalFunds = pendingFunds.filter(item => item?.category !== 'qdii' && !overdueCodes.has(item?.fund_code))
+  const qdiiFunds = pendingFunds.filter(item => item?.category === 'qdii' && !overdueCodes.has(item?.fund_code))
   const cards = []
+
+  if (overdueFunds.length) {
+    const summaryNames = formatFundNames(overdueFunds)
+    cards.push({
+      id: 'pending-nav-overdue',
+      level: 'urgent',
+      title: `${overdueFunds.length}只基金净值超时未更新`,
+      description: summaryNames
+        ? `${summaryNames}${overdueFunds.length > 2 ? ' 等' : ''}已超过预期更新时间或同步失败，请补同步并关注数据源状态。`
+        : '有基金已超过预期更新时间或同步失败，请补同步并关注数据源状态。',
+      impactLabel: '同步异常',
+      action: 'sync_pending',
+      actionLabel: '立即重试',
+      count: overdueFunds.length,
+      funds: overdueFunds,
+    })
+  }
 
   if (normalFunds.length) {
     const summaryNames = formatFundNames(normalFunds)

@@ -34,6 +34,20 @@ test('只有 QDII 待更新时只显示提示卡，不升级成告警卡', () =>
   assert.equal(cards[0].action, 'view_positions')
 })
 
+test('超时或同步失败的基金会升级成独立告警且不重复计数', () => {
+  const cards = buildPendingNavEventCards([
+    { fund_code: '000001', fund_name: '普通债券A', category: 'normal', overdue: true },
+    { fund_code: '019118', fund_name: '海外指数A', category: 'qdii', sync_state: 'error' },
+    { fund_code: '000002', fund_name: '普通混合A', category: 'normal' },
+  ])
+
+  assert.deepEqual(cards.map(item => item.id), ['pending-nav-overdue', 'pending-nav-normal'])
+  assert.equal(cards[0].count, 2)
+  assert.equal(cards[0].action, 'sync_pending')
+  assert.match(cards[0].title, /超时未更新/)
+  assert.equal(summarizePendingNavEvents(cards), 3)
+})
+
 test('汇总事件数会累加所有净值待处理基金数量', () => {
   const count = summarizePendingNavEvents([
     { count: 2 },

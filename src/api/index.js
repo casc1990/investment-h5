@@ -5,6 +5,7 @@
 
 import axios from 'axios'
 import { shouldLogApi } from '../utils/appShell'
+import { unwrapApiPayload } from '../utils/apiResponse'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 const ENABLE_API_LOG = shouldLogApi(import.meta.env)
@@ -46,10 +47,7 @@ apiClient.interceptors.response.use(
       window.location.href = '/login'
       return Promise.reject(new Error('请先登录'))
     }
-    if (response.data?.code === 0) {
-      return response.data.data
-    }
-    return response.data
+    return unwrapApiPayload(response.data)
   },
   error => {
     if (ENABLE_API_LOG) {
@@ -114,6 +112,12 @@ export const fundApi = {
   detail: (fundCode) => apiClient.get(`/funds/${fundCode}/detail`),
   pending: (params) => apiClient.get('/fund/pending', { params }),
   syncPending: (params) => apiClient.get('/fund/sync/pending', { params }),
+}
+
+export const eventApi = {
+  list: (params) => apiClient.get('/events', { params }),
+  get: (id) => apiClient.get(`/events/${id}`),
+  updateStatus: (id, data) => apiClient.patch(`/events/${id}/status`, data),
 }
 
 // ============ 成员 API ============

@@ -20,13 +20,40 @@ function jsonResponse(data, status = 200) {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0',
     },
   });
+}
+
+export function requiresAuthentication(path = '', method = 'GET') {
+  const normalizedMethod = String(method || 'GET').toUpperCase();
+  if (normalizedMethod === 'OPTIONS') return false;
+  if (!path.startsWith('/api/')) return false;
+  if ((path === '/health' || path === '/api/health') && normalizedMethod === 'GET') return false;
+  if (path === '/api/auth/status' && normalizedMethod === 'GET') return false;
+  if ((path === '/api/auth/setup' || path === '/api/auth/login') && normalizedMethod === 'POST') return false;
+  return true;
+}
+
+function safeEqualStrings(left = '', right = '') {
+  const a = new TextEncoder().encode(String(left));
+  const b = new TextEncoder().encode(String(right));
+  let mismatch = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    mismatch |= (a[index] || 0) ^ (b[index] || 0);
+  }
+  return mismatch === 0;
+}
+
+export function isAuthorizedCronRequest(request, env = {}) {
+  const configuredSecret = String(env.CRON_SYNC_SECRET || '');
+  const providedSecret = request.headers.get('X-Cron-Secret') || '';
+  return configuredSecret.length >= 32 && safeEqualStrings(configuredSecret, providedSecret);
 }
 
 function getChinaDateString(date = new Date()) {
@@ -361,15 +388,16 @@ export function resolveDisplayedYesterdayProfit({
   storedChangeRate = null,
   navDate = null,
   fundName = '',
+  now = new Date(),
 } = {}) {
   const quantity = Number(shares || 0);
 
   // 如果有净值日期，判断是否为最新（普通基金：今天/上一交易日；QDII 允许额外晚一个交易日）
   if (navDate !== null && navDate !== undefined && navDate !== '') {
-    const today = getChinaDateString(new Date());
-    const previousTradingDate = getPreviousChinaTradingDateString(new Date());
-    const secondPreviousTradingDate = getNthPreviousChinaTradingDateString(new Date(), 2);
-    const thirdPreviousTradingDate = getNthPreviousChinaTradingDateString(new Date(), 3);
+    const today = getChinaDateString(now);
+    const previousTradingDate = getPreviousChinaTradingDateString(now);
+    const secondPreviousTradingDate = getNthPreviousChinaTradingDateString(now, 2);
+    const thirdPreviousTradingDate = getNthPreviousChinaTradingDateString(now, 3);
     const isLatestDate = navDate === today || navDate === previousTradingDate;
     const isQdiiLaggedLatestDate = isQdiiFund(fundName)
       && (navDate === previousTradingDate || navDate === secondPreviousTradingDate || navDate === thirdPreviousTradingDate);
@@ -464,6 +492,18 @@ function getChinaHour(date = new Date()) {
   return Number(hour);
 }
 
+function getChinaMinuteOfDay(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = Number(parts.find(part => part.type === 'hour')?.value || 0);
+  const minute = Number(parts.find(part => part.type === 'minute')?.value || 0);
+  return hour * 60 + minute;
+}
+
 function isDelayedNavFund(fundName = '') {
   return /QDII|纳斯达克|标普|海外|恒生|美股|港股/i.test(String(fundName || ''));
 }
@@ -493,6 +533,13 @@ export function getExpectedNavDateForSyncMode({ now = new Date(), mode = 'night'
   return getChinaDateString(now);
 }
 
+export function getExpectedNavDateForFund({ now = new Date(), mode = 'night', category = 'normal' } = {}) {
+  if (category === 'qdii') {
+    return getPreviousChinaTradingDateString(now);
+  }
+  return getExpectedNavDateForSyncMode({ now, mode });
+}
+
 export function buildPendingFundList({
   positions = [],
   snapshots = [],
@@ -505,7 +552,6 @@ export function buildPendingFundList({
   );
   const seen = new Set();
   const pending = [];
-  const expectedJzrq = getExpectedNavDateForSyncMode({ now, mode });
 
   for (const position of positions || []) {
     const fundCode = String(position.fund_code || '').trim();
@@ -515,6 +561,7 @@ export function buildPendingFundList({
     const fundName = position.fund_name || position.name || '';
     const category = isDelayedNavFund(fundName) ? 'qdii' : 'normal';
     if (category === 'qdii' && !includeQdii) continue;
+    const expectedJzrq = getExpectedNavDateForFund({ now, mode, category });
 
     const snapshot = snapshotMap.get(fundCode);
     const currentJzrq = snapshot?.jzrq || null;
@@ -531,6 +578,18 @@ export function buildPendingFundList({
   }
 
   return pending;
+}
+
+export function isPendingFundOverdue(fund = {}, now = new Date()) {
+  if (Number(fund.consecutive_failures || 0) > 0 || fund.sync_state === 'error') return true;
+
+  if (fund.category === 'qdii') {
+    const oldestExpectedDate = getNthPreviousChinaTradingDateString(now, 2);
+    return Boolean(fund.current_jzrq) && fund.current_jzrq < oldestExpectedDate;
+  }
+
+  const minuteOfDay = getChinaMinuteOfDay(now);
+  return minuteOfDay >= 23 * 60 + 30 || (minuteOfDay >= 8 * 60 && minuteOfDay < 21 * 60);
 }
 
 async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
@@ -676,38 +735,73 @@ async function syncPendingFunds(env, {
 } = {}) {
   const pendingFunds = await getPendingFunds(env, { now, mode, includeQdii });
   const results = {};
+  const batch = pendingFunds.slice(0, batchSize);
+  const batchResults = await Promise.all(
+    batch.map(async (fund) => {
+      try {
+        const result = await syncOneFundSnapshot(env, fund.fund_code, fund.fund_name);
+        return [fund.fund_code, {
+          ...result,
+          before_jzrq: fund.current_jzrq,
+          expected_jzrq: fund.expected_jzrq,
+          category: fund.category,
+          advanced: Boolean(result.jzrq && (!fund.current_jzrq || result.jzrq > fund.current_jzrq)),
+        }];
+      } catch (error) {
+        return [fund.fund_code, {
+          ok: false,
+          fund_code: fund.fund_code,
+          fund_name: fund.fund_name,
+          before_jzrq: fund.current_jzrq,
+          expected_jzrq: fund.expected_jzrq,
+          category: fund.category,
+          reason: String(error?.message || error),
+        }];
+      }
+    })
+  );
 
-  for (let i = 0; i < pendingFunds.length; i += batchSize) {
-    const batch = pendingFunds.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map(async (fund) => {
-        try {
-          const result = await syncOneFundSnapshot(env, fund.fund_code, fund.fund_name);
-          return [fund.fund_code, {
-            ...result,
-            before_jzrq: fund.current_jzrq,
-            expected_jzrq: fund.expected_jzrq,
-            category: fund.category,
-            advanced: Boolean(result.jzrq && (!fund.current_jzrq || result.jzrq > fund.current_jzrq)),
-          }];
-        } catch (error) {
-          return [fund.fund_code, {
-            ok: false,
-            fund_code: fund.fund_code,
-            fund_name: fund.fund_name,
-            before_jzrq: fund.current_jzrq,
-            expected_jzrq: fund.expected_jzrq,
-            category: fund.category,
-            reason: String(error?.message || error),
-          }];
-        }
-      })
-    );
-
-    for (const [fundCode, result] of batchResults) {
-      results[fundCode] = result;
-    }
+  for (const [fundCode, result] of batchResults) {
+    results[fundCode] = result;
   }
+
+  await Promise.all(Object.values(results).map((result) => {
+    const state = !result.ok ? 'error' : (result.advanced ? 'synced' : 'waiting');
+    const errorMessage = result.ok ? null : String(result.reason || 'Unknown sync error');
+    return env.DB.prepare(`
+      INSERT INTO fund_sync_status (
+        fund_code, fund_name, category, state, last_attempt_at, last_success_at,
+        last_success_jzrq, consecutive_failures, next_retry_at, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, unixepoch(),
+        CASE WHEN ? = 'synced' THEN unixepoch() ELSE NULL END,
+        CASE WHEN ? = 'synced' THEN ? ELSE NULL END,
+        CASE WHEN ? = 'error' THEN 1 ELSE 0 END,
+        CASE WHEN ? IN ('waiting', 'error') THEN unixepoch() + 1800 ELSE NULL END,
+        ?, unixepoch())
+      ON CONFLICT(fund_code) DO UPDATE SET
+        fund_name = excluded.fund_name,
+        category = excluded.category,
+        state = excluded.state,
+        last_attempt_at = excluded.last_attempt_at,
+        last_success_at = CASE WHEN excluded.state = 'synced' THEN excluded.last_success_at ELSE fund_sync_status.last_success_at END,
+        last_success_jzrq = CASE WHEN excluded.state = 'synced' THEN excluded.last_success_jzrq ELSE fund_sync_status.last_success_jzrq END,
+        consecutive_failures = CASE WHEN excluded.state = 'error' THEN fund_sync_status.consecutive_failures + 1 ELSE 0 END,
+        next_retry_at = excluded.next_retry_at,
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at
+    `).bind(
+      result.fund_code,
+      result.fund_name || '',
+      result.category || 'normal',
+      state,
+      state,
+      state,
+      result.jzrq || null,
+      state,
+      state,
+      errorMessage,
+    ).run();
+  }));
 
   const stillPendingFunds = await getPendingFunds(env, { now, mode, includeQdii });
   const syncedCount = Object.values(results).filter(item => item.ok).length;
@@ -717,6 +811,7 @@ async function syncPendingFunds(env, {
     include_qdii: includeQdii,
     batch_size: batchSize,
     total_pending_before_sync: pendingFunds.length,
+    attempted: batch.length,
     synced: syncedCount,
     failed: Object.values(results).filter(item => !item.ok).length,
     still_pending_count: stillPendingFunds.length,
@@ -731,13 +826,16 @@ export async function onRequest(context) {
   const path = url.pathname;
   const method = context.request.method;
   const env = context.env;
+  const isCronAuthorized = method === 'POST'
+    && (path === '/api/fund/sync' || path === '/api/fund/sync/pending')
+    && isAuthorizedCronRequest(context.request, env);
 
   // CORS 预检
   if (method === 'OPTIONS') {
     return new Response(null, {
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
     });
@@ -962,6 +1060,44 @@ export async function onRequest(context) {
 
           await ensureMembersSchema();
           await ensureLedgerSchemas();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS fund_sync_status (
+              fund_code TEXT PRIMARY KEY,
+              fund_name TEXT DEFAULT '',
+              category TEXT DEFAULT 'normal',
+              state TEXT DEFAULT 'waiting',
+              last_attempt_at INTEGER,
+              last_success_at INTEGER,
+              last_success_jzrq TEXT,
+              consecutive_failures INTEGER DEFAULT 0,
+              next_retry_at INTEGER,
+              last_error TEXT,
+              updated_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS events (
+              id TEXT PRIMARY KEY,
+              event_type TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              event_time INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              description TEXT DEFAULT '',
+              fund_code TEXT DEFAULT '',
+              fund_name TEXT DEFAULT '',
+              account_id TEXT,
+              account_name TEXT DEFAULT '',
+              source_type TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              detail_json TEXT DEFAULT '{}',
+              handled_at INTEGER,
+              handle_note TEXT DEFAULT '',
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch()),
+              UNIQUE(source_type, source_id, event_type)
+            )
+          `).run();
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_events_status_time ON events(status, event_time DESC)').run();
         })().catch(error => {
           runtimeSchemaInitPromise = null;
           throw error;
@@ -980,6 +1116,59 @@ export async function onRequest(context) {
       }
 
       return advisorySchemaInitPromise;
+    }
+
+    async function seedBusinessEvents() {
+      const now = new Date();
+      const expectedDate = getExpectedNavDateForSyncMode({ now, mode: 'night' });
+      const pendingFunds = await getPendingFunds(env, { now, mode: 'night', includeQdii: true });
+      for (const fund of pendingFunds) {
+        const detail = JSON.stringify({
+          target_nav_date: expectedDate,
+          current_nav_date: fund.jzrq || null,
+          category: fund.category || 'normal',
+        });
+        await env.DB.prepare(`
+          INSERT OR IGNORE INTO events (
+            id, event_type, status, event_time, title, description, fund_code, fund_name,
+            source_type, source_id, detail_json
+          ) VALUES (?, 'nav_update', 'pending', unixepoch(), ?, ?, ?, ?, 'fund_nav', ?, ?)
+        `).bind(
+          generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
+          `最新净值仍停留在 ${fund.jzrq || '未知日期'}，可能影响今日收益统计。`,
+          fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${expectedDate}`, detail,
+        ).run();
+      }
+
+      const { results: trades } = await env.DB.prepare(`
+        SELECT t.*, a.name AS account_name
+        FROM trades t LEFT JOIN accounts a ON a.id = t.account_id
+        ORDER BY t.created_at ASC
+      `).all();
+      for (const trade of trades || []) {
+        const tradeType = normalizeTradeType(trade.trade_type);
+        const isDividend = ['现金分红', '分红再投', '红利再投'].includes(tradeType);
+        const eventType = isDividend ? 'dividend' : 'share_change';
+        const eventTime = Number(trade.created_at || 0) || Math.floor(Date.parse(`${trade.trade_date}T12:00:00+08:00`) / 1000);
+        const quantity = Number(trade.quantity || 0);
+        const amount = Number(trade.amount || 0);
+        const title = isDividend
+          ? `${trade.fund_name || trade.fund_code}发生${tradeType}`
+          : `${trade.fund_name || trade.fund_code}持有份额发生变化`;
+        const description = isDividend
+          ? `分红金额 ${amount.toFixed(2)} 元，请确认到账或再投资情况。`
+          : `${tradeType}导致份额变动 ${quantity.toFixed(2)} 份，请确认记录。`;
+        await env.DB.prepare(`
+          INSERT OR IGNORE INTO events (
+            id, event_type, status, event_time, title, description, fund_code, fund_name,
+            account_id, account_name, source_type, source_id, detail_json
+          ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'trade', ?, ?)
+        `).bind(
+          generateId(), eventType, eventTime, title, description, trade.fund_code,
+          trade.fund_name || '', trade.account_id, trade.account_name || '', trade.id,
+          JSON.stringify({ trade_type: tradeType, quantity, amount, trade_date: trade.trade_date, note: trade.note || '' }),
+        ).run();
+      }
     }
 
     async function fetchPositionDetailById(id) {
@@ -1196,15 +1385,60 @@ export async function onRequest(context) {
       return jsonResponse({ code: 0, message: '已登出' });
     }
 
-    // 读操作暂不强制认证（可按需开启）
-    const isReadOnly = method === 'GET' || method === 'OPTIONS';
-
-    // 写操作需要认证
-    if (!isReadOnly) {
+    // 除健康检查和认证入口外，所有业务接口都需要认证。
+    // 部分 GET 路由会触发行情同步或返回敏感投资数据，不能按 HTTP 方法放行。
+    if (requiresAuthentication(path, method) && !isCronAuthorized) {
       const authUser = await verifyToken(context.request);
       if (!authUser) {
         return jsonResponse({ code: 401, message: '请先登录' }, 401);
       }
+    }
+
+    // ========== 事件中心 API ==========
+    if (path === '/api/events' && method === 'GET') {
+      await seedBusinessEvents();
+      const group = url.searchParams.get('group') === 'confirmed' ? 'confirmed' : 'pending';
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') || 5)));
+      const where = group === 'confirmed' ? "status IN ('processed', 'ignored')" : "status = 'pending'";
+      const { results } = await env.DB.prepare(
+        `SELECT * FROM events WHERE ${where} ORDER BY event_time DESC, created_at DESC LIMIT ?`
+      ).bind(limit).all();
+      const { results: counts } = await env.DB.prepare(`
+        SELECT
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status IN ('processed', 'ignored') THEN 1 ELSE 0 END) AS confirmed
+        FROM events
+      `).all();
+      const events = (results || []).map(row => ({
+        ...row,
+        detail: (() => { try { return JSON.parse(row.detail_json || '{}'); } catch { return {}; } })(),
+      }));
+      return jsonResponse({ code: 0, data: { events, counts: { pending: Number(counts?.[0]?.pending || 0), confirmed: Number(counts?.[0]?.confirmed || 0) } } });
+    }
+
+    if (path.match(/^\/api\/events\/[\w-]+$/) && method === 'GET') {
+      const id = path.split('/').pop();
+      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
+      const event = results[0];
+      try { event.detail = JSON.parse(event.detail_json || '{}'); } catch { event.detail = {}; }
+      return jsonResponse({ code: 0, data: event });
+    }
+
+    if (path.match(/^\/api\/events\/[\w-]+\/status$/) && method === 'PATCH') {
+      const id = path.split('/')[3];
+      const body = await context.request.json();
+      const status = String(body.status || '');
+      if (!['pending', 'processed', 'ignored'].includes(status)) {
+        return jsonResponse({ code: 400, message: '无效的事件状态' }, 400);
+      }
+      const note = String(body.note || '').trim();
+      await env.DB.prepare(`
+        UPDATE events SET status = ?, handle_note = ?, handled_at = ?, updated_at = unixepoch() WHERE id = ?
+      `).bind(status, note, status === 'pending' ? null : Math.floor(Date.now() / 1000), id).run();
+      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
+      return jsonResponse({ code: 0, data: results[0] });
     }
 
     // ========== 成员 API ==========
@@ -2127,14 +2361,33 @@ export async function onRequest(context) {
         const includeQdii = parseBooleanLike(url.searchParams.get('includeQdii'), false);
         const now = new Date();
         const funds = await getPendingFunds(env, { now, mode, includeQdii });
+        const { results: statusRows } = await env.DB.prepare(
+          'SELECT fund_code, state, last_attempt_at, last_success_at, last_success_jzrq, consecutive_failures, next_retry_at, last_error FROM fund_sync_status'
+        ).all();
+        const statusMap = new Map((statusRows || []).map(row => [String(row.fund_code), row]));
+        const enrichedFunds = funds.map((fund) => {
+          const status = statusMap.get(String(fund.fund_code)) || {};
+          const enriched = {
+            ...fund,
+            sync_state: status.state || 'pending',
+            last_attempt_at: status.last_attempt_at || null,
+            last_success_at: status.last_success_at || null,
+            last_success_jzrq: status.last_success_jzrq || null,
+            consecutive_failures: Number(status.consecutive_failures || 0),
+            next_retry_at: status.next_retry_at || null,
+            last_error: status.last_error || null,
+          };
+          return { ...enriched, overdue: isPendingFundOverdue(enriched, now) };
+        });
 
         return jsonResponse({
           code: 0,
           mode,
           include_qdii: includeQdii,
           expected_jzrq: getExpectedNavDateForSyncMode({ now, mode }),
-          pending: funds.length,
-          funds,
+          pending: enrichedFunds.length,
+          overdue: enrichedFunds.filter(item => item.overdue).length,
+          funds: enrichedFunds,
         });
       } catch (error) {
         return jsonResponse({ code: 500, message: error.message }, 500);
@@ -2143,10 +2396,6 @@ export async function onRequest(context) {
 
     // 只同步待补基金
     if (path === '/api/fund/sync/pending' && (method === 'GET' || method === 'POST')) {
-      if (method === 'POST' && !env.CLOUDFLARE_CRON_TRIGGER) {
-        return jsonResponse({ code: 403, message: 'Forbidden: cron trigger only' }, 403);
-      }
-
       try {
         const mode = normalizeSyncMode(url.searchParams.get('mode') || 'night');
         const includeQdii = parseBooleanLike(url.searchParams.get('includeQdii'), false);
@@ -2169,12 +2418,8 @@ export async function onRequest(context) {
     }
 
     // 净值同步接口
-    // 支持 GET（手动触发）和 POST（cron 触发，校验 CLOUDFLARE_CRON_TRIGGER）
+    // 支持 GET（登录用户手动触发）和 POST（登录用户或 cron secret 触发）
     if (path === '/api/fund/sync' && (method === 'GET' || method === 'POST')) {
-      if (method === 'POST' && !env.CLOUDFLARE_CRON_TRIGGER) {
-        return jsonResponse({ code: 403, message: 'Forbidden: cron trigger only' }, 403);
-      }
-
       try {
         // 1. 获取所有持仓（带份额）
         const { results: allPositions } = await env.DB.prepare(

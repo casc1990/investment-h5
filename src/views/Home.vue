@@ -118,45 +118,64 @@
     <!-- 事件中心 -->
     <div class="section event-section">
       <div class="section-heading">
-        <div class="section-title">🛎️ 事件中心</div>
-        <span v-if="pendingEventTotal" class="event-count-badge">{{ pendingEventTotal }}项</span>
+        <div class="section-title">事件中心</div>
+        <span v-if="eventCounts.pending" class="event-count-badge">{{ eventCounts.pending }}</span>
+      </div>
+      <div class="event-tabs">
+        <button :class="{ active: activeEventTab === 'pending' }" @click="activeEventTab = 'pending'">待处理 {{ eventCounts.pending }}</button>
+        <button :class="{ active: activeEventTab === 'confirmed' }" @click="activeEventTab = 'confirmed'">已确认 {{ eventCounts.confirmed }}</button>
       </div>
 
-      <div v-if="pendingEventCards.length" class="event-list">
-        <div
-          v-for="card in pendingEventCards"
-          :key="card.id"
-          class="event-card"
-          :class="[`level-${card.level}`]"
-        >
+      <div v-if="visibleEvents.length" class="event-list">
+        <div v-for="event in visibleEvents" :key="event.id" class="event-card" @click="openEventDetail(event)">
           <div class="event-card-top">
-            <div class="event-main">
-              <div class="event-title-row">
-                <span class="event-title">{{ card.title }}</span>
-                <span class="event-impact-tag">{{ card.impactLabel }}</span>
-              </div>
-              <div class="event-description">{{ card.description }}</div>
-            </div>
-            <span class="event-level-tag">{{ card.level === 'urgent' ? '立即处理' : '提示关注' }}</span>
+            <span class="event-type-tag" :class="`type-${event.event_type}`">{{ eventTypeLabel(event.event_type) }}</span>
+            <span class="event-status-tag" :class="`status-${event.status}`">{{ eventStatusLabel(event.status) }}</span>
           </div>
-
-          <div class="event-actions">
-            <button
-              class="event-action-btn primary"
-              :disabled="eventSyncing"
-              @click="handleEventAction(card)"
-            >
-              {{ eventSyncing && card.action === 'sync_pending' ? '补同步中...' : card.actionLabel }}
-            </button>
-          </div>
+          <div class="event-title">{{ event.title }}</div>
+          <div class="event-time">◷ {{ formatEventTime(event.event_time) }}</div>
+          <div class="event-description">{{ event.description }}</div>
+          <div class="event-detail-link">查看详情 <span>›</span></div>
         </div>
       </div>
 
       <div v-else class="event-empty">
-        <div class="event-empty-title">暂无净值待处理事项</div>
-        <div class="event-empty-desc">当前首页先聚焦“净值未更新”，如有异常会优先在这里提醒。</div>
+        <div class="event-empty-title">{{ activeEventTab === 'pending' ? '暂无待处理事件' : '暂无已确认事件' }}</div>
+        <div class="event-empty-desc">新的净值、分红和份额变动会出现在这里。</div>
       </div>
     </div>
+
+    <van-popup v-model:show="eventDetailVisible" position="bottom" round class="event-detail-popup">
+      <div v-if="selectedEvent" class="event-detail-sheet">
+        <div class="event-detail-head"><strong>事件详情</strong><button @click="eventDetailVisible = false">×</button></div>
+        <div class="event-detail-badges">
+          <span class="event-type-tag" :class="`type-${selectedEvent.event_type}`">{{ eventTypeLabel(selectedEvent.event_type) }}</span>
+          <span class="event-status-tag" :class="`status-${selectedEvent.status}`">{{ eventStatusLabel(selectedEvent.status) }}</span>
+        </div>
+        <h3>{{ selectedEvent.fund_name || selectedEvent.title }}</h3>
+        <div class="event-detail-row"><span>基金代码</span><b>{{ selectedEvent.fund_code || '—' }}</b></div>
+        <div v-if="selectedEvent.account_name" class="event-detail-row"><span>所属账户</span><b>{{ selectedEvent.account_name }}</b></div>
+        <div class="event-detail-row"><span>事件时间</span><b>{{ formatEventDateTime(selectedEvent.event_time) }}</b></div>
+        <template v-if="selectedEvent.event_type === 'nav_update'">
+          <div class="event-detail-row"><span>目标净值日期</span><b>{{ selectedEvent.detail?.target_nav_date || '—' }}</b></div>
+          <div class="event-detail-row"><span>当前净值日期</span><b>{{ selectedEvent.detail?.current_nav_date || '—' }}</b></div>
+        </template>
+        <template v-else>
+          <div class="event-detail-row"><span>业务类型</span><b>{{ selectedEvent.detail?.trade_type || '—' }}</b></div>
+          <div class="event-detail-row"><span>{{ selectedEvent.event_type === 'dividend' ? '分红金额' : '变动份额' }}</span><b>{{ selectedEvent.event_type === 'dividend' ? `${formatNumber(selectedEvent.detail?.amount || 0)} 元` : `${formatNumber(selectedEvent.detail?.quantity || 0)} 份` }}</b></div>
+        </template>
+        <div class="event-detail-description">{{ selectedEvent.description }}</div>
+        <div v-if="selectedEvent.handle_note" class="event-detail-note">处理备注：{{ selectedEvent.handle_note }}</div>
+        <div class="event-detail-actions">
+          <template v-if="selectedEvent.status === 'pending'">
+            <button class="secondary" @click="changeEventStatus('ignored')">忽略事件</button>
+            <button v-if="selectedEvent.event_type === 'nav_update'" class="outline" :disabled="eventSyncing" @click="syncSelectedEvent">{{ eventSyncing ? '同步中...' : '立即补同步' }}</button>
+            <button class="primary" @click="changeEventStatus('processed')">标记已处理</button>
+          </template>
+          <button v-else class="outline full" @click="changeEventStatus('pending')">重新打开</button>
+        </div>
+      </div>
+    </van-popup>
 
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-overlay">
@@ -169,17 +188,20 @@
 import { ref, computed, onActivated, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { authApi, fundApi, statsApi } from '../api'
+import { authApi, eventApi, fundApi, statsApi } from '../api'
 import { formatAmount as formatNumber } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
-import { buildPendingNavEventCards, summarizePendingNavEvents } from '../utils/homeEventCenter'
 
 const router = useRouter()
 const loading = ref(false)
 const overview = ref(null)
 const expandedMemberIds = ref([])
-const pendingFunds = ref([])
 const eventSyncing = ref(false)
+const activeEventTab = ref('pending')
+const eventGroups = ref({ pending: [], confirmed: [] })
+const eventCounts = ref({ pending: 0, confirmed: 0 })
+const selectedEvent = ref(null)
+const eventDetailVisible = ref(false)
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
 
@@ -192,8 +214,7 @@ const homePositionDailyProfit = computed(() => (
   Number(overview.value?.summary?.totalPositionYesterdayProfit ?? overview.value?.summary?.totalYesterdayProfit) || 0
 ))
 
-const pendingEventCards = computed(() => buildPendingNavEventCards(pendingFunds.value))
-const pendingEventTotal = computed(() => summarizePendingNavEvents(pendingEventCards.value))
+const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
 
 const isMemberExpanded = (memberId) => expandedMemberIds.value.includes(memberId)
 
@@ -203,17 +224,24 @@ const toggleMember = (memberId) => {
     : [...expandedMemberIds.value, memberId]
 }
 
-const fetchPendingFunds = async () => {
-  const data = await fundApi.pending({ mode: 'night', includeQdii: true })
-  pendingFunds.value = Array.isArray(data?.funds) ? data.funds : []
+const fetchEvents = async () => {
+  const [pending, confirmed] = await Promise.all([
+    eventApi.list({ group: 'pending', limit: 5 }),
+    eventApi.list({ group: 'confirmed', limit: 5 }),
+  ])
+  eventGroups.value = {
+    pending: pending?.events || [],
+    confirmed: confirmed?.events || [],
+  }
+  eventCounts.value = pending?.counts || confirmed?.counts || { pending: 0, confirmed: 0 }
 }
 
 const fetchData = async () => {
   loading.value = true
   try {
-    const [overviewResult, pendingResult] = await Promise.allSettled([
+    const [overviewResult, eventsResult] = await Promise.allSettled([
       statsApi.overview(),
-      fetchPendingFunds(),
+      fetchEvents(),
     ])
 
     if (overviewResult.status === 'fulfilled') {
@@ -222,9 +250,9 @@ const fetchData = async () => {
       throw overviewResult.reason
     }
 
-    if (pendingResult.status === 'rejected') {
-      console.error('Failed to fetch pending funds:', pendingResult.reason)
-      pendingFunds.value = []
+    if (eventsResult.status === 'rejected') {
+      console.error('Failed to fetch events:', eventsResult.reason)
+      eventGroups.value = { pending: [], confirmed: [] }
     }
 
     hasLoadedOnce.value = true
@@ -237,18 +265,45 @@ const fetchData = async () => {
   }
 }
 
-const handleEventAction = async (card) => {
-  if (card.action === 'view_positions') {
-    router.push('/positions')
-    return
+const eventTypeLabel = type => ({ nav_update: '净值更新', dividend: '分红', share_change: '份额变动' }[type] || '其他')
+const eventStatusLabel = status => ({ pending: '待处理', processed: '已处理', ignored: '已忽略' }[status] || status)
+const eventDate = timestamp => new Date(Number(timestamp || 0) * 1000)
+const formatEventTime = timestamp => {
+  const date = eventDate(timestamp)
+  const today = new Date()
+  const day = date.toLocaleDateString('zh-CN') === today.toLocaleDateString('zh-CN') ? '今天' : date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  return `${day} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
+}
+const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh-CN', { hour12: false })
+
+const openEventDetail = async event => {
+  selectedEvent.value = event
+  eventDetailVisible.value = true
+  try { selectedEvent.value = await eventApi.get(event.id) } catch (error) { console.error('Failed to fetch event detail:', error) }
+}
+
+const changeEventStatus = async status => {
+  if (!selectedEvent.value) return
+  try {
+    await eventApi.updateStatus(selectedEvent.value.id, { status })
+    eventDetailVisible.value = false
+    await fetchEvents()
+    activeEventTab.value = status === 'pending' ? 'pending' : 'confirmed'
+    showToast(status === 'pending' ? '事件已重新打开' : status === 'ignored' ? '事件已忽略' : '事件已处理')
+  } catch (error) {
+    showToast('状态更新失败: ' + (error.message || '网络错误'))
   }
+}
 
-  if (card.action !== 'sync_pending' || eventSyncing.value) return
-
+const syncSelectedEvent = async () => {
+  if (!selectedEvent.value || eventSyncing.value) return
   eventSyncing.value = true
   try {
     const result = await fundApi.syncPending({ mode: 'night', includeQdii: false, batchSize: 5 })
-    await fetchData()
+    await eventApi.updateStatus(selectedEvent.value.id, { status: 'processed', note: '净值补同步完成' })
+    eventDetailVisible.value = false
+    await fetchEvents()
+    activeEventTab.value = 'confirmed'
     showToast(`已补同步 ${result?.synced || 0} 只，剩余 ${result?.still_pending_count || 0} 只`)
   } catch (error) {
     console.error('Failed to sync pending funds:', error)
@@ -646,14 +701,12 @@ onActivated(() => {
 }
 
 .event-count-badge {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #eef2ff;
-  color: #4f46e5;
-  font-size: 12px;
-  font-weight: 600;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
+  background: #f59e0b; color: white; font-size: 12px; font-weight: 700;
 }
+.event-tabs { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 14px; border: 1px solid #e5e7eb; border-radius: 9px; overflow: hidden; }
+.event-tabs button { padding: 11px; border: 0; background: #fff; color: #64748b; font-size: 14px; }
+.event-tabs button.active { background: #eff6ff; color: #2563eb; font-weight: 700; box-shadow: inset 0 -2px #2563eb; }
 
 .event-list {
   display: flex;
@@ -662,27 +715,11 @@ onActivated(() => {
 }
 
 .event-card {
-  border-radius: 16px;
-  padding: 14px;
-  border: 1px solid #e5e7eb;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-radius: 12px; border: 1px solid #e8edf3; background: #fff; overflow: hidden; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .05);
 }
 
-.event-card.level-urgent {
-  border-color: #fecaca;
-  background: linear-gradient(180deg, #fff7f7 0%, #fff1f2 100%);
-}
-
-.event-card.level-notice {
-  border-color: #fde68a;
-  background: linear-gradient(180deg, #fffdf5 0%, #fffbeb 100%);
-}
-
-.event-card-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
+.event-card-top { display: flex; justify-content: space-between; padding: 13px 14px 0; }
 
 .event-main {
   min-width: 0;
@@ -696,45 +733,19 @@ onActivated(() => {
   flex-wrap: wrap;
 }
 
-.event-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
-}
+.event-title { padding: 10px 14px 0; font-size: 15px; font-weight: 700; color: #111827; }
 
-.event-impact-tag,
-.event-level-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-}
+.event-type-tag, .event-status-tag { display: inline-flex; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.type-nav_update { color: #2563eb; background: #eff6ff; }
+.type-dividend { color: #ea580c; background: #fff7ed; }
+.type-share_change { color: #7c3aed; background: #f5f3ff; }
+.status-pending { color: #d97706; background: #fffbeb; border: 1px solid #fde68a; }
+.status-processed { color: #16a34a; background: #f0fdf4; }
+.status-ignored { color: #64748b; background: #f1f5f9; }
+.event-time { padding: 8px 14px 0; font-size: 12px; color: #64748b; }
 
-.event-impact-tag {
-  background: rgba(255, 255, 255, 0.8);
-  color: #92400e;
-}
-
-.event-level-tag {
-  flex-shrink: 0;
-  align-self: flex-start;
-  background: rgba(255, 255, 255, 0.86);
-  color: #b45309;
-}
-
-.event-card.level-urgent .event-level-tag {
-  color: #dc2626;
-}
-
-.event-description {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #6b7280;
-}
+.event-description { padding: 7px 14px 12px; font-size: 13px; line-height: 1.55; color: #64748b; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.event-detail-link { border-top: 1px solid #f1f5f9; padding: 10px 14px; color: #2563eb; font-size: 13px; display: flex; justify-content: space-between; }
 
 .event-actions {
   margin-top: 12px;
@@ -774,6 +785,22 @@ onActivated(() => {
   line-height: 1.6;
   color: #94a3b8;
 }
+.event-detail-popup { max-height: 88vh; }
+.event-detail-sheet { padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); color: #0f172a; }
+.event-detail-head { display: flex; align-items: center; justify-content: space-between; font-size: 18px; }
+.event-detail-head button { border: 0; background: transparent; color: #64748b; font-size: 28px; }
+.event-detail-badges { display: flex; justify-content: space-between; margin-top: 20px; }
+.event-detail-sheet h3 { margin: 16px 0; font-size: 19px; }
+.event-detail-row { display: flex; justify-content: space-between; gap: 24px; padding: 12px 0; border-top: 1px solid #f1f5f9; font-size: 13px; }
+.event-detail-row span { color: #64748b; }
+.event-detail-row b { text-align: right; font-weight: 500; }
+.event-detail-description, .event-detail-note { margin-top: 14px; padding: 14px; border-radius: 10px; background: #f8fafc; font-size: 13px; line-height: 1.6; color: #475569; }
+.event-detail-actions { display: flex; gap: 8px; margin-top: 20px; }
+.event-detail-actions button { flex: 1; min-height: 44px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.event-detail-actions .secondary { background: #fff; border: 1px solid #cbd5e1; color: #475569; }
+.event-detail-actions .outline { background: #fff; border: 1px solid #2563eb; color: #2563eb; }
+.event-detail-actions .primary { background: #2563eb; border: 1px solid #2563eb; color: #fff; }
+.event-detail-actions .full { flex-basis: 100%; }
 
 .loading-overlay {
   position: fixed;

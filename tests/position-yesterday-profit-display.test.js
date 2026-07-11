@@ -33,6 +33,7 @@ test('QDII 在北京时间次日凌晨仍停留前两个交易日净值时，不
     storedChangeRate: -1.48,
     navDate: '2026-07-07',
     fundName: '景顺长城纳斯达克科技市值加权ETF联接(QDII)E',
+    now: new Date('2026-07-08T17:30:00.000Z'),
   })
 
   assert.notEqual(result, 0)
