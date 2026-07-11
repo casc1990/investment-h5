@@ -5,8 +5,25 @@ import {
   buildPendingFundList,
   getExpectedNavDateForFund,
   getExpectedNavDateForSyncMode,
+  isChinaTradingDay,
   isPendingFundOverdue,
 } from '../functions/[[path]].js'
+
+test('事件净值比较只在中国交易日执行', () => {
+  assert.equal(isChinaTradingDay(new Date('2026-07-10T04:00:00.000Z')), true)
+  assert.equal(isChinaTradingDay(new Date('2026-07-11T04:00:00.000Z')), false)
+  assert.equal(isChinaTradingDay(new Date('2026-10-05T04:00:00.000Z')), false)
+  assert.equal(isChinaTradingDay(new Date('2026-10-08T04:00:00.000Z')), true)
+})
+
+test('上一交易日会跳过周末和节假日', () => {
+  const afterNationalDay = new Date('2026-10-08T14:30:00.000Z')
+  assert.equal(getExpectedNavDateForFund({
+    now: afterNationalDay,
+    mode: 'night',
+    category: 'qdii',
+  }), '2026-09-30')
+})
 
 test('夜间普通基金只返回未更新到当天的 pending 列表', () => {
   const now = new Date('2026-06-21T13:30:00.000Z') // 北京时间 21:30
@@ -78,7 +95,7 @@ test('QDII 以最后一个交易日为目标日期，避免强求当天净值', 
   const now = new Date('2026-06-21T14:30:00.000Z') // 北京时间 22:30
   const pending = buildPendingFundList({
     positions: [{ fund_code: '019118', fund_name: '摩根标普500指数(QDII)C' }],
-    snapshots: [{ fund_code: '019118', jzrq: '2026-06-18' }],
+    snapshots: [{ fund_code: '019118', jzrq: '2026-06-17' }],
     now,
     mode: 'night',
     includeQdii: true,
@@ -88,8 +105,8 @@ test('QDII 以最后一个交易日为目标日期，避免强求当天净值', 
     {
       fund_code: '019118',
       fund_name: '摩根标普500指数(QDII)C',
-      current_jzrq: '2026-06-18',
-      expected_jzrq: '2026-06-19',
+      current_jzrq: '2026-06-17',
+      expected_jzrq: '2026-06-18',
       category: 'qdii',
       pending_reason: 'date_not_advanced',
     },
@@ -100,14 +117,14 @@ test('QDII 已更新到上一交易日时不再进入重试队列', () => {
   const now = new Date('2026-06-22T14:30:00.000Z') // 北京时间周一 22:30
   const pending = buildPendingFundList({
     positions: [{ fund_code: '019118', fund_name: '摩根标普500指数(QDII)C' }],
-    snapshots: [{ fund_code: '019118', jzrq: '2026-06-19' }],
+    snapshots: [{ fund_code: '019118', jzrq: '2026-06-18' }],
     now,
     mode: 'night',
     includeQdii: true,
   })
 
   assert.deepEqual(pending, [])
-  assert.equal(getExpectedNavDateForFund({ now, mode: 'night', category: 'qdii' }), '2026-06-19')
+  assert.equal(getExpectedNavDateForFund({ now, mode: 'night', category: 'qdii' }), '2026-06-18')
 })
 
 test('morning / pre_report 模式都以当天为目标净值日期', () => {
@@ -127,6 +144,6 @@ test('普通基金深夜及次日早晨仍未更新时标记为超时', () => {
 test('同步错误和落后两个交易日以上的 QDII 标记为超时', () => {
   const now = new Date('2026-06-23T02:00:00.000Z')
   assert.equal(isPendingFundOverdue({ category: 'normal', sync_state: 'error' }, now), true)
-  assert.equal(isPendingFundOverdue({ category: 'qdii', current_jzrq: '2026-06-18' }, now), true)
-  assert.equal(isPendingFundOverdue({ category: 'qdii', current_jzrq: '2026-06-19' }, now), false)
+  assert.equal(isPendingFundOverdue({ category: 'qdii', current_jzrq: '2026-06-17' }, now), true)
+  assert.equal(isPendingFundOverdue({ category: 'qdii', current_jzrq: '2026-06-18' }, now), false)
 })

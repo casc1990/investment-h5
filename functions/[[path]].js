@@ -110,16 +110,32 @@ function addDays(date, days) {
   return copy;
 }
 
+// 上交所 2026 年部分节假日休市安排（周末由 weekday 判断统一处理）。
+// 后续年度发布休市安排后，只需补充对应日期即可。
+const CHINA_MARKET_HOLIDAYS = new Set([
+  '2026-01-01', '2026-01-02',
+  '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23',
+  '2026-04-06',
+  '2026-05-01', '2026-05-04', '2026-05-05',
+  '2026-06-19',
+  '2026-09-25',
+  '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
+]);
+
+export function isChinaTradingDay(date = new Date()) {
+  const weekday = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai',
+    weekday: 'short',
+  }).format(date);
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+  return !CHINA_MARKET_HOLIDAYS.has(getChinaDateString(date));
+}
+
 function getPreviousChinaTradingDateString(now = new Date()) {
   let cursor = addDays(now, -1);
 
   while (true) {
-    const weekday = new Intl.DateTimeFormat('en', {
-      timeZone: 'Asia/Shanghai',
-      weekday: 'short',
-    }).format(cursor);
-
-    if (weekday !== 'Sat' && weekday !== 'Sun') {
+    if (isChinaTradingDay(cursor)) {
       return getChinaDateString(cursor);
     }
 
@@ -133,12 +149,7 @@ function getNthPreviousChinaTradingDateString(now = new Date(), n = 1) {
 
   while (remaining > 0) {
     cursor = addDays(cursor, -1);
-    const weekday = new Intl.DateTimeFormat('en', {
-      timeZone: 'Asia/Shanghai',
-      weekday: 'short',
-    }).format(cursor);
-
-    if (weekday !== 'Sat' && weekday !== 'Sun') {
+    if (isChinaTradingDay(cursor)) {
       remaining -= 1;
     }
   }
@@ -987,6 +998,11 @@ export async function onRequest(context) {
       });
       const navDate = r.nav_jzrq || null;
       const dailyProfitMeta = getDailyProfitMeta(navDate, new Date(), r.fund_name || '');
+      const navCategory = isDelayedNavFund(r.fund_name || '') ? 'qdii' : 'normal';
+      const expectedNavDate = getExpectedNavDateForFund({ now: new Date(), mode: 'night', category: navCategory });
+      const navUpdateStatus = r.sync_state === 'error'
+        ? 'error'
+        : (navDate && navDate >= expectedNavDate ? 'updated' : 'waiting');
 
       return {
         id: r.id,
@@ -1025,6 +1041,14 @@ export async function onRequest(context) {
         nav_gszzl: navGszzl,
         nav_dwjz: confirmedNav,
         nav_jzrq: r.nav_jzrq || null,
+        nav_category: navCategory,
+        nav_update_status: navUpdateStatus,
+        expected_nav_date: expectedNavDate,
+        sync_state: r.sync_state || null,
+        sync_last_attempt_at: r.sync_last_attempt_at || null,
+        sync_consecutive_failures: Number(r.sync_consecutive_failures || 0),
+        sync_last_error: r.sync_last_error || null,
+        trade_count: Number(r.trade_count || 0),
       };
     }
 
@@ -1171,24 +1195,31 @@ export async function onRequest(context) {
       `).run();
 
       const now = new Date();
-      const expectedDate = getExpectedNavDateForSyncMode({ now, mode: 'night' });
-      const pendingFunds = await getPendingFunds(env, { now, mode: 'night', includeQdii: true });
-      for (const fund of pendingFunds) {
-        const detail = JSON.stringify({
-          target_nav_date: expectedDate,
-          current_nav_date: fund.jzrq || null,
-          category: fund.category || 'normal',
-        });
+      if (!isChinaTradingDay(now)) {
         await env.DB.prepare(`
-          INSERT OR IGNORE INTO events (
-            id, event_type, status, event_time, title, description, fund_code, fund_name,
-            source_type, source_id, detail_json
-          ) VALUES (?, 'nav_update', 'pending', unixepoch(), ?, ?, ?, ?, 'fund_nav', ?, ?)
-        `).bind(
-          generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
-          `最新净值仍停留在 ${fund.jzrq || '未知日期'}，可能影响今日收益统计。`,
-          fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${expectedDate}`, detail,
-        ).run();
+          DELETE FROM events
+          WHERE event_type = 'nav_update' AND status = 'pending' AND source_type = 'fund_nav'
+        `).run();
+      } else {
+        const expectedDate = getExpectedNavDateForSyncMode({ now, mode: 'night' });
+        const pendingFunds = await getPendingFunds(env, { now, mode: 'night', includeQdii: true });
+        for (const fund of pendingFunds) {
+          const detail = JSON.stringify({
+            target_nav_date: expectedDate,
+            current_nav_date: fund.current_jzrq || null,
+            category: fund.category || 'normal',
+          });
+          await env.DB.prepare(`
+            INSERT OR IGNORE INTO events (
+              id, event_type, status, event_time, title, description, fund_code, fund_name,
+              source_type, source_id, detail_json
+            ) VALUES (?, 'nav_update', 'pending', unixepoch(), ?, ?, ?, ?, 'fund_nav', ?, ?)
+          `).bind(
+            generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
+            `最新净值仍停留在 ${fund.current_jzrq || '未知日期'}，可能影响今日收益统计。`,
+            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${expectedDate}`, detail,
+          ).run();
+        }
       }
 
       const { results: trades } = await env.DB.prepare(`
@@ -1977,11 +2008,14 @@ export async function onRequest(context) {
       
       let query = `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
                    s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
-                   s.prev_nav
+                   s.prev_nav, fs.state as sync_state, fs.last_attempt_at as sync_last_attempt_at,
+                   fs.consecutive_failures as sync_consecutive_failures, fs.last_error as sync_last_error,
+                   (SELECT COUNT(1) FROM trades t WHERE t.account_id = p.account_id AND t.fund_code = p.fund_code) as trade_count
                    FROM positions p
                    LEFT JOIN accounts a ON p.account_id = a.id
                    LEFT JOIN members m ON a.member_id = m.id
-                   LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code`;
+                   LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+                   LEFT JOIN fund_sync_status fs ON p.fund_code = fs.fund_code`;
       const conditions = [];
       const params = [];
       
