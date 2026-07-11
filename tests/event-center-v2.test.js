@@ -29,6 +29,13 @@ test('事件详情支持处理、忽略、重新打开和净值补同步', () =>
   assert.match(apiSource, /\['pending', 'processed', 'ignored'\]/)
 })
 
+test('分红公告提供立即处理并展示四位精度的每份分红', () => {
+  assert.match(homeSource, /立即处理/)
+  assert.match(homeSource, /processDividendEvent/)
+  assert.match(homeSource, /formatDividendPerShare/)
+  assert.match(homeSource, /红利再投新增/)
+})
+
 test('事件详情弹层挂载到 body 顶层且高于固定底部菜单', () => {
   assert.match(homeSource, /teleport="body"/)
   assert.match(homeSource, /:z-index="1000"/)

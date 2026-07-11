@@ -172,7 +172,7 @@
         <template v-else-if="selectedEvent.event_type === 'dividend' && selectedEvent.source_type === 'dividend_announcement'">
           <div class="event-detail-row"><span>权益登记日</span><b>{{ selectedEvent.detail?.record_date || '—' }}</b></div>
           <div class="event-detail-row"><span>除息日</span><b>{{ selectedEvent.detail?.ex_date || '—' }}</b></div>
-          <div class="event-detail-row"><span>每份分红</span><b>{{ formatNumber(selectedEvent.detail?.dividend_per_share || 0) }} 元</b></div>
+          <div class="event-detail-row"><span>每份分红</span><b>{{ formatDividendPerShare(selectedEvent.detail?.dividend_per_share) }} 元</b></div>
           <div class="event-detail-row"><span>预计分红</span><b>{{ formatNumber(selectedEvent.detail?.estimated_amount || 0) }} 元</b></div>
           <div class="event-detail-row"><span>红利发放日</span><b>{{ selectedEvent.detail?.payment_date || '—' }}</b></div>
         </template>
@@ -186,7 +186,11 @@
           <template v-if="selectedEvent.status === 'pending'">
             <button class="secondary" @click="changeEventStatus('ignored')">忽略事件</button>
             <button v-if="selectedEvent.event_type === 'nav_update'" class="outline" :disabled="eventSyncing" @click="syncSelectedEvent">{{ eventSyncing ? '同步中...' : '立即补同步' }}</button>
-            <button class="primary" @click="changeEventStatus('processed')">标记已处理</button>
+            <button
+              class="primary"
+              :disabled="eventProcessing"
+              @click="selectedEvent.source_type === 'dividend_announcement' ? processDividendEvent() : changeEventStatus('processed')"
+            >{{ eventProcessing ? '处理中...' : selectedEvent.source_type === 'dividend_announcement' ? '立即处理' : '标记已处理' }}</button>
           </template>
           <button v-else class="outline full" @click="changeEventStatus('pending')">重新打开</button>
         </div>
@@ -213,6 +217,7 @@ const loading = ref(false)
 const overview = ref(null)
 const expandedMemberIds = ref([])
 const eventSyncing = ref(false)
+const eventProcessing = ref(false)
 const activeEventTab = ref('pending')
 const eventGroups = ref({ pending: [], confirmed: [] })
 const eventCounts = ref({ pending: 0, confirmed: 0 })
@@ -291,6 +296,7 @@ const formatEventTime = timestamp => {
   return `${day} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh-CN', { hour12: false })
+const formatDividendPerShare = value => Number(value || 0).toFixed(4)
 
 const openEventDetail = async event => {
   selectedEvent.value = event
@@ -309,6 +315,33 @@ const changeEventStatus = async status => {
     showToast(status === 'pending' ? '事件已重新打开' : status === 'ignored' ? '事件已忽略' : bookingCount > 0 ? `事件已处理，已生成 ${bookingCount} 笔分红流水` : '事件已处理')
   } catch (error) {
     showToast('状态更新失败: ' + (error.message || '网络错误'))
+  }
+}
+
+const processDividendEvent = async () => {
+  if (!selectedEvent.value || eventProcessing.value) return
+  eventProcessing.value = true
+  try {
+    const result = await eventApi.updateStatus(selectedEvent.value.id, { status: 'processed' })
+    const bookings = result?.booking_result?.bookings || []
+    const reinvestQuantity = bookings.reduce((sum, item) => sum + Number(item.added_quantity || 0), 0)
+    const cashAmount = bookings
+      .filter(item => item.trade_type === '现金分红')
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+    eventDetailVisible.value = false
+    await fetchEvents()
+    activeEventTab.value = 'confirmed'
+    if (reinvestQuantity > 0) {
+      showToast(`处理成功，红利再投新增 ${reinvestQuantity.toFixed(4)} 份`)
+    } else if (cashAmount > 0) {
+      showToast(`处理成功，现金分红 ${formatNumber(cashAmount)} 元`)
+    } else {
+      showToast('分红事件已处理')
+    }
+  } catch (error) {
+    showToast('处理失败: ' + (error.message || '网络错误'))
+  } finally {
+    eventProcessing.value = false
   }
 }
 
