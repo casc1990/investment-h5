@@ -1163,6 +1163,13 @@ export async function onRequest(context) {
     }
 
     async function seedBusinessEvents() {
+      // 分红公告自动入账生成的交易是原事件的处理结果，不应再次产生待处理事件。
+      await env.DB.prepare(`
+        DELETE FROM events
+        WHERE source_type = 'trade'
+          AND source_id IN (SELECT id FROM trades WHERE source_type = 'dividend_event')
+      `).run();
+
       const now = new Date();
       const expectedDate = getExpectedNavDateForSyncMode({ now, mode: 'night' });
       const pendingFunds = await getPendingFunds(env, { now, mode: 'night', includeQdii: true });
@@ -1187,6 +1194,7 @@ export async function onRequest(context) {
       const { results: trades } = await env.DB.prepare(`
         SELECT t.*, a.name AS account_name
         FROM trades t LEFT JOIN accounts a ON a.id = t.account_id
+        WHERE COALESCE(t.source_type, '') != 'dividend_event'
         ORDER BY t.created_at ASC
       `).all();
       for (const trade of trades || []) {
@@ -1200,7 +1208,9 @@ export async function onRequest(context) {
           ? `${trade.fund_name || trade.fund_code}发生${tradeType}`
           : `${trade.fund_name || trade.fund_code}持有份额发生变化`;
         const description = isDividend
-          ? `分红金额 ${amount.toFixed(2)} 元，请确认到账或再投资情况。`
+          ? tradeType === TRADE_TYPES.REINVEST_DIVIDEND
+            ? `红利再投新增 ${quantity.toFixed(4)} 份，折算分红金额 ${amount.toFixed(2)} 元。`
+            : `现金分红 ${amount.toFixed(2)} 元，请确认到账情况。`
           : `${tradeType}导致份额变动 ${quantity.toFixed(2)} 份，请确认记录。`;
         await env.DB.prepare(`
           INSERT OR IGNORE INTO events (

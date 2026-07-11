@@ -66,3 +66,11 @@ test('处理分红公告会按持仓分红方式生成幂等交易流水', () =>
   assert.match(apiSource, /CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_source/)
   assert.match(apiSource, /booking_result/)
 })
+
+test('红利再投事件显示新增份额且自动入账流水不会重复生成事件', () => {
+  assert.match(homeSource, /新增分红份额/)
+  assert.match(homeSource, /折算分红金额/)
+  assert.match(homeSource, /isReinvestDividendEvent/)
+  assert.match(apiSource, /WHERE COALESCE\(t\.source_type, ''\) != 'dividend_event'/)
+  assert.match(apiSource, /DELETE FROM events[\s\S]*source_type = 'dividend_event'/)
+})

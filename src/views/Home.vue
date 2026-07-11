@@ -178,7 +178,9 @@
         </template>
         <template v-else>
           <div class="event-detail-row"><span>业务类型</span><b>{{ selectedEvent.detail?.trade_type || '—' }}</b></div>
-          <div class="event-detail-row"><span>{{ selectedEvent.event_type === 'dividend' ? '分红金额' : '变动份额' }}</span><b>{{ selectedEvent.event_type === 'dividend' ? `${formatNumber(selectedEvent.detail?.amount || 0)} 元` : `${formatNumber(selectedEvent.detail?.quantity || 0)} 份` }}</b></div>
+          <div v-if="isReinvestDividendEvent(selectedEvent)" class="event-detail-row"><span>新增分红份额</span><b>{{ formatShareQuantity(selectedEvent.detail?.quantity) }} 份</b></div>
+          <div v-if="isReinvestDividendEvent(selectedEvent)" class="event-detail-row"><span>折算分红金额</span><b>{{ formatNumber(selectedEvent.detail?.amount || 0) }} 元</b></div>
+          <div v-else class="event-detail-row"><span>{{ selectedEvent.event_type === 'dividend' ? '现金分红金额' : '变动份额' }}</span><b>{{ selectedEvent.event_type === 'dividend' ? `${formatNumber(selectedEvent.detail?.amount || 0)} 元` : `${formatNumber(selectedEvent.detail?.quantity || 0)} 份` }}</b></div>
         </template>
         <div class="event-detail-description">{{ selectedEvent.description }}</div>
         <div v-if="selectedEvent.handle_note" class="event-detail-note">处理备注：{{ selectedEvent.handle_note }}</div>
@@ -297,6 +299,8 @@ const formatEventTime = timestamp => {
 }
 const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh-CN', { hour12: false })
 const formatDividendPerShare = value => Number(value || 0).toFixed(4)
+const formatShareQuantity = value => Number(value || 0).toFixed(4)
+const isReinvestDividendEvent = event => event?.event_type === 'dividend' && ['红利再投', '分红再投'].includes(event?.detail?.trade_type)
 
 const openEventDetail = async event => {
   selectedEvent.value = event
