@@ -1408,32 +1408,71 @@ export async function onRequest(context) {
       return fetchPositionDetailById(seededPosition.id);
     }
 
-    async function bookDividendAnnouncement(event) {
-      let detail = {};
-      try { detail = JSON.parse(event.detail_json || '{}'); } catch { detail = {}; }
-
-      const { results: positions } = await env.DB.prepare(`
-        SELECT p.*
+    async function getDividendPositions(event) {
+      const { results } = await env.DB.prepare(`
+        SELECT p.*, a.name AS account_name
         FROM positions p
+        LEFT JOIN accounts a ON a.id = p.account_id
         WHERE p.fund_code = ? AND p.quantity > 0
         ORDER BY p.account_id, p.id
       `).bind(event.fund_code).all();
-      if (!positions.length) throw new Error('当前没有该基金的有效持仓，无法处理分红');
+      return results || [];
+    }
 
+    async function resolveDividendReinvestNav(event, detail, positions) {
       let reinvestNav = toNumber(detail.reinvest_nav);
-      if (positions.some(position => (position.dividend_method || '红利再投') === '红利再投') && reinvestNav <= 0) {
-        const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${event.fund_code}.js?v=${Date.now()}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; InvestmentEventCenter/1.0)' },
-        });
-        if (response.ok) {
-          const history = parsePingzhongdataFundHistory(await response.text()).net_worth_trend;
-          reinvestNav = toNumber(history.find(row => row.date === detail.ex_date)?.nav);
-        }
+      if (!positions.some(position => (position.dividend_method || '红利再投') === '红利再投') || reinvestNav > 0) {
+        return reinvestNav;
       }
+      const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${event.fund_code}.js?v=${Date.now()}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; InvestmentEventCenter/1.0)' },
+      });
+      if (response.ok) {
+        const history = parsePingzhongdataFundHistory(await response.text()).net_worth_trend;
+        reinvestNav = toNumber(history.find(row => row.date === detail.ex_date)?.nav);
+      }
+      return reinvestNav;
+    }
 
+    async function previewDividendAnnouncement(event) {
+      let detail = {};
+      try { detail = JSON.parse(event.detail_json || '{}'); } catch { detail = {}; }
+      const positions = await getDividendPositions(event);
+      if (!positions.length) throw new Error('当前没有该基金的有效持仓，无法处理分红');
+      const reinvestNav = await resolveDividendReinvestNav(event, detail, positions);
       const drafts = positions.map(position => ({
         position,
         trade: buildDividendTrade({ position, detail, confirmedNav: reinvestNav }),
+      }));
+      const accounts = drafts.map(({ position, trade }) => ({
+        position_id: position.id,
+        account_id: position.account_id,
+        account_name: position.account_name || '',
+        held_quantity: Number(position.quantity || 0),
+        dividend_method: position.dividend_method || '红利再投',
+        amount: trade.amount,
+        added_quantity: trade.quantity || 0,
+        reinvest_nav: trade.reinvest_nav,
+      }));
+      return {
+        accounts,
+        total_added_quantity: Number(accounts.reduce((sum, item) => sum + item.added_quantity, 0).toFixed(4)),
+        total_cash_amount: Number(accounts.filter(item => item.dividend_method !== '红利再投').reduce((sum, item) => sum + item.amount, 0).toFixed(4)),
+      };
+    }
+
+    async function bookDividendAnnouncement(event) {
+      let detail = {};
+      try { detail = JSON.parse(event.detail_json || '{}'); } catch { detail = {}; }
+      const preview = await previewDividendAnnouncement(event);
+      const positions = await getDividendPositions(event);
+      const drafts = positions.map(position => ({
+        position,
+        trade: buildDividendTrade({
+          position,
+          detail,
+          confirmedNav: preview.accounts.find(item => item.position_id === position.id)?.reinvest_nav,
+        }),
       }));
       let created = 0;
       const bookings = [];
@@ -1586,6 +1625,13 @@ export async function onRequest(context) {
       if (!results.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
       const event = results[0];
       try { event.detail = JSON.parse(event.detail_json || '{}'); } catch { event.detail = {}; }
+      if (event.source_type === 'dividend_announcement') {
+        try {
+          event.dividend_preview = await previewDividendAnnouncement(event);
+        } catch (error) {
+          event.dividend_preview = { accounts: [], error: error.message || '暂时无法计算分红结果' };
+        }
+      }
       return jsonResponse({ code: 0, data: event });
     }
 

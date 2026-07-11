@@ -173,8 +173,15 @@
           <div class="event-detail-row"><span>权益登记日</span><b>{{ selectedEvent.detail?.record_date || '—' }}</b></div>
           <div class="event-detail-row"><span>除息日</span><b>{{ selectedEvent.detail?.ex_date || '—' }}</b></div>
           <div class="event-detail-row"><span>每份分红</span><b>{{ formatDividendPerShare(selectedEvent.detail?.dividend_per_share) }} 元</b></div>
-          <div class="event-detail-row"><span>预计分红</span><b>{{ formatNumber(selectedEvent.detail?.estimated_amount || 0) }} 元</b></div>
           <div class="event-detail-row"><span>红利发放日</span><b>{{ selectedEvent.detail?.payment_date || '—' }}</b></div>
+          <template v-for="account in selectedEvent.dividend_preview?.accounts || []" :key="account.position_id">
+            <div class="event-detail-row"><span>所属账户</span><b>{{ account.account_name || '—' }}</b></div>
+            <div class="event-detail-row"><span>分红方式</span><b>{{ account.dividend_method }}</b></div>
+            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>预计新增份额</span><b>{{ formatShareQuantity(account.added_quantity) }} 份</b></div>
+            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>份额折算净值</span><b>{{ formatDividendPerShare(account.reinvest_nav) }}</b></div>
+            <div v-else class="event-detail-row"><span>预计现金分红</span><b>{{ formatNumber(account.amount) }} 元</b></div>
+          </template>
+          <div v-if="selectedEvent.dividend_preview?.error" class="event-detail-note">{{ selectedEvent.dividend_preview.error }}</div>
         </template>
         <template v-else>
           <div class="event-detail-row"><span>业务类型</span><b>{{ selectedEvent.detail?.trade_type || '—' }}</b></div>
@@ -182,7 +189,7 @@
           <div v-if="isReinvestDividendEvent(selectedEvent)" class="event-detail-row"><span>折算分红金额</span><b>{{ formatNumber(selectedEvent.detail?.amount || 0) }} 元</b></div>
           <div v-else class="event-detail-row"><span>{{ selectedEvent.event_type === 'dividend' ? '现金分红金额' : '变动份额' }}</span><b>{{ selectedEvent.event_type === 'dividend' ? `${formatNumber(selectedEvent.detail?.amount || 0)} 元` : `${formatNumber(selectedEvent.detail?.quantity || 0)} 份` }}</b></div>
         </template>
-        <div class="event-detail-description">{{ selectedEvent.description }}</div>
+        <div class="event-detail-description">{{ eventDetailDescription(selectedEvent) }}</div>
         <div v-if="selectedEvent.handle_note" class="event-detail-note">处理备注：{{ selectedEvent.handle_note }}</div>
         <div class="event-detail-actions">
           <template v-if="selectedEvent.status === 'pending'">
@@ -301,6 +308,14 @@ const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh
 const formatDividendPerShare = value => Number(value || 0).toFixed(4)
 const formatShareQuantity = value => Number(value || 0).toFixed(4)
 const isReinvestDividendEvent = event => event?.event_type === 'dividend' && ['红利再投', '分红再投'].includes(event?.detail?.trade_type)
+const eventDetailDescription = event => {
+  if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
+  const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)
+  const cashAmount = Number(event.dividend_preview.total_cash_amount || 0)
+  if (addedQuantity > 0 && cashAmount > 0) return `预计红利再投新增 ${addedQuantity.toFixed(4)} 份，现金分红 ${formatNumber(cashAmount)} 元。`
+  if (addedQuantity > 0) return `该持仓采用红利再投，预计新增 ${addedQuantity.toFixed(4)} 份。`
+  return `该持仓采用现金分红，预计到账 ${formatNumber(cashAmount)} 元。`
+}
 
 const openEventDetail = async event => {
   selectedEvent.value = event
