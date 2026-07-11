@@ -145,7 +145,16 @@
       </div>
     </div>
 
-    <van-popup v-model:show="eventDetailVisible" position="bottom" round class="event-detail-popup">
+    <van-popup
+      v-model:show="eventDetailVisible"
+      position="bottom"
+      round
+      teleport="body"
+      :z-index="1000"
+      :overlay-style="{ zIndex: 999 }"
+      safe-area-inset-bottom
+      class="event-detail-popup"
+    >
       <div v-if="selectedEvent" class="event-detail-sheet">
         <div class="event-detail-head"><strong>事件详情</strong><button @click="eventDetailVisible = false">×</button></div>
         <div class="event-detail-badges">
@@ -785,8 +794,8 @@ onActivated(() => {
   line-height: 1.6;
   color: #94a3b8;
 }
-.event-detail-popup { max-height: 88vh; }
-.event-detail-sheet { padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); color: #0f172a; }
+.event-detail-popup { max-height: 88dvh; overflow-y: auto; }
+.event-detail-sheet { min-height: 0; padding: 18px 18px calc(24px + env(safe-area-inset-bottom)); color: #0f172a; }
 .event-detail-head { display: flex; align-items: center; justify-content: space-between; font-size: 18px; }
 .event-detail-head button { border: 0; background: transparent; color: #64748b; font-size: 28px; }
 .event-detail-badges { display: flex; justify-content: space-between; margin-top: 20px; }

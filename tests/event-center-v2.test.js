@@ -29,6 +29,13 @@ test('事件详情支持处理、忽略、重新打开和净值补同步', () =>
   assert.match(apiSource, /\['pending', 'processed', 'ignored'\]/)
 })
 
+test('事件详情弹层挂载到 body 顶层且高于固定底部菜单', () => {
+  assert.match(homeSource, /teleport="body"/)
+  assert.match(homeSource, /:z-index="1000"/)
+  assert.match(homeSource, /safe-area-inset-bottom/)
+  assert.match(homeSource, /event-detail-popup \{ max-height: 88dvh; overflow-y: auto;/)
+})
+
 test('后端事件表包含业务字段并通过来源唯一键幂等去重', () => {
   for (const field of ['event_type', 'status', 'event_time', 'description', 'detail_json', 'handled_at', 'handle_note']) {
     assert.match(apiSource, new RegExp(field))
