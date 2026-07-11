@@ -140,4 +140,5 @@ test('成员分布的账户项同时展示持有收益金额和持有收益率',
   assert.match(homeSource, /持有收益 \{\{ displaySignedMoney\(account\.profit\) \}\}/)
   assert.match(homeSource, /displayPercent\(account\.profitRate\)/)
   assert.match(homeSource, /account-holding/)
+  assert.match(homeSource, /account-holding-rate/)
 })
