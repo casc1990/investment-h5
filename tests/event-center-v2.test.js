@@ -135,3 +135,9 @@ test('成员分布使用成员 Tab 单成员展示并位于每日收益贡献之
   assert.match(homeSource, /selectedOverviewMember\.accounts/)
   assert.ok(homeSource.indexOf('成员分布') < homeSource.indexOf('每日收益贡献'))
 })
+
+test('成员分布的账户项同时展示持有收益金额和持有收益率', () => {
+  assert.match(homeSource, /持有收益 \{\{ displaySignedMoney\(account\.profit\) \}\}/)
+  assert.match(homeSource, /displayPercent\(account\.profitRate\)/)
+  assert.match(homeSource, /account-holding/)
+})

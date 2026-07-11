@@ -96,8 +96,9 @@
                 <div class="account-profit" :class="profitClass(account.dailyProfit)">
                   {{ displaySignedMoney(account.dailyProfit) }}
                 </div>
-                <div class="account-rate" :class="{ positive: account.profit > 0, negative: account.profit < 0 }">
-                  持有收益率 {{ displayPercent(account.profitRate) }}
+                <div class="account-holding" :class="profitClass(account.profit)">
+                  <span>持有收益 {{ displaySignedMoney(account.profit) }}</span>
+                  <span>{{ displayPercent(account.profitRate) }}</span>
                 </div>
               </div>
             </button>
@@ -834,24 +835,28 @@ onActivated(() => {
 .account-daily-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
 
 .account-profit,
-.account-rate {
+.account-holding {
   font-family: 'Courier New', monospace;
   font-size: 13px;
   font-weight: 700;
 }
 
-.account-rate {
+.account-holding {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .account-profit.positive,
-.account-rate.positive {
+.account-holding.positive {
   color: #f87171;
 }
 
 .account-profit.negative,
-.account-rate.negative {
+.account-holding.negative {
   color: #4ade80;
 }
 
