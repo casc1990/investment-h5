@@ -16,11 +16,8 @@
           <span class="profit-label">持有收益</span>
           <strong>{{ displaySignedMoney(overview?.summary?.totalProfit) }}</strong>
           <span class="rate">{{ displayPercent(overview?.summary?.totalProfitRate) }}</span>
+          <span class="profit-freshness">{{ freshnessText }}</span>
         </div>
-      </div>
-      <div class="freshness-row">
-        <span>{{ dailyProfitLabel }}</span>
-        <span>{{ freshnessText }}</span>
       </div>
     </div>
 
@@ -47,7 +44,7 @@
       </div>
     </div>
 
-    <div v-if="accountContributionGroups.length" class="section contribution-section">
+    <div v-if="contributionMemberTabs.length" class="section contribution-section">
       <div class="section-heading">
         <div>
           <div class="section-title">每日收益贡献</div>
@@ -55,6 +52,16 @@
         </div>
         <button class="section-more" @click="router.push('/positions')">全部持仓</button>
       </div>
+      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员">
+        <button
+          v-for="member in contributionMemberTabs"
+          :key="member.member_id"
+          :class="{ active: selectedContributionMemberId === member.member_id }"
+          role="tab"
+          @click="selectedContributionMemberId = member.member_id"
+        >{{ member.emoji }} {{ member.member_name }}</button>
+      </div>
+      <div v-if="!accountContributionGroups.length" class="contribution-empty">该成员暂无基金日收益数据</div>
       <div v-for="group in accountContributionGroups" :key="group.accountId" class="contribution-account-group">
         <div class="contribution-account-head"><strong>{{ group.accountName }}</strong><span>{{ group.items.length }} 项</span></div>
         <button v-for="item in group.items" :key="`${item.accountId}:${item.fundCode}:${item.rankLabel}`" class="contribution-item" @click="openPosition(item)">
@@ -262,6 +269,7 @@ const eventGroups = ref({ pending: [], confirmed: [] })
 const eventCounts = ref({ pending: 0, confirmed: 0 })
 const selectedEvent = ref(null)
 const eventDetailVisible = ref(false)
+const selectedContributionMemberId = ref(null)
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
 
@@ -275,9 +283,11 @@ const homePositionDailyProfit = computed(() => (
 ))
 
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
+const contributionMemberTabs = computed(() => overview.value?.members || [])
 const accountContributionGroups = computed(() => {
   const groups = new Map()
-  for (const item of overview.value?.dailyContributions || []) {
+  const memberId = selectedContributionMemberId.value
+  for (const item of (overview.value?.dailyContributions || []).filter(row => !memberId || row.memberId === memberId)) {
     const key = item.accountId || 'unassigned'
     if (!groups.has(key)) groups.set(key, { accountId: key, accountName: item.accountName || '未命名账户', funds: [] })
     groups.get(key).funds.push(item)
@@ -336,6 +346,10 @@ const fetchData = async () => {
 
     if (overviewResult.status === 'fulfilled') {
       overview.value = overviewResult.value
+      const memberIds = (overview.value?.members || []).map(member => member.member_id)
+      if (!selectedContributionMemberId.value || !memberIds.includes(selectedContributionMemberId.value)) {
+        selectedContributionMemberId.value = memberIds[0] || null
+      }
       if (!expandedMemberIds.value.length) {
         const first = [...(overview.value?.members || [])].sort((a, b) => Math.abs(Number(b.dailyProfit || 0)) - Math.abs(Number(a.dailyProfit || 0)))[0]
         if (first) expandedMemberIds.value = [first.member_id]
@@ -555,6 +569,7 @@ onActivated(() => {
   gap: 7px;
   margin-top: 10px;
   font-size: 14px;
+  white-space: nowrap;
 }
 .total-info .profit-label { color: rgba(255,255,255,.72); font-size: 12px; }
 .total-info .profit strong { font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -571,8 +586,7 @@ onActivated(() => {
   font-size: 12px;
   opacity: .9;
 }
-
-.freshness-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.18); font-size: 12px; opacity: .9; }
+.profit-freshness { margin-left: auto; color: rgba(255,255,255,.86); font-size: 12px; font-weight: 500; }
 
 .today-grid {
   display: grid;
@@ -629,6 +643,11 @@ onActivated(() => {
 
 .section-subtitle { margin-top: -6px; font-size: 12px; color: #94a3b8; }
 .section-more { border: 0; background: transparent; color: #2563eb; font-size: 13px; }
+.contribution-member-tabs { display: flex; gap: 8px; margin: 12px -4px 4px; padding: 0 4px 8px; overflow-x: auto; scrollbar-width: none; }
+.contribution-member-tabs::-webkit-scrollbar { display: none; }
+.contribution-member-tabs button { flex-shrink: 0; border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; color: #64748b; padding: 7px 12px; font-size: 12px; }
+.contribution-member-tabs button.active { border-color: #6366f1; background: #eef2ff; color: #4f46e5; font-weight: 700; }
+.contribution-empty { padding: 22px 0 10px; text-align: center; color: #94a3b8; font-size: 12px; }
 .contribution-account-group + .contribution-account-group { margin-top: 14px; }
 .contribution-account-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 7px; color: #334155; }
 .contribution-account-head strong { font-size: 13px; }

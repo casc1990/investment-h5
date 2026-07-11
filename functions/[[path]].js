@@ -2471,6 +2471,7 @@ export async function onRequest(context) {
           fundName: position.fund_name || position.fund_code,
           accountId: position.account_id,
           accountName: account?.accountName || '',
+          memberId: account?.member_id || null,
           dailyProfit: 0,
           dailyChangeRate: Number(snapshotMap[position.fund_code]?.gszzl || 0),
         };
