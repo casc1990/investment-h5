@@ -25,7 +25,8 @@
       <div class="today-card">
         <div class="today-label">{{ dailyProfitLabel }}</div>
         <div class="today-value" :class="{ positive: homePositionDailyProfit > 0, negative: homePositionDailyProfit < 0 }">
-          {{ displaySignedMoney(homePositionDailyProfit) }}
+          <span>{{ displaySignedMoney(homePositionDailyProfit) }}</span>
+          <small>{{ displayPercent(homeDailyProfitRate) }}</small>
         </div>
       </div>
       <div class="today-card">
@@ -281,6 +282,11 @@ const unassignedAccounts = computed(() => {
 const homePositionDailyProfit = computed(() => (
   Number(overview.value?.summary?.totalPositionYesterdayProfit ?? overview.value?.summary?.totalYesterdayProfit) || 0
 ))
+const homeDailyProfitRate = computed(() => {
+  const summary = overview.value?.summary || {}
+  const profitBase = Number(summary.totalMarketValue || 0) - Number(summary.totalProfit || 0)
+  return profitBase > 0 ? (homePositionDailyProfit.value / profitBase) * 100 : 0
+})
 
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
 const contributionMemberTabs = computed(() => overview.value?.members || [])
@@ -614,6 +620,7 @@ onActivated(() => {
   font-family: 'Courier New', monospace;
   color: #1f2937;
 }
+.today-value small { margin-left: 6px; font-size: 11px; font-weight: 600; color: inherit; }
 
 .today-value.positive {
   color: #f87171;
@@ -642,6 +649,7 @@ onActivated(() => {
 }
 
 .section-subtitle { margin-top: -6px; font-size: 12px; color: #94a3b8; }
+.section-heading .section-subtitle { margin-top: 5px; line-height: 1.5; }
 .section-more { border: 0; background: transparent; color: #2563eb; font-size: 13px; }
 .contribution-member-tabs { display: flex; gap: 8px; margin: 12px -4px 4px; padding: 0 4px 8px; overflow-x: auto; scrollbar-width: none; }
 .contribution-member-tabs::-webkit-scrollbar { display: none; }
@@ -656,7 +664,7 @@ onActivated(() => {
 .contribution-rank { flex-shrink: 0; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
 .contribution-rank.highest { color: #dc2626; background: #fef2f2; }
 .contribution-rank.lowest { color: #15803d; background: #f0fdf4; }
-.contribution-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.contribution-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; text-align: left; }
 .contribution-main strong { max-width: 190px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #1f2937; font-size: 13px; }
 .contribution-main span, .contribution-value span { color: #94a3b8; font-size: 11px; }
 .contribution-value { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }

@@ -113,3 +113,11 @@ test('首页贡献榜支持成员 Tab 且顶部更新进度与持有收益同行
   assert.match(homeSource, /profit-freshness/)
   assert.doesNotMatch(homeSource, /class="freshness-row"/)
 })
+
+test('首页日收益展示基于总资产减持有收益的收益率并优化贡献榜排版', () => {
+  assert.match(homeSource, /homeDailyProfitRate/)
+  assert.match(homeSource, /totalMarketValue \|\| 0\) - Number\(summary\.totalProfit/)
+  assert.match(homeSource, /displayPercent\(homeDailyProfitRate\)/)
+  assert.match(homeSource, /section-heading \.section-subtitle \{ margin-top: 5px/)
+  assert.match(homeSource, /contribution-main \{ flex: 1;[\s\S]*align-items: flex-start/)
+})
