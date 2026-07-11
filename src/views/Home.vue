@@ -3,18 +3,19 @@
     <!-- 顶部卡片 - 总资产 -->
     <div class="header-card">
       <div class="header-top">
-        <div class="total-info">
-          <div class="label">确认总资产</div>
-          <div class="amount">{{ displayMoney(overview?.summary?.totalMarketValue) }}</div>
-          <div class="profit" :class="{ positive: overview?.summary?.totalProfit > 0, negative: overview?.summary?.totalProfit < 0 }">
-            <span>持有收益 {{ displaySignedMoney(overview?.summary?.totalProfit) }}</span>
-            <span class="rate">({{ overview?.summary?.totalProfitRate || 0 }}%)</span>
-          </div>
-        </div>
+        <div class="header-title">确认总资产</div>
         <div class="header-actions">
           <button @click="amountsHidden = !amountsHidden">{{ amountsHidden ? '显示' : '隐藏' }}</button>
           <button :disabled="refreshing" @click="refreshHome">{{ refreshing ? '刷新中' : '刷新' }}</button>
           <button @click="handleLogout">退出</button>
+        </div>
+      </div>
+      <div class="total-info">
+        <div class="amount">{{ displayMoney(overview?.summary?.totalMarketValue) }}</div>
+        <div class="profit" :class="profitClass(overview?.summary?.totalProfit)">
+          <span class="profit-label">持有收益</span>
+          <strong>{{ displaySignedMoney(overview?.summary?.totalProfit) }}</strong>
+          <span class="rate">{{ displayPercent(overview?.summary?.totalProfitRate) }}</span>
         </div>
       </div>
       <div class="freshness-row">
@@ -46,24 +47,28 @@
       </div>
     </div>
 
-    <div v-if="dailyContributions.length" class="section contribution-section">
+    <div v-if="accountContributionGroups.length" class="section contribution-section">
       <div class="section-heading">
         <div>
           <div class="section-title">每日收益贡献</div>
-          <div class="section-subtitle">按收益影响绝对值排序</div>
+          <div class="section-subtitle">每个账户展示当日收益率最高和最低基金</div>
         </div>
         <button class="section-more" @click="router.push('/positions')">全部持仓</button>
       </div>
-      <button v-for="item in dailyContributions" :key="`${item.accountId}:${item.fundCode}`" class="contribution-item" @click="openPosition(item)">
-        <div class="contribution-main">
-          <strong>{{ item.fundName }}</strong>
-          <span>{{ item.accountName }} · {{ item.fundCode }}</span>
-        </div>
-        <div class="contribution-value" :class="profitClass(item.dailyProfit)">
-          <strong>{{ displaySignedMoney(item.dailyProfit) }}</strong>
-          <span>{{ displayPercent(item.dailyChangeRate) }}</span>
-        </div>
-      </button>
+      <div v-for="group in accountContributionGroups" :key="group.accountId" class="contribution-account-group">
+        <div class="contribution-account-head"><strong>{{ group.accountName }}</strong><span>{{ group.items.length }} 项</span></div>
+        <button v-for="item in group.items" :key="`${item.accountId}:${item.fundCode}:${item.rankLabel}`" class="contribution-item" @click="openPosition(item)">
+          <span class="contribution-rank" :class="item.rankType">{{ item.rankLabel }}</span>
+          <div class="contribution-main">
+            <strong>{{ item.fundName }}</strong>
+            <span>{{ item.fundCode }}</span>
+          </div>
+          <div class="contribution-value" :class="profitClass(item.dailyProfit)">
+            <strong>{{ displaySignedMoney(item.dailyProfit) }}</strong>
+            <span :class="profitClass(item.dailyChangeRate)">{{ displayPercent(item.dailyChangeRate) }}</span>
+          </div>
+        </button>
+      </div>
     </div>
 
     <!-- 成员分布 -->
@@ -111,7 +116,8 @@
                 <div class="account-subtitle">持有金额 ¥{{ formatNumber(account.marketValue || 0) }}</div>
               </div>
               <div class="account-side">
-                <div class="account-profit" :class="{ positive: account.profit > 0, negative: account.profit < 0 }">
+                <div class="account-daily-label">日收益</div>
+                <div class="account-profit" :class="profitClass(account.dailyProfit)">
                   {{ displaySignedMoney(account.dailyProfit) }}
                 </div>
                 <div class="account-rate" :class="{ positive: account.profit > 0, negative: account.profit < 0 }">
@@ -269,7 +275,22 @@ const homePositionDailyProfit = computed(() => (
 ))
 
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
-const dailyContributions = computed(() => (overview.value?.dailyContributions || []).slice(0, 3))
+const accountContributionGroups = computed(() => {
+  const groups = new Map()
+  for (const item of overview.value?.dailyContributions || []) {
+    const key = item.accountId || 'unassigned'
+    if (!groups.has(key)) groups.set(key, { accountId: key, accountName: item.accountName || '未命名账户', funds: [] })
+    groups.get(key).funds.push(item)
+  }
+  return [...groups.values()].map(group => {
+    const sorted = [...group.funds].sort((a, b) => Number(b.dailyChangeRate || 0) - Number(a.dailyChangeRate || 0))
+    const highest = sorted[0]
+    const lowest = sorted[sorted.length - 1]
+    const items = highest ? [{ ...highest, rankLabel: '最高', rankType: 'highest' }] : []
+    if (lowest && lowest.fundCode !== highest?.fundCode) items.push({ ...lowest, rankLabel: '最低', rankType: 'lowest' })
+    return { accountId: group.accountId, accountName: group.accountName, items }
+  }).sort((a, b) => a.accountName.localeCompare(b.accountName, 'zh-CN'))
+})
 const unassignedMarketValue = computed(() => unassignedAccounts.value.reduce((sum, account) => sum + Number(account.marketValue || 0), 0))
 const dailyProfitLabel = computed(() => {
   const date = overview.value?.summary?.dailyProfitDate
@@ -489,48 +510,54 @@ onActivated(() => {
 
 .header-card {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 24px 20px;
+  padding: 20px 20px 18px;
   color: white;
 }
 
 .header-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+  gap: 12px;
 }
 
-.header-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.header-title { font-size: 14px; font-weight: 500; letter-spacing: .04em; opacity: .86; }
+.header-actions { display: flex; gap: 7px; justify-content: flex-end; }
 .header-actions button {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   color: white;
-  border-radius: 20px;
-  padding: 6px 10px;
-  font-size: 12px;
+  border-radius: 999px;
+  min-width: 44px;
+  height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .total-info {
+  margin-top: 14px;
   text-align: left;
 }
 
-.total-info .label {
-  font-size: 14px;
-  opacity: 0.9;
-  margin-bottom: 8px;
-}
-
 .total-info .amount {
-  font-size: 32px;
-  font-weight: bold;
-  font-family: 'Courier New', monospace;
+  font-size: clamp(30px, 8vw, 38px);
+  line-height: 1.12;
+  font-weight: 700;
+  letter-spacing: .015em;
+  font-variant-numeric: tabular-nums;
 }
 
 .total-info .profit {
-  margin-top: 8px;
-  font-size: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 14px;
 }
+.total-info .profit-label { color: rgba(255,255,255,.72); font-size: 12px; }
+.total-info .profit strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 
 .total-info .profit.positive {
   color: #f87171;
@@ -541,7 +568,8 @@ onActivated(() => {
 }
 
 .total-info .rate {
-  margin-left: 4px;
+  font-size: 12px;
+  opacity: .9;
 }
 
 .freshness-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.18); font-size: 12px; opacity: .9; }
@@ -601,9 +629,16 @@ onActivated(() => {
 
 .section-subtitle { margin-top: -6px; font-size: 12px; color: #94a3b8; }
 .section-more { border: 0; background: transparent; color: #2563eb; font-size: 13px; }
-.contribution-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border: 0; border-top: 1px solid #f1f5f9; background: transparent; text-align: left; }
+.contribution-account-group + .contribution-account-group { margin-top: 14px; }
+.contribution-account-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 7px; color: #334155; }
+.contribution-account-head strong { font-size: 13px; }
+.contribution-account-head span { font-size: 11px; color: #94a3b8; }
+.contribution-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 0; border: 0; border-top: 1px solid #f1f5f9; background: transparent; text-align: left; }
+.contribution-rank { flex-shrink: 0; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.contribution-rank.highest { color: #dc2626; background: #fef2f2; }
+.contribution-rank.lowest { color: #15803d; background: #f0fdf4; }
 .contribution-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.contribution-main strong { max-width: 230px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #1f2937; font-size: 14px; }
+.contribution-main strong { max-width: 190px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #1f2937; font-size: 13px; }
 .contribution-main span, .contribution-value span { color: #94a3b8; font-size: 11px; }
 .contribution-value { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .positive { color: #ef4444 !important; }
@@ -794,6 +829,7 @@ onActivated(() => {
   text-align: right;
   flex-shrink: 0;
 }
+.account-daily-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
 
 .account-profit,
 .account-rate {
@@ -835,6 +871,12 @@ onActivated(() => {
 .skeleton-section { margin-top: 12px; padding: 16px; border-radius: 12px; background: white; }
 .skeleton-section i { height: 48px; margin-bottom: 10px; }
 @keyframes skeleton-wave { to { background-position: -200% 0; } }
+@media (max-width: 360px) {
+  .header-card { padding-left: 16px; padding-right: 16px; }
+  .header-actions { gap: 4px; }
+  .header-actions button { min-width: 40px; padding: 0 7px; }
+  .contribution-main strong { max-width: 145px; }
+}
 
 /* 事件中心 */
 .section-heading {

@@ -95,3 +95,12 @@ test('首页升级为带净值进度和收益贡献的每日收益看板', () =>
   assert.match(homeSource, /home-skeleton/)
   assert.match(homeSource, /amountsHidden/)
 })
+
+test('首页贡献榜按账户展示收益率最高最低基金且账户明确显示日收益', () => {
+  assert.match(homeSource, /accountContributionGroups/)
+  assert.match(homeSource, /rankLabel: '最高'/)
+  assert.match(homeSource, /rankLabel: '最低'/)
+  assert.match(homeSource, /每个账户展示当日收益率最高和最低基金/)
+  assert.match(homeSource, /account-daily-label">日收益/)
+  assert.match(apiSource, /accountStats\.dailyProfit/)
+})
