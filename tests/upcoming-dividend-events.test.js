@@ -14,17 +14,16 @@ const html = `
   </tbody></table>
 `
 
-test('只收集今天起未来30天内的基金分红安排', () => {
+test('只收集当前日期前后各3个工作日内的基金分红安排', () => {
   const rows = parseUpcomingDividendRows(html, {
     now: new Date('2026-07-11T02:00:00Z'),
-    daysAhead: 30,
   })
 
   assert.deepEqual(rows, [{
-    record_date: '2026-07-20',
-    ex_date: '2026-07-20',
-    dividend_per_share: 0.0083,
-    payment_date: '2026-07-21',
+    record_date: '2026-07-10',
+    ex_date: '2026-07-10',
+    dividend_per_share: 0.006,
+    payment_date: '2026-07-11',
   }])
 })
 
@@ -33,6 +32,17 @@ test('分红解析兼容表格标签之间的空白', () => {
   const rows = parseUpcomingDividendRows(spacedHtml, { now: new Date('2026-07-11T00:00:00+08:00') })
   assert.equal(rows.length, 1)
   assert.equal(rows[0].dividend_per_share, 0.005)
+})
+
+test('周末扫描会回看前3个工作日并收集012708在7月9日的分红', () => {
+  const fund012708Html = '<tr><td>2026年</td><td>2026-07-09</td><td>2026-07-09</td><td>每份派现金0.0040元</td><td>2026-07-13</td></tr>'
+  const rows = parseUpcomingDividendRows(fund012708Html, { now: new Date('2026-07-11T10:00:00+08:00') })
+  assert.deepEqual(rows, [{
+    record_date: '2026-07-09',
+    ex_date: '2026-07-09',
+    dividend_per_share: 0.004,
+    payment_date: '2026-07-13',
+  }])
 })
 
 test('近期分红扫描由净值同步触发而不是首页事件读取触发', () => {

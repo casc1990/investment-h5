@@ -56,15 +56,31 @@ export function isAuthorizedCronRequest(request, env = {}) {
   return configuredSecret.length >= 32 && safeEqualStrings(configuredSecret, providedSecret);
 }
 
-export function parseUpcomingDividendRows(html = '', { now = new Date(), daysAhead = 30 } = {}) {
-  const today = getChinaDateString(now);
-  const endDate = getChinaDateString(addDays(now, Math.max(0, Number(daysAhead || 0))));
+function addChinaBusinessDays(date, offset) {
+  const direction = offset >= 0 ? 1 : -1;
+  let remaining = Math.abs(Number(offset || 0));
+  let cursor = new Date(date);
+  while (remaining > 0) {
+    cursor = addDays(cursor, direction);
+    const weekday = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(cursor);
+    if (weekday !== 'Sat' && weekday !== 'Sun') remaining -= 1;
+  }
+  return cursor;
+}
+
+export function parseUpcomingDividendRows(html = '', {
+  now = new Date(),
+  businessDaysBefore = 3,
+  businessDaysAfter = 3,
+} = {}) {
+  const startDate = getChinaDateString(addChinaBusinessDays(now, -Math.max(0, Number(businessDaysBefore || 0))));
+  const endDate = getChinaDateString(addChinaBusinessDays(now, Math.max(0, Number(businessDaysAfter || 0))));
   const rows = [];
   const rowPattern = /<tr>\s*<td>\d{4}年<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>每份派现金([\d.]+)元<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<\/tr>/g;
   let match;
   while ((match = rowPattern.exec(String(html || ''))) !== null) {
     const [, recordDate, exDate, dividendPerShare, paymentDate] = match;
-    if (recordDate < today || recordDate > endDate) continue;
+    if (recordDate < startDate || recordDate > endDate) continue;
     rows.push({
       record_date: recordDate,
       ex_date: exDate,
@@ -1198,7 +1214,7 @@ export async function onRequest(context) {
 
     async function scanUpcomingDividendEvents() {
       const now = new Date();
-      const scanKey = 'upcoming_dividends';
+      const scanKey = 'upcoming_dividends_workday_window_v2';
       await env.DB.prepare('INSERT OR IGNORE INTO event_scan_status (scan_key, last_scanned_at) VALUES (?, 0)').bind(scanKey).run();
       const scanLock = await env.DB.prepare(`
         UPDATE event_scan_status SET last_scanned_at = unixepoch()
@@ -1218,7 +1234,11 @@ export async function onRequest(context) {
             try {
               const response = await fetch(`https://fundf10.eastmoney.com/fhsp_${position.fund_code}.html`, { headers });
               if (!response.ok) return;
-              const dividendRows = parseUpcomingDividendRows(await response.text(), { now, daysAhead: 30 });
+              const dividendRows = parseUpcomingDividendRows(await response.text(), {
+                now,
+                businessDaysBefore: 3,
+                businessDaysAfter: 3,
+              });
               for (const dividend of dividendRows) {
                 const estimatedAmount = Number((Number(position.quantity || 0) * dividend.dividend_per_share).toFixed(2));
                 const eventTime = Math.floor(Date.parse(`${dividend.record_date}T09:00:00+08:00`) / 1000);
