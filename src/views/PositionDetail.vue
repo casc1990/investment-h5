@@ -10,20 +10,19 @@
 
     <div v-if="position" class="hero-card">
       <div class="hero-top">
-        <div>
+        <div class="hero-identity">
           <div class="hero-name">{{ position.fund_name || '未知基金' }}</div>
-          <div class="hero-code">{{ position.fund_code }}</div>
+          <div class="hero-meta-line">
+            <span class="hero-code">{{ position.fund_code }}</span>
+            <span v-if="position.member_name" class="hero-tag member">{{ position.member_emoji }} {{ position.member_name }}</span>
+            <span v-if="position.account_name" class="hero-tag account">{{ position.account_name }}</span>
+          </div>
         </div>
         <div class="hero-nav">
           <div class="hero-nav-caption">最新净值</div>
           <div class="hero-nav-value">{{ latestNavText }}</div>
           <div class="hero-nav-date">{{ position.nav_jzrq || '净值日期待更新' }}</div>
         </div>
-      </div>
-
-      <div class="hero-tags">
-        <span v-if="position.member_name" class="hero-tag member">{{ position.member_emoji }} {{ position.member_name }}</span>
-        <span v-if="position.account_name" class="hero-tag account">{{ position.account_name }}</span>
       </div>
 
       <div class="hero-primary">
@@ -80,6 +79,7 @@
         :formatter="positionTrendFormatter"
         :y-axis-formatter="positionTrendAxisFormatter"
         :show-zero-baseline="positionTrendTab === 'daily'"
+        :show-point-markers="false"
         @select="handlePositionTrendSelect"
       />
 
@@ -146,6 +146,7 @@
         summary-label="所选周期涨跌幅"
         :formatter="formatSignedPercent"
         :y-axis-formatter="formatAxisPercent"
+        :show-point-markers="false"
         @select="handleFundTrendSelect"
       />
 
@@ -176,7 +177,7 @@
       <div class="section-header">
         <div>
           <div class="section-title">📊 历史业绩统计</div>
-          <div class="section-subtitle">参考截图风格，拆成阶段涨幅和历史净值两个页签</div>
+          <div class="section-subtitle">阶段表现与最近30个净值记录</div>
         </div>
       </div>
 
@@ -515,7 +516,7 @@ onDeactivated(() => {
 
 .hero-card {
   margin: 12px;
-  padding: 18px 16px;
+  padding: 16px;
   border-radius: 18px;
   color: #fff;
   background: linear-gradient(135deg, #1e80ff 0%, #3b5bdb 100%);
@@ -531,19 +532,38 @@ onDeactivated(() => {
 }
 
 .hero-name {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   line-height: 1.4;
 }
 
-.hero-code,
 .hero-nav-date {
   margin-top: 4px;
   font-size: 12px;
   opacity: 0.88;
 }
 
+.hero-identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.hero-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.hero-code {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  font-family: 'Courier New', monospace;
+}
+
 .hero-nav {
+  flex: 0 0 auto;
   text-align: right;
 }
 
@@ -563,7 +583,7 @@ onDeactivated(() => {
   justify-content: space-between;
   gap: 14px;
   align-items: flex-end;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .hero-primary-main {
@@ -577,8 +597,8 @@ onDeactivated(() => {
 }
 
 .hero-primary-value {
-  margin-top: 8px;
-  font-size: 34px;
+  margin-top: 6px;
+  font-size: 32px;
   line-height: 1.15;
   font-weight: 800;
   letter-spacing: -0.5px;
@@ -626,17 +646,10 @@ onDeactivated(() => {
   color: rgba(255, 255, 255, 0.92);
 }
 
-.hero-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-
 .hero-tag {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 999px;
   font-size: 12px;
 }
@@ -728,7 +741,7 @@ onDeactivated(() => {
 
 .section {
   margin: 12px;
-  padding: 16px;
+  padding: 15px;
   border-radius: 18px;
   background: #fff;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
@@ -837,11 +850,18 @@ onDeactivated(() => {
 .chip-row {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
   margin: 14px 0;
 }
 
+.chip-row::-webkit-scrollbar {
+  display: none;
+}
+
 .pill-chip {
+  flex: 0 0 auto;
   border: none;
   border-radius: 999px;
   padding: 7px 14px;

@@ -11,6 +11,7 @@ import {
   buildRecentFundNavRows,
   rebuildPositionRowsFromNavHistory,
 } from '../src/utils/fundDetail.js'
+import { mergeLatestConfirmedNavIntoHistory } from '../functions/[[path]].js'
 
 const snapshots = [
   {
@@ -94,6 +95,23 @@ test('基金详情历史净值表最多保留近30天并按日期倒序展示', 
   assert.equal(result.length, 30)
   assert.equal(result[0].date, '2026-06-03')
   assert.equal(result.at(-1).date, '2026-05-05')
+})
+
+test('基金详情把数据库中更新的确认净值补到东方财富历史序列末尾', () => {
+  const rows = [
+    { date: '2026-07-08', nav: 1.07, daily_return_pct: 0.1, cumulative_return_pct: 0 },
+    { date: '2026-07-09', nav: 1.072, daily_return_pct: 0.19, cumulative_return_pct: 0.19 },
+  ]
+  const result = mergeLatestConfirmedNavIntoHistory(rows, {
+    date: '2026-07-10',
+    nav: 1.0752,
+    daily_return_pct: 0.3,
+  })
+
+  assert.equal(result.at(-1).date, '2026-07-10')
+  assert.equal(result.at(-1).nav, 1.0752)
+  assert.equal(result.at(-1).daily_return_pct, 0.3)
+  assert.equal(result.length, 3)
 })
 
 test('持仓收益曲线遇到基金分红时应按真实收益补回除息影响', () => {

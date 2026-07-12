@@ -393,7 +393,44 @@ export function parsePingzhongdataFundHistory(text, htmlText = '') {
     fund_name: fundName,
     net_worth_trend: netWorthTrend,
     performance_stats: buildFundPerformanceStats(netWorthTrend, officialReturns),
+    official_returns: officialReturns,
   };
+}
+
+export function mergeLatestConfirmedNavIntoHistory(rows = [], snapshot = {}) {
+  const ordered = [...(Array.isArray(rows) ? rows : [])]
+    .filter(row => row?.date && Number(row?.nav) > 0)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const date = String(snapshot?.date || '');
+  const nav = Number(snapshot?.nav || 0);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(nav) || nav <= 0) return ordered;
+
+  const existingIndex = ordered.findIndex(row => row.date === date);
+  const latestDate = ordered.at(-1)?.date || '';
+  if (existingIndex < 0 && latestDate && date < latestDate) return ordered;
+
+  const previous = existingIndex > 0 ? ordered[existingIndex - 1] : ordered.at(-1);
+  const previousNav = Number(previous?.nav || 0);
+  const suppliedReturn = Number(snapshot?.daily_return_pct);
+  const dailyReturnPct = Number.isFinite(suppliedReturn)
+    ? Number(suppliedReturn.toFixed(2))
+    : previousNav > 0
+      ? Number((((nav - previousNav) / previousNav) * 100).toFixed(2))
+      : 0;
+  const baseNav = Number(ordered[0]?.nav || nav);
+  const mergedRow = {
+    ...(existingIndex >= 0 ? ordered[existingIndex] : {}),
+    time: new Date(`${date}T00:00:00+08:00`).getTime(),
+    date,
+    nav: Number(nav.toFixed(4)),
+    daily_return_pct: dailyReturnPct,
+    cumulative_return_pct: baseNav > 0 ? Number((((nav - baseNav) / baseNav) * 100).toFixed(2)) : 0,
+    unit_money: existingIndex >= 0 ? ordered[existingIndex]?.unit_money || '' : '',
+  };
+
+  if (existingIndex >= 0) ordered.splice(existingIndex, 1, mergedRow);
+  else ordered.push(mergedRow);
+  return ordered;
 }
 
 export function resolveDisplayedNavGszzl({
@@ -2604,11 +2641,23 @@ export async function onRequest(context) {
         const text = await response.text();
         const htmlText = htmlResponse.ok ? await htmlResponse.text() : '';
         const parsed = parsePingzhongdataFundHistory(text, htmlText);
+        const { results: snapshotRows } = await env.DB.prepare(
+          'SELECT dwjz, gsz, gszzl, jzrq FROM market_snapshot WHERE fund_code = ? LIMIT 1'
+        ).bind(fundCode).all();
+        const snapshot = snapshotRows?.[0] || null;
+        const confirmedNav = Number(snapshot?.dwjz || snapshot?.gsz || 0);
+        const netWorthTrend = mergeLatestConfirmedNavIntoHistory(parsed.net_worth_trend, {
+          date: snapshot?.jzrq || '',
+          nav: confirmedNav,
+          daily_return_pct: snapshot?.gszzl,
+        });
         return jsonResponse({
           code: 0,
           data: {
             fund_code: fundCode,
-            ...parsed,
+            fund_name: parsed.fund_name,
+            net_worth_trend: netWorthTrend,
+            performance_stats: buildFundPerformanceStats(netWorthTrend, parsed.official_returns),
           },
         });
       } catch (error) {
