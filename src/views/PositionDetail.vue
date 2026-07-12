@@ -235,7 +235,7 @@ import { showToast } from 'vant'
 import TrendChart from '../components/TrendChart.vue'
 import { fundApi, positionApi } from '../api'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
-import { getProfitSnapshots } from '../utils/profitLedger'
+import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import {
   buildFundReturnChartPoints,
   buildRecentFundNavRows,
@@ -471,7 +471,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     await loadPosition()
-    snapshots.value = getProfitSnapshots()
+    try { snapshots.value = await fetchProfitSnapshots() } catch { snapshots.value = getProfitSnapshots() }
     await loadFundDetail(position.value?.fund_code)
   } catch (error) {
     console.error('Failed to fetch position detail:', error)

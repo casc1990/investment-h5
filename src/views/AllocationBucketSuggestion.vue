@@ -115,7 +115,7 @@ import {
   buildAllocationProfileSummary,
   buildAllocationSuggestions,
 } from '../utils/allocation'
-import { loadAllocationProfiles } from '../utils/allocationStorage'
+import { fetchAllocationProfiles, loadAllocationProfiles } from '../utils/allocationStorage'
 import { formatAmount, formatPercent, profitClass } from '../utils/formatters'
 
 const route = useRoute()
@@ -171,7 +171,10 @@ async function fetchPositions() {
   }
 }
 
-onMounted(fetchPositions)
+onMounted(async () => {
+  try { profiles.value = await fetchAllocationProfiles() } catch (error) { showToast(`策略同步失败：${error.message || '网络错误'}`) }
+  await fetchPositions()
+})
 </script>
 
 <style scoped>

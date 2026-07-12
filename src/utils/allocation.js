@@ -130,6 +130,7 @@ export const normalizeAllocationProfile = (profile = {}) => ({
   targetProfitRate: round2(profile.targetProfitRate ?? profile.target_profit_rate ?? 0),
   createdAt: profile.createdAt || profile.created_at || null,
   updatedAt: profile.updatedAt || profile.updated_at || null,
+  version: Number(profile.version || 0),
   buckets: (profile.buckets || createDefaultAllocationBuckets()).map(normalizeBucket),
   funds: (profile.funds || []).map(normalizeFund),
   defaultFundByType: { ...(profile.defaultFundByType || {}) },

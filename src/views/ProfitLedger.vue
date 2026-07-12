@@ -109,7 +109,7 @@ import { computed, onMounted, ref } from 'vue'
 import { showToast } from 'vant'
 import SectionShortcutNav from '../components/SectionShortcutNav.vue'
 import { formatAmount, formatSignedAmount, profitClass } from '../utils/formatters'
-import { buildFundTrend, getProfitSnapshots, summarizeProfitRange } from '../utils/profitLedger'
+import { buildFundTrend, fetchProfitSnapshots, getProfitSnapshots, summarizeProfitRange } from '../utils/profitLedger'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 
 const periodOptions = [
@@ -176,7 +176,7 @@ const handleRefresh = async () => {
 }
 
 onMounted(async () => {
-  refreshLocalSnapshots()
+  try { allSnapshots.value = await fetchProfitSnapshots() } catch { refreshLocalSnapshots() }
   await captureSnapshot()
 })
 </script>

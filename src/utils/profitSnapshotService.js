@@ -1,5 +1,5 @@
 import { advisoryApi, positionApi, statsApi } from '../api'
-import { recordProfitSnapshot } from './profitLedger'
+import { persistProfitSnapshot, recordProfitSnapshot } from './profitLedger'
 import { buildSnapshotPayloadFromApis } from './perfHelpers'
 
 export const fetchProfitSnapshotData = async () => {
@@ -23,6 +23,7 @@ export const captureProfitSnapshotFromApis = async () => {
     summary: payload.overview?.summary,
     positions: payload.snapshotPositions,
   })
+  if (snapshotResult.saved) await persistProfitSnapshot(snapshotResult.snapshot)
 
   return {
     ...payload,

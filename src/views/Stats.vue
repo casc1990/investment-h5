@@ -389,7 +389,7 @@ import TrendChart from '../components/TrendChart.vue'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
-import { getProfitSnapshots } from '../utils/profitLedger'
+import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import {
   buildAccountFilterOptions,
   buildCurrentFundRows,
@@ -457,6 +457,10 @@ const periodOptions = [
 
 const refreshSnapshots = () => {
   allSnapshots.value = getProfitSnapshots()
+}
+
+const syncSnapshots = async () => {
+  try { allSnapshots.value = await fetchProfitSnapshots() } catch { refreshSnapshots() }
 }
 
 const fetchData = async () => {
@@ -655,11 +659,13 @@ watch(fundSelectorOptions, (options) => {
   if (!exists) selectedFundCode.value = 'all'
 }, { immediate: true })
 
-onMounted(() => {
+onMounted(async () => {
+  await syncSnapshots()
   ensureFreshData({ force: true })
 })
 
-onActivated(() => {
+onActivated(async () => {
+  await syncSnapshots()
   ensureFreshData()
 })
 </script>

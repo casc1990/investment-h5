@@ -145,8 +145,9 @@ import {
 } from '../utils/allocation'
 import { buildFundPerformanceMap } from '../utils/fundPerformance'
 import {
+  fetchAllocationProfiles,
   loadAllocationProfiles,
-  saveAllocationProfiles,
+  persistAllocationProfiles,
   saveSelectedAllocationProfileId,
 } from '../utils/allocationStorage'
 import { formatAmount, formatSignedAmount, formatPercent, profitClass } from '../utils/formatters'
@@ -267,7 +268,7 @@ async function fetchPerformance() {
   performanceMap.value = await buildFundPerformanceMap(codes, fundApi.detail)
 }
 
-function saveSelection() {
+async function saveSelection() {
   if (!currentProfile.value || !assetType.value) {
     showToast('当前分类信息无效')
     return
@@ -290,11 +291,14 @@ function saveSelection() {
   const nextProfiles = profiles.value.map(profile => (
     profile.id === nextProfile.id ? normalizeAllocationProfile(nextProfile) : profile
   ))
-  profiles.value = nextProfiles
-  saveAllocationProfiles(nextProfiles)
-  saveSelectedAllocationProfileId(nextProfile.id)
-  showToast(`已保存${bucketLabel.value}基金选择`)
-  router.push(`/allocation/${nextProfile.id}`)
+  try {
+    profiles.value = await persistAllocationProfiles(nextProfiles, profiles.value)
+    saveSelectedAllocationProfileId(nextProfile.id)
+    showToast(`已保存并同步${bucketLabel.value}基金选择`)
+    router.push(`/allocation/${nextProfile.id}`)
+  } catch (error) {
+    showToast(`保存失败：${error?.response?.data?.message || error.message || '网络错误'}`)
+  }
 }
 
 watch([currentProfile, assetType], initializeDrafts, { immediate: true })
@@ -309,6 +313,7 @@ watch(selectedPositionIds, (ids) => {
 }, { deep: true })
 
 onMounted(async () => {
+  try { profiles.value = await fetchAllocationProfiles() } catch (error) { showToast(`策略同步失败：${error.message || '网络错误'}`) }
   await fetchPositions()
   initializeDrafts()
   await fetchPerformance()

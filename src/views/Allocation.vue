@@ -166,53 +166,57 @@
         <div class="section-header">
           <div>
             <div class="section-title">📊 配置统计</div>
-            <div class="section-subtitle">按组合总资产核算各类别当前占比，分类内支持基金录入、基金持仓与配置建议</div>
+            <div class="section-subtitle">各类别目标、当前配比与收益概览</div>
           </div>
-        </div>
-        <div class="cash-input-card bucket-insight-toolbar">
-          <div>
-            <div class="cash-input-label">本次新增资金（元）</div>
-            <div class="bucket-insight-hint">填写后，各类别里的“配置建议”会按这笔新增资金重新计算</div>
-          </div>
-          <van-field v-model.number="newCashAmount" type="number" placeholder="例如 3000" input-align="right" />
         </div>
         <div v-if="loading" class="section-loading"><van-loading size="20px">持仓加载中...</van-loading></div>
         <div v-else class="bucket-summary-list">
           <div v-for="bucket in configuredBucketSummaries" :key="bucket.assetType" class="bucket-summary-card" :class="bucket.status">
             <div class="bucket-summary-top">
-              <div>
+              <div class="bucket-summary-heading">
                 <div class="bucket-summary-title">{{ bucket.label }}</div>
-                <div class="bucket-summary-status">{{ getBucketStatusLabel(bucket.status) }}</div>
+                <span class="bucket-status-pill" :class="bucket.status">{{ getBucketStatusLabel(bucket.status) }}</span>
               </div>
-              <div class="bucket-summary-amount">¥{{ formatAmount(bucket.marketValue) }}</div>
+              <div class="bucket-summary-value">
+                <span>持仓市值</span>
+                <strong>¥{{ formatAmount(bucket.marketValue) }}</strong>
+              </div>
             </div>
-            <div class="bucket-summary-grid">
+            <div class="bucket-ratio-grid">
               <div class="bucket-summary-metric">
-                <span class="small-label">目标配比</span>
+                <span class="small-label">目标</span>
                 <div class="small-value">{{ formatPercent(bucket.targetPct) }}</div>
               </div>
               <div class="bucket-summary-metric">
-                <span class="small-label">当前配比</span>
+                <span class="small-label">当前</span>
                 <div class="small-value" :class="currentRatioClass(bucket.currentPct, bucket.targetPct)">{{ formatPercent(bucket.currentPct) }}</div>
               </div>
-              <div class="bucket-summary-metric wide">
-                <span class="small-label">累计收益/率</span>
-                <div class="small-value nowrap" :class="profitClass(bucket.totalProfit)">
-                  {{ formatSignedAmount(bucket.totalProfit) }} / {{ formatSignedPercent(bucket.totalProfitRate) }}
-                </div>
+              <div class="bucket-summary-metric">
+                <span class="small-label">偏差</span>
+                <div class="small-value" :class="profitClass(bucket.deviationPct)">{{ formatSignedPercent(bucket.deviationPct) }}</div>
               </div>
-              <div class="bucket-summary-metric wide">
-                <span class="small-label">今日收益/率</span>
-                <div class="small-value nowrap" :class="profitClass(bucket.dailyProfit)">
-                  {{ formatSignedAmount(bucket.dailyProfit) }} / {{ formatSignedPercent(bucket.dailyProfitRate) }}
-                </div>
+              <div class="bucket-summary-metric">
+                <span class="small-label">基金</span>
+                <div class="small-value">{{ getBucketIncludedCount(bucket.assetType) }}只</div>
+              </div>
+            </div>
+            <div class="bucket-profit-grid">
+              <div class="bucket-profit-item">
+                <span class="small-label">累计收益</span>
+                <div class="bucket-profit-value" :class="profitClass(bucket.totalProfit)">{{ formatSignedAmount(bucket.totalProfit) }}</div>
+                <span class="bucket-profit-rate" :class="profitClass(bucket.totalProfitRate)">{{ formatSignedPercent(bucket.totalProfitRate) }}</span>
+              </div>
+              <div class="bucket-profit-item">
+                <span class="small-label">今日收益</span>
+                <div class="bucket-profit-value" :class="profitClass(bucket.dailyProfit)">{{ formatSignedAmount(bucket.dailyProfit) }}</div>
+                <span class="bucket-profit-rate" :class="profitClass(bucket.dailyProfitRate)">{{ formatSignedPercent(bucket.dailyProfitRate) }}</span>
               </div>
             </div>
 
             <div class="bucket-card-actions">
               <button type="button" class="bucket-mini-action primary" @click="openBucketSelector(bucket.assetType)">
                 <span class="bucket-mini-action-title">基金录入</span>
-                <span class="bucket-mini-action-subtitle">选择纳入基金</span>
+                <span class="bucket-mini-action-subtitle">选择基金</span>
               </button>
               <button type="button" class="bucket-mini-action secondary" @click="openBucketHoldings(bucket.assetType)">
                 <span class="bucket-mini-action-title">基金持仓</span>
@@ -220,7 +224,7 @@
               </button>
               <button type="button" class="bucket-mini-action ghost" @click="openBucketSuggestion(bucket.assetType)">
                 <span class="bucket-mini-action-title">配置建议</span>
-                <span class="bucket-mini-action-subtitle">{{ getBucketSuggestionSummary(bucket.assetType) }}</span>
+                <span class="bucket-mini-action-subtitle">{{ getBucketActionHint(bucket.status) }}</span>
               </button>
             </div>
           </div>
@@ -248,8 +252,8 @@
           </div>
         </div>
         <div class="popup-actions">
-          <van-button round @click="showProfilePopup = false">取消</van-button>
-          <van-button round type="primary" :disabled="!canSaveProfileDraft" @click="saveProfileDraft">保存方案</van-button>
+          <van-button round :disabled="savingProfile" @click="showProfilePopup = false">取消</van-button>
+          <van-button round type="primary" :loading="savingProfile" loading-text="保存中..." :disabled="!canSaveProfileDraft || savingProfile" @click="saveProfileDraft">保存方案</van-button>
         </div>
       </div>
     </van-popup>
@@ -272,7 +276,6 @@ import {
   buildAllocationOccupancyMap,
   buildAllocationProfileSummary,
   buildAllocationProfitTrend,
-  buildAllocationSuggestions,
   createDefaultAllocationBuckets,
   filterConfiguredAllocationBuckets,
   getPositionMarketValue,
@@ -283,13 +286,14 @@ import {
 } from '../utils/allocation'
 import {
   ALLOCATION_PROFILES_UPDATED_EVENT,
+  fetchAllocationProfiles,
   loadAllocationProfiles,
   loadSelectedAllocationProfileId,
-  saveAllocationProfiles,
+  persistAllocationProfiles,
   saveSelectedAllocationProfileId,
 } from '../utils/allocationStorage'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
-import { getProfitSnapshots } from '../utils/profitLedger'
+import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 
 const route = useRoute()
@@ -301,10 +305,11 @@ const loading = ref(false)
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
 const showProfilePopup = ref(false)
-const newCashAmount = ref(null)
+const savingProfile = ref(false)
 const profileDraft = ref(createProfileDraft())
 const selectedAllocationTrendRow = ref(null)
 const activeTrendTab = ref('profit_rate')
+const profitSnapshots = ref(getProfitSnapshots())
 
 const assetTypeOptions = ALLOCATION_ASSET_TYPE_ORDER.map(value => ({ value, label: ALLOCATION_ASSET_TYPE_LABELS[value] }))
 const fundStatusOptions = Object.values(ALLOCATION_FUND_STATUSES)
@@ -323,26 +328,18 @@ const configuredBucketRows = computed(() => {
   })
 })
 const configuredBucketSummaries = configuredBucketRows
-const suggestions = computed(() => {
-  if (!currentProfile.value) return null
-  return buildAllocationSuggestions({
-    profile: currentProfile.value,
-    positions: positions.value,
-    newCashAmount: Number(newCashAmount.value) || 0,
-  })
-})
 const allocationProfitTrendPoints = computed(() => {
   if (!currentProfile.value) return []
   return buildAllocationProfitTrend({
     profile: currentProfile.value,
-    snapshots: getProfitSnapshots(),
+    snapshots: profitSnapshots.value,
   })
 })
 const allocationBucketDailyTrendSeries = computed(() => {
   if (!currentProfile.value) return []
   return buildAllocationDailyProfitTrend({
     profile: currentProfile.value,
-    snapshots: getProfitSnapshots(),
+    snapshots: profitSnapshots.value,
   })
 })
 const allocationTrendReferenceLines = computed(() => {
@@ -458,6 +455,7 @@ function createProfileDraft(profile = null) {
   if (!profile) {
     return {
       id: '',
+      version: 0,
       name: '',
       note: '',
       totalAsset: null,
@@ -471,6 +469,7 @@ function createProfileDraft(profile = null) {
   }
   return JSON.parse(JSON.stringify({
     id: profile.id,
+    version: Number(profile.version || 0),
     name: profile.name,
     note: profile.note || '',
     totalAsset: profile.totalAsset || null,
@@ -479,10 +478,10 @@ function createProfileDraft(profile = null) {
   }))
 }
 
-function persistProfiles(nextProfiles, nextSelectedId) {
-  profiles.value = nextProfiles
-  selectedProfileId.value = nextSelectedId || nextProfiles[0]?.id || ''
-  saveAllocationProfiles(nextProfiles)
+async function persistProfiles(nextProfiles, nextSelectedId) {
+  const previousProfiles = profiles.value
+  profiles.value = await persistAllocationProfiles(nextProfiles, previousProfiles)
+  selectedProfileId.value = nextSelectedId || profiles.value[0]?.id || ''
   saveSelectedAllocationProfileId(selectedProfileId.value)
   if (selectedProfileId.value) {
     router.replace(`/allocation/${selectedProfileId.value}`)
@@ -510,7 +509,7 @@ function handleProfilesUpdated() {
   syncProfilesFromStorage()
 }
 
-function updateCurrentProfile(mutator) {
+async function updateCurrentProfile(mutator) {
   if (!currentProfile.value) return
   const nextProfiles = profiles.value.map(profile => {
     if (profile.id !== currentProfile.value.id) return profile
@@ -519,7 +518,7 @@ function updateCurrentProfile(mutator) {
     draft.updatedAt = new Date().toISOString()
     return normalizeAllocationProfile(draft)
   })
-  persistProfiles(nextProfiles, currentProfile.value.id)
+  await persistProfiles(nextProfiles, currentProfile.value.id)
 }
 
 async function fetchPositions() {
@@ -583,7 +582,8 @@ function openEditProfilePopup() {
   showProfilePopup.value = true
 }
 
-function saveProfileDraft() {
+async function saveProfileDraft() {
+  if (savingProfile.value) return
   if (!canSaveProfileDraft.value) {
     showToast('请先填写方案名称、组合总资产，并确保目标比例合计等于100%')
     return
@@ -591,6 +591,7 @@ function saveProfileDraft() {
 
   const normalized = normalizeAllocationProfile({
     id: profileDraft.value.id || createProfileId(),
+    version: Number(profileDraft.value.version || 0),
     name: profileDraft.value.name.trim(),
     note: profileDraft.value.note?.trim() || '',
     totalAsset: Number(profileDraft.value.totalAsset) || 0,
@@ -615,10 +616,20 @@ function saveProfileDraft() {
     ? profiles.value.map(item => (item.id === normalized.id ? normalized : item))
     : [...profiles.value, normalized]
 
-  persistProfiles(nextProfiles, normalized.id)
-  showProfilePopup.value = false
-  showToast(exists ? '配置方案已更新' : '配置方案已创建')
-  router.replace(`/allocation/${normalized.id}`)
+  try {
+    savingProfile.value = true
+    await persistProfiles(nextProfiles, normalized.id)
+    showProfilePopup.value = false
+    showToast(exists ? '配置方案已更新并同步' : '配置方案已创建并同步')
+    router.replace(`/allocation/${normalized.id}`)
+  } catch (error) {
+    showToast(`配置方案保存失败：${error?.response?.data?.message || error.message || '网络错误'}`)
+    if (error?.response?.status === 409) {
+      try { profiles.value = await fetchAllocationProfiles() } catch { /* keep current form for retry */ }
+    }
+  } finally {
+    savingProfile.value = false
+  }
 }
 
 async function handleDeleteCurrentProfile() {
@@ -626,15 +637,16 @@ async function handleDeleteCurrentProfile() {
   try {
     await showConfirmDialog({ title: '删除方案', message: `确定删除“${currentProfile.value.name}”吗？` })
     const nextProfiles = profiles.value.filter(item => item.id !== currentProfile.value.id)
-    persistProfiles(nextProfiles, nextProfiles[0]?.id || '')
+    await persistProfiles(nextProfiles, nextProfiles[0]?.id || '')
     showToast('已删除当前方案')
     if (nextProfiles[0]?.id) {
       router.replace(`/allocation/${nextProfiles[0].id}`)
     } else {
       router.replace('/allocation')
     }
-  } catch {
-    // cancel
+  } catch (error) {
+    if (error === 'cancel' || error?.message === 'cancel') return
+    showToast(`删除失败：${error?.response?.data?.message || error.message || '网络错误'}`)
   }
 }
 
@@ -682,24 +694,10 @@ function getBucketIncludedCount(assetType) {
   return currentProfile.value?.funds?.filter(item => item.assetType === assetType).length || 0
 }
 
-function getBucketSuggestion(assetType) {
-  return {
-    recommended: suggestions.value?.recommendedCategories?.find(item => item.assetType === assetType) || null,
-    rebalance: suggestions.value?.rebalanceCategories?.find(item => item.assetType === assetType) || null,
-  }
-}
-
-function hasBucketSuggestion(assetType) {
-  const suggestion = getBucketSuggestion(assetType)
-  return Boolean(suggestion.recommended || suggestion.rebalance)
-}
-
-function getBucketSuggestionSummary(assetType) {
-  const suggestion = getBucketSuggestion(assetType)
-  if (suggestion.recommended && suggestion.rebalance) return '补仓 + 调仓'
-  if (suggestion.recommended) return '新增资金建议'
-  if (suggestion.rebalance) return '查看调仓提示'
-  return '当前暂无建议'
+function getBucketActionHint(status) {
+  if (status === 'low') return '查看补仓建议'
+  if (status === 'high') return '查看调仓提示'
+  return '查看配置分析'
 }
 
 function getBucketCandidatePositions(assetType) {
@@ -772,16 +770,27 @@ watch(allocationProfitTrendPoints, (points) => {
   selectedAllocationTrendRow.value = existing || points.at(-1)?.raw || null
 }, { immediate: true })
 
-onMounted(() => {
-  syncProfilesFromStorage()
+onMounted(async () => {
+  try { profitSnapshots.value = await fetchProfitSnapshots() } catch (error) { showToast(`历史收益同步失败：${error.message || '网络错误'}`) }
+  try {
+    profiles.value = await fetchAllocationProfiles()
+    syncProfilesFromStorage()
+  } catch (error) {
+    showToast(`策略同步失败：${error.message || '网络错误'}`)
+  }
   ensureFreshData({ force: true })
   if (typeof window !== 'undefined') {
     window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleProfilesUpdated)
   }
 })
 
-onActivated(() => {
-  syncProfilesFromStorage()
+onActivated(async () => {
+  try { profitSnapshots.value = await fetchProfitSnapshots() } catch { profitSnapshots.value = getProfitSnapshots() }
+  try {
+    profiles.value = await fetchAllocationProfiles()
+  } catch {
+    syncProfilesFromStorage()
+  }
   ensureFreshData()
 })
 
@@ -801,7 +810,6 @@ onBeforeUnmount(() => {
 
 .hero-card,
 .section,
-.cash-input-card,
 .position-card,
 .bucket-summary-card,
 .fund-row-card,
@@ -1285,22 +1293,131 @@ onBeforeUnmount(() => {
 
 .bucket-summary-card,
 .fund-row-card,
-.suggestion-card,
-.cash-input-card {
+.suggestion-card {
   padding: 12px;
 }
 
-.bucket-summary-card.low { border-left: 4px solid #f59e0b; }
-.bucket-summary-card.high { border-left: 4px solid #ef4444; }
-.bucket-summary-card.ok { border-left: 4px solid #10b981; }
+.bucket-summary-card {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 14px 13px;
+  border: 1px solid #edf1f7;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.055);
+}
 
-.bucket-summary-grid,
+.bucket-summary-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  content: '';
+}
+
+.bucket-summary-card.low::before { background: #f59e0b; }
+.bucket-summary-card.high::before { background: #ef4444; }
+.bucket-summary-card.ok::before { background: #10b981; }
+
+.bucket-summary-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bucket-status-pill {
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.bucket-status-pill.low { color: #b45309; background: #fff7ed; }
+.bucket-status-pill.high { color: #dc2626; background: #fef2f2; }
+.bucket-status-pill.ok { color: #047857; background: #ecfdf5; }
+
+.bucket-summary-value {
+  flex: none;
+  text-align: right;
+}
+
+.bucket-summary-value span {
+  display: block;
+  margin-bottom: 2px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.bucket-summary-value strong {
+  color: #0f172a;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
 .fund-row-grid,
 .trend-metrics-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 8px;
+}
+
+.bucket-ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 13px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.bucket-ratio-grid .bucket-summary-metric {
+  min-width: 0;
+  text-align: center;
+}
+
+.bucket-ratio-grid .small-label {
+  margin-bottom: 3px;
+  font-size: 10px;
+}
+
+.bucket-ratio-grid .small-value {
+  font-size: 14px;
+}
+
+.bucket-profit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.bucket-profit-item {
+  position: relative;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.bucket-profit-value {
+  margin-top: 3px;
+  padding-right: 42px;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-profit-rate {
+  position: absolute;
+  right: 10px;
+  bottom: 11px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .metric-card {
@@ -1352,32 +1469,13 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 
-.bucket-insight-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.bucket-insight-toolbar :deep(.van-field) {
-  flex: 1;
-  min-width: 160px;
-  background: #f8fafc;
-  border-radius: 12px;
-}
-
-.bucket-insight-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #64748b;
-}
-
 .bucket-card-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid #eef2f7;
 }
 
 .bucket-mini-action {
@@ -1501,11 +1599,6 @@ onBeforeUnmount(() => {
 .fund-status-tag.reduce { background: #fee2e2; color: #b91c1c; }
 .fund-status-tag.forbid { background: #e5e7eb; color: #374151; }
 
-.cash-input-label {
-  font-size: 13px;
-  color: #475569;
-  margin-bottom: 6px;
-}
 
 .suggestion-block + .suggestion-block {
   margin-top: 18px;

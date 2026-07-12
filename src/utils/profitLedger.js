@@ -1,4 +1,7 @@
+import { profitSnapshotApi } from '../api/index.js'
+
 const STORAGE_KEY = 'investment_profit_ledger_v1'
+const MIGRATED_KEY = 'investment_profit_ledger_server_migrated_v1'
 
 const safeNumber = (value) => {
   const num = Number(value)
@@ -106,6 +109,36 @@ export const getProfitSnapshots = ({ days } = {}) => {
   const startKey = toDateKey(start)
 
   return snapshots.filter(item => item.date >= startKey)
+}
+
+export const fetchProfitSnapshots = async () => {
+  const localSnapshots = getProfitSnapshots()
+  const data = await profitSnapshotApi.list()
+  let serverSnapshots = Array.isArray(data) ? data : data?.snapshots || []
+
+  if (typeof localStorage !== 'undefined' && !localStorage.getItem(MIGRATED_KEY) && localSnapshots.length) {
+    const serverDates = new Set(serverSnapshots.map(snapshot => snapshot.date))
+    const missingLocalSnapshots = localSnapshots.filter(snapshot => !serverDates.has(snapshot.date))
+    await Promise.all(missingLocalSnapshots.map(snapshot => profitSnapshotApi.save(snapshot)))
+    serverSnapshots = [...serverSnapshots, ...missingLocalSnapshots]
+    localStorage.setItem(MIGRATED_KEY, '1')
+  }
+
+  serverSnapshots.sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  writeStore(serverSnapshots)
+  return serverSnapshots
+}
+
+export const persistProfitSnapshot = async (snapshot) => {
+  await profitSnapshotApi.save(snapshot)
+  const snapshots = getProfitSnapshots()
+  const existingIndex = snapshots.findIndex(item => item.date === snapshot.date)
+  if (existingIndex >= 0) snapshots[existingIndex] = snapshot
+  else snapshots.push(snapshot)
+  snapshots.sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  writeStore(snapshots)
+  if (typeof localStorage !== 'undefined') localStorage.setItem(MIGRATED_KEY, '1')
+  return snapshot
 }
 
 export const getLatestProfitSnapshot = () => {

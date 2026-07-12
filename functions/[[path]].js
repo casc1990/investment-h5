@@ -29,6 +29,44 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+const ALLOCATION_ASSET_TYPES = new Set(['pure_bond', 'fixed_income', 'dividend', 'index', 'qdii', 'other']);
+const ALLOCATION_FUND_STATUSES = new Set(['保留', '观察', '可调出', '禁买']);
+
+export function validateAllocationProfile(profile = {}) {
+  const errors = [];
+  if (!String(profile.id || '').match(/^[\w-]+$/)) errors.push('策略ID无效');
+  const name = String(profile.name || '').trim();
+  if (!name) errors.push('策略名称不能为空');
+  if (name.length > 80) errors.push('策略名称不能超过80个字符');
+  if (String(profile.note || '').length > 500) errors.push('备注不能超过500个字符');
+  if (!Number.isFinite(Number(profile.totalAsset)) || Number(profile.totalAsset) <= 0) errors.push('组合总资产必须大于0');
+  if (!Number.isFinite(Number(profile.targetProfitRate))) errors.push('目标收益率无效');
+  const buckets = Array.isArray(profile.buckets) ? profile.buckets : [];
+  if (!buckets.length) errors.push('至少需要一个资产分类');
+  const bucketTypes = new Set();
+  let targetTotal = 0;
+  for (const bucket of buckets) {
+    if (!ALLOCATION_ASSET_TYPES.has(bucket?.assetType)) errors.push('存在无效资产分类');
+    if (bucketTypes.has(bucket?.assetType)) errors.push('资产分类不能重复');
+    bucketTypes.add(bucket?.assetType);
+    const targetPct = Number(bucket?.targetPct);
+    const maxDeviationPct = Number(bucket?.maxDeviationPct);
+    if (!Number.isFinite(targetPct) || targetPct < 0 || targetPct > 100) errors.push('目标比例必须在0到100之间');
+    if (!Number.isFinite(maxDeviationPct) || maxDeviationPct < 0 || maxDeviationPct > 100) errors.push('允许偏差必须在0到100之间');
+    targetTotal += Number.isFinite(targetPct) ? targetPct : 0;
+  }
+  if (Math.abs(targetTotal - 100) > 0.001) errors.push('目标比例合计必须等于100%');
+  const positionIds = new Set();
+  for (const fund of Array.isArray(profile.funds) ? profile.funds : []) {
+    if (!String(fund?.positionId || '')) errors.push('基金持仓ID不能为空');
+    if (positionIds.has(fund?.positionId)) errors.push('同一持仓不能重复纳入策略');
+    positionIds.add(fund?.positionId);
+    if (!ALLOCATION_ASSET_TYPES.has(fund?.assetType)) errors.push('基金资产分类无效');
+    if (!ALLOCATION_FUND_STATUSES.has(fund?.status || '保留')) errors.push('基金状态无效');
+  }
+  return [...new Set(errors)];
+}
+
 export function requiresAuthentication(path = '', method = 'GET') {
   const normalizedMethod = String(method || 'GET').toUpperCase();
   if (normalizedMethod === 'OPTIONS') return false;
@@ -1236,6 +1274,36 @@ export async function onRequest(context) {
               last_scanned_at INTEGER NOT NULL DEFAULT 0
             )
           `).run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS allocation_profiles (
+              id TEXT PRIMARY KEY,
+              profile_json TEXT NOT NULL,
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await ensureColumn('allocation_profiles', 'version', 'version INTEGER DEFAULT 1');
+          await ensureColumn('allocation_profiles', 'deleted_at', 'deleted_at INTEGER');
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS allocation_profile_audit_logs (
+              id TEXT PRIMARY KEY,
+              profile_id TEXT NOT NULL,
+              action TEXT NOT NULL,
+              version INTEGER NOT NULL,
+              profile_json TEXT,
+              created_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_allocation_audit_profile ON allocation_profile_audit_logs(profile_id, created_at DESC)').run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS profit_snapshots (
+              snapshot_date TEXT PRIMARY KEY,
+              snapshot_json TEXT NOT NULL,
+              captured_at INTEGER NOT NULL,
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
         })().catch(error => {
           runtimeSchemaInitPromise = null;
           throw error;
@@ -1699,6 +1767,119 @@ export async function onRequest(context) {
     }
 
     // ========== 事件中心 API ==========
+    // ========== 家庭共享配置策略 API ==========
+    if (path === '/api/allocation-profiles' && method === 'GET') {
+      const includeDeleted = url.searchParams.get('deleted') === 'true';
+      const { results } = await env.DB.prepare(
+        `SELECT profile_json, version, deleted_at FROM allocation_profiles ${includeDeleted ? 'WHERE deleted_at IS NOT NULL' : 'WHERE deleted_at IS NULL'} ORDER BY updated_at DESC, created_at DESC`
+      ).all();
+      const profiles = (results || []).map(row => {
+        try { return { ...JSON.parse(row.profile_json), version: Number(row.version || 1), deletedAt: row.deleted_at || null }; } catch { return null; }
+      }).filter(Boolean);
+      return jsonResponse({ code: 0, data: { profiles } });
+    }
+
+    if (path.match(/^\/api\/allocation-profiles\/[\w-]+$/) && method === 'PUT') {
+      const id = path.split('/').pop();
+      const body = await context.request.json();
+      const profile = body?.profile || body;
+      const errors = validateAllocationProfile(profile);
+      if (String(profile?.id || '') !== id) errors.push('策略ID与请求路径不一致');
+      if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
+      const fundIds = [...new Set((profile.funds || []).map(fund => fund.positionId))];
+      if (fundIds.length) {
+        const placeholders = fundIds.map(() => '?').join(',');
+        const { results: positionRows } = await env.DB.prepare(`SELECT id FROM positions WHERE id IN (${placeholders})`).bind(...fundIds).all();
+        const existingPositionIds = new Set((positionRows || []).map(row => row.id));
+        const missingPositionIds = fundIds.filter(positionId => !existingPositionIds.has(positionId));
+        if (missingPositionIds.length) return jsonResponse({ code: 400, message: '策略包含已删除或不存在的持仓', data: { missing_position_ids: missingPositionIds } }, 400);
+      }
+      const { results: existingRows } = await env.DB.prepare('SELECT version, deleted_at FROM allocation_profiles WHERE id = ?').bind(id).all();
+      const existing = existingRows[0] || null;
+      const expectedVersion = Number(body?.expectedVersion ?? profile.version ?? 0);
+      if (existing && Number(existing.version || 1) !== expectedVersion) {
+        return jsonResponse({ code: 409, message: '策略已在其他设备更新，请刷新后重试', data: { current_version: Number(existing.version || 1) } }, 409);
+      }
+      const nextVersion = existing ? Number(existing.version || 1) + 1 : 1;
+      const savedProfile = { ...profile, id, version: nextVersion, updatedAt: new Date().toISOString() };
+      const payload = JSON.stringify(savedProfile);
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO allocation_profiles (id, profile_json, version, deleted_at, created_at, updated_at)
+          VALUES (?, ?, ?, NULL, unixepoch(), unixepoch())
+          ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, version = excluded.version, deleted_at = NULL, updated_at = unixepoch()
+        `).bind(id, payload, nextVersion),
+        env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
+          .bind(generateId(), id, existing ? 'update' : 'create', nextVersion, payload),
+      ]);
+      return jsonResponse({ code: 0, data: { profile: savedProfile } });
+    }
+
+    if (path.match(/^\/api\/allocation-profiles\/[\w-]+$/) && method === 'DELETE') {
+      const id = path.split('/').pop();
+      const expectedVersion = Number(url.searchParams.get('version') || 0);
+      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND deleted_at IS NULL').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '配置策略不存在' }, 404);
+      const currentVersion = Number(results[0].version || 1);
+      if (expectedVersion !== currentVersion) return jsonResponse({ code: 409, message: '策略已在其他设备更新，请刷新后重试' }, 409);
+      await env.DB.batch([
+        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = unixepoch(), version = version + 1, updated_at = unixepoch() WHERE id = ?').bind(id),
+        env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
+          .bind(generateId(), id, 'delete', currentVersion + 1, results[0].profile_json),
+      ]);
+      return jsonResponse({ code: 0, message: '配置策略已删除' });
+    }
+
+    if (path.match(/^\/api\/allocation-profiles\/[\w-]+\/restore$/) && method === 'POST') {
+      const id = path.split('/')[3];
+      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND deleted_at IS NOT NULL').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '已删除策略不存在' }, 404);
+      const nextVersion = Number(results[0].version || 1) + 1;
+      await env.DB.batch([
+        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = NULL, version = ?, updated_at = unixepoch() WHERE id = ?').bind(nextVersion, id),
+        env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
+          .bind(generateId(), id, 'restore', nextVersion, results[0].profile_json),
+      ]);
+      return jsonResponse({ code: 0, message: '配置策略已恢复' });
+    }
+
+    if (path.match(/^\/api\/allocation-profiles\/[\w-]+\/audit-logs$/) && method === 'GET') {
+      const id = path.split('/')[3];
+      const { results } = await env.DB.prepare(
+        'SELECT id, profile_id, action, version, created_at FROM allocation_profile_audit_logs WHERE profile_id = ? ORDER BY created_at DESC LIMIT 100'
+      ).bind(id).all();
+      return jsonResponse({ code: 0, data: { logs: results || [] } });
+    }
+
+    if (path === '/api/profit-snapshots' && method === 'GET') {
+      const { results } = await env.DB.prepare(
+        'SELECT snapshot_json FROM profit_snapshots ORDER BY snapshot_date DESC'
+      ).all();
+      const snapshots = (results || []).map(row => {
+        try { return JSON.parse(row.snapshot_json); } catch { return null; }
+      }).filter(Boolean);
+      return jsonResponse({ code: 0, data: { snapshots } });
+    }
+
+    if (path.match(/^\/api\/profit-snapshots\/\d{4}-\d{2}-\d{2}$/) && method === 'PUT') {
+      const snapshotDate = path.split('/').pop();
+      const body = await context.request.json();
+      const snapshot = body?.snapshot || body;
+      if (!snapshot || String(snapshot.date || '') !== snapshotDate || !Array.isArray(snapshot.positions)) {
+        return jsonResponse({ code: 400, message: '收益快照数据无效' }, 400);
+      }
+      await env.DB.prepare(`
+        INSERT INTO profit_snapshots (snapshot_date, snapshot_json, captured_at, created_at, updated_at)
+        VALUES (?, ?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(snapshot_date) DO UPDATE SET
+          snapshot_json = excluded.snapshot_json,
+          captured_at = excluded.captured_at,
+          updated_at = unixepoch()
+        WHERE excluded.captured_at > profit_snapshots.captured_at
+      `).bind(snapshotDate, JSON.stringify(snapshot), Number(snapshot.captured_at || Date.now())).run();
+      return jsonResponse({ code: 0, data: { snapshot } });
+    }
+
     if (path === '/api/events' && method === 'GET') {
       await seedBusinessEvents();
       const group = url.searchParams.get('group') === 'confirmed' ? 'confirmed' : 'pending';

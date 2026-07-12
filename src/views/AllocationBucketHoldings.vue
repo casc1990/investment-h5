@@ -168,8 +168,8 @@ import {
   getAllocationPositionOwnerText,
 } from '../utils/allocation'
 import { buildFundPerformanceMap } from '../utils/fundPerformance'
-import { loadAllocationProfiles } from '../utils/allocationStorage'
-import { getProfitSnapshots } from '../utils/profitLedger'
+import { fetchAllocationProfiles, loadAllocationProfiles } from '../utils/allocationStorage'
+import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import { formatAmount, formatSignedAmount, formatPercent, profitClass } from '../utils/formatters'
 import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
 
@@ -180,6 +180,7 @@ const profiles = ref(loadAllocationProfiles())
 const positions = ref([])
 const loading = ref(false)
 const performanceMap = ref({})
+const profitSnapshots = ref(getProfitSnapshots())
 const PIE_COLORS = ['#4f46e5', '#0ea5e9', '#14b8a6', '#f97316', '#ef4444', '#a855f7', '#22c55e', '#f59e0b']
 
 const profileId = computed(() => String(route.params.profileId || ''))
@@ -215,7 +216,7 @@ const bucketTrendSeries = computed(() => {
   if (!currentProfile.value || !assetType.value) return []
   return buildAllocationBucketDailyProfitTrend({
     profile: currentProfile.value,
-    snapshots: getProfitSnapshots(),
+    snapshots: profitSnapshots.value,
     assetTypes: [assetType.value],
   })
 })
@@ -259,6 +260,8 @@ function openPositionDetail(positionId) {
 }
 
 onMounted(async () => {
+  try { profitSnapshots.value = await fetchProfitSnapshots() } catch (error) { showToast(`历史收益同步失败：${error.message || '网络错误'}`) }
+  try { profiles.value = await fetchAllocationProfiles() } catch (error) { showToast(`策略同步失败：${error.message || '网络错误'}`) }
   await fetchPositions()
   await fetchPerformance()
 })

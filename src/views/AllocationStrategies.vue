@@ -38,6 +38,17 @@
       </button>
     </div>
 
+    <div v-if="deletedProfiles.length" class="deleted-section">
+      <div class="deleted-title">最近删除</div>
+      <div v-for="profile in deletedProfiles" :key="profile.id" class="deleted-row">
+        <div>
+          <div class="strategy-name">{{ profile.name }}</div>
+          <div class="strategy-note">可恢复的配置策略</div>
+        </div>
+        <van-button size="small" round plain type="primary" @click="restoreProfile(profile.id)">恢复</van-button>
+      </div>
+    </div>
+
     <van-popup v-model:show="showProfilePopup" position="bottom" round class="profile-popup" safe-area-inset-bottom>
       <div class="popup-content">
         <div class="popup-title">新建配置策略</div>
@@ -69,6 +80,7 @@
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import { allocationProfileApi } from '../api'
 import {
   ALLOCATION_ASSET_TYPE_LABELS,
   createDefaultAllocationBuckets,
@@ -76,13 +88,15 @@ import {
 } from '../utils/allocation'
 import {
   ALLOCATION_PROFILES_UPDATED_EVENT,
+  fetchAllocationProfiles,
   loadAllocationProfiles,
-  saveAllocationProfiles,
+  persistAllocationProfiles,
   saveSelectedAllocationProfileId,
 } from '../utils/allocationStorage'
 
 const router = useRouter()
 const profiles = ref(loadAllocationProfiles())
+const deletedProfiles = ref([])
 const showProfilePopup = ref(false)
 const profileDraft = ref(createProfileDraft())
 
@@ -143,6 +157,22 @@ function syncProfilesFromStorage() {
   profiles.value = loadAllocationProfiles()
 }
 
+async function refreshDeletedProfiles() {
+  const data = await allocationProfileApi.listDeleted()
+  deletedProfiles.value = Array.isArray(data) ? data : data?.profiles || []
+}
+
+async function restoreProfile(profileId) {
+  try {
+    await allocationProfileApi.restore(profileId)
+    profiles.value = await fetchAllocationProfiles()
+    await refreshDeletedProfiles()
+    showToast('策略已恢复')
+  } catch (error) {
+    showToast(`恢复失败：${error?.response?.data?.message || error.message || '网络错误'}`)
+  }
+}
+
 function handleProfilesUpdated() {
   syncProfilesFromStorage()
 }
@@ -152,7 +182,7 @@ function goToProfile(profileId) {
   router.push(`/allocation/${profileId}`)
 }
 
-function saveProfileDraft() {
+async function saveProfileDraft() {
   if (!canSaveProfileDraft.value) {
     showToast('请先填写策略名称、组合总资产，并确保目标比例合计等于100%')
     return
@@ -174,24 +204,38 @@ function saveProfileDraft() {
     updatedAt: new Date().toISOString(),
   })
 
-  const nextProfiles = [...profiles.value, profile]
-  profiles.value = nextProfiles
-  saveAllocationProfiles(nextProfiles)
-  saveSelectedAllocationProfileId(profile.id)
-  showProfilePopup.value = false
-  showToast('策略已创建')
-  router.push(`/allocation/${profile.id}`)
+  const previousProfiles = profiles.value
+  const nextProfiles = [...previousProfiles, profile]
+  try {
+    profiles.value = await persistAllocationProfiles(nextProfiles, previousProfiles)
+    saveSelectedAllocationProfileId(profile.id)
+    showProfilePopup.value = false
+    showToast('策略已创建并同步')
+    router.push(`/allocation/${profile.id}`)
+  } catch (error) {
+    showToast(`策略保存失败：${error?.response?.data?.message || error.message || '网络错误'}`)
+  }
 }
 
-onMounted(() => {
-  syncProfilesFromStorage()
+onMounted(async () => {
+  try {
+    profiles.value = await fetchAllocationProfiles()
+    await refreshDeletedProfiles()
+  } catch (error) {
+    showToast(`策略同步失败：${error.message || '网络错误'}`)
+  }
   if (typeof window !== 'undefined') {
     window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleProfilesUpdated)
   }
 })
 
-onActivated(() => {
-  syncProfilesFromStorage()
+onActivated(async () => {
+  try {
+    profiles.value = await fetchAllocationProfiles()
+    await refreshDeletedProfiles()
+  } catch {
+    syncProfilesFromStorage()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -210,10 +254,32 @@ onBeforeUnmount(() => {
 
 .hero-card,
 .strategy-card,
-.empty-section {
+.empty-section,
+.deleted-section {
   background: #fff;
   border-radius: 20px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.deleted-section {
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.deleted-title {
+  margin-bottom: 10px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.deleted-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #eef2f7;
 }
 
 .hero-card,

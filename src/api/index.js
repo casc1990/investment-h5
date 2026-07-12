@@ -4,11 +4,12 @@
  */
 
 import axios from 'axios'
-import { shouldLogApi } from '../utils/appShell'
-import { unwrapApiPayload } from '../utils/apiResponse'
+import { shouldLogApi } from '../utils/appShell.js'
+import { unwrapApiPayload } from '../utils/apiResponse.js'
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
-const ENABLE_API_LOG = shouldLogApi(import.meta.env)
+const APP_ENV = import.meta.env || {}
+const BASE_URL = APP_ENV.VITE_API_BASE_URL || '/api'
+const ENABLE_API_LOG = shouldLogApi(APP_ENV)
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -146,6 +147,20 @@ export const statsApi = {
   overview: () => apiClient.get('/stats/overview'),
   positionDetail: (id) => apiClient.get(`/stats/position/${id}`),
   history: (params) => apiClient.get('/stats/history', { params }),
+}
+
+export const allocationProfileApi = {
+  list: () => apiClient.get('/allocation-profiles'),
+  save: (profile) => apiClient.put(`/allocation-profiles/${profile.id}`, { profile, expectedVersion: Number(profile.version || 0) }),
+  delete: (id, version) => apiClient.delete(`/allocation-profiles/${id}`, { params: { version } }),
+  listDeleted: () => apiClient.get('/allocation-profiles', { params: { deleted: true } }),
+  restore: (id) => apiClient.post(`/allocation-profiles/${id}/restore`),
+  auditLogs: (id) => apiClient.get(`/allocation-profiles/${id}/audit-logs`),
+}
+
+export const profitSnapshotApi = {
+  list: () => apiClient.get('/profit-snapshots'),
+  save: (snapshot) => apiClient.put(`/profit-snapshots/${snapshot.date}`, { snapshot }),
 }
 
 export default apiClient
