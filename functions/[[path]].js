@@ -163,20 +163,16 @@ function isQdiiFund(fundName = '') {
 
 export function getDailyProfitMeta(navDate, now = new Date(), fundName = '') {
   const chinaToday = getChinaDateString(now);
-  const previousChinaTradingDate = getPreviousChinaTradingDateString(now);
   const isTodayUpdated = Boolean(navDate) && navDate === chinaToday;
-  const isQdiiLatestUpdated = Boolean(navDate)
-    && !isTodayUpdated
-    && isQdiiFund(fundName)
-    && navDate === previousChinaTradingDate;
+  const isLatestUpdated = isFundNavUpdated({ navDate, fundName, now, mode: 'night' });
 
   return {
     daily_profit_label: isTodayUpdated ? '今日收益' : '昨日收益',
     daily_profit_rate_label: isTodayUpdated ? '今日收益率' : '昨日收益率',
-    daily_profit_updated: isTodayUpdated || isQdiiLatestUpdated,
+    daily_profit_updated: isLatestUpdated,
     daily_profit_update_text: isTodayUpdated
       ? '今日收益更新'
-      : (isQdiiLatestUpdated ? '最新收益已更新' : ''),
+      : (isLatestUpdated ? '最新收益已更新' : ''),
   };
 }
 
@@ -572,6 +568,10 @@ function normalizeBatchSize(value, defaultValue = 3) {
 export function getExpectedNavDateForSyncMode({ now = new Date(), mode = 'night' } = {}) {
   const normalizedMode = normalizeSyncMode(mode);
 
+  if (!isChinaTradingDay(now)) {
+    return getPreviousChinaTradingDateString(now);
+  }
+
   if (normalizedMode === 'night' && getChinaHour(now) < 21) {
     return getPreviousChinaTradingDateString(now);
   }
@@ -580,10 +580,36 @@ export function getExpectedNavDateForSyncMode({ now = new Date(), mode = 'night'
 }
 
 export function getExpectedNavDateForFund({ now = new Date(), mode = 'night', category = 'normal' } = {}) {
+  const normalExpectedDate = getExpectedNavDateForSyncMode({ now, mode });
   if (category === 'qdii') {
-    return getPreviousChinaTradingDateString(now);
+    const anchor = new Date(`${normalExpectedDate}T12:00:00+08:00`);
+    return getPreviousChinaTradingDateString(anchor);
   }
-  return getExpectedNavDateForSyncMode({ now, mode });
+  return normalExpectedDate;
+}
+
+export function isFundNavUpdated({ navDate = null, fundName = '', now = new Date(), mode = 'night' } = {}) {
+  if (!navDate) return false;
+  const category = isDelayedNavFund(fundName) ? 'qdii' : 'normal';
+  const expectedDate = getExpectedNavDateForFund({ now, mode, category });
+  return String(navDate) >= expectedDate;
+}
+
+export function summarizeFundNavFreshness({ positions = [], snapshotMap = {}, now = new Date() } = {}) {
+  const heldPositions = (positions || []).filter(position => Number(position.quantity || 0) > 0);
+  const fundNameMap = new Map(heldPositions.map(position => [position.fund_code, position.fund_name || '']));
+  const fundCodes = [...fundNameMap.keys()];
+  const updatedFundCount = fundCodes.filter(code => isFundNavUpdated({
+    navDate: snapshotMap[code]?.jzrq,
+    fundName: fundNameMap.get(code) || '',
+    now,
+    mode: 'night',
+  })).length;
+  return {
+    totalFundCount: fundCodes.length,
+    updatedFundCount,
+    staleFundCount: Math.max(0, fundCodes.length - updatedFundCount),
+  };
 }
 
 export function buildPendingFundList({
@@ -593,6 +619,8 @@ export function buildPendingFundList({
   mode = 'night',
   includeQdii = false,
 } = {}) {
+  if (!isChinaTradingDay(now)) return [];
+
   const snapshotMap = new Map(
     (snapshots || []).map(row => [String(row.fund_code || ''), row])
   );
@@ -2490,9 +2518,7 @@ export async function onRequest(context) {
       const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
       const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
       const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;
-      const updatedFundCount = dailyProfitDate
-        ? heldFundCodes.filter(code => snapshotMap[code]?.jzrq === dailyProfitDate).length
-        : 0;
+      const navFreshness = summarizeFundNavFreshness({ positions, snapshotMap, now: new Date() });
       const contributionMap = new Map();
       positions.forEach(position => {
         if (Number(position.quantity || 0) <= 0) return;
@@ -2530,9 +2556,9 @@ export async function onRequest(context) {
             totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
             totalCumulativeProfit: Number(totalCumulativeProfit.toFixed(2)),
             dailyProfitDate,
-            updatedFundCount,
-            totalFundCount: heldFundCodes.length,
-            staleFundCount: Math.max(0, heldFundCodes.length - updatedFundCount),
+            updatedFundCount: navFreshness.updatedFundCount,
+            totalFundCount: navFreshness.totalFundCount,
+            staleFundCount: navFreshness.staleFundCount,
           },
           members: memberStats,
           accounts: filteredAccounts,

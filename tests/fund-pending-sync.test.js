@@ -7,6 +7,7 @@ import {
   getExpectedNavDateForSyncMode,
   isChinaTradingDay,
   isPendingFundOverdue,
+  summarizeFundNavFreshness,
 } from '../functions/[[path]].js'
 
 test('事件净值比较只在中国交易日执行', () => {
@@ -26,14 +27,14 @@ test('上一交易日会跳过周末和节假日', () => {
 })
 
 test('夜间普通基金只返回未更新到当天的 pending 列表', () => {
-  const now = new Date('2026-06-21T13:30:00.000Z') // 北京时间 21:30
+  const now = new Date('2026-06-22T13:30:00.000Z') // 北京时间周一 21:30
   const positions = [
     { fund_code: '000001', fund_name: '普通债券A' },
     { fund_code: '000002', fund_name: '普通混合A' },
   ]
   const snapshots = [
-    { fund_code: '000001', jzrq: '2026-06-21' },
-    { fund_code: '000002', jzrq: '2026-06-20' },
+    { fund_code: '000001', jzrq: '2026-06-22' },
+    { fund_code: '000002', jzrq: '2026-06-18' },
   ]
 
   const pending = buildPendingFundList({
@@ -48,8 +49,8 @@ test('夜间普通基金只返回未更新到当天的 pending 列表', () => {
     {
       fund_code: '000002',
       fund_name: '普通混合A',
-      current_jzrq: '2026-06-20',
-      expected_jzrq: '2026-06-21',
+      current_jzrq: '2026-06-18',
+      expected_jzrq: '2026-06-22',
       category: 'normal',
       pending_reason: 'date_not_advanced',
     },
@@ -57,7 +58,7 @@ test('夜间普通基金只返回未更新到当天的 pending 列表', () => {
 })
 
 test('缺少快照的基金会进入 pending 列表', () => {
-  const now = new Date('2026-06-21T13:00:00.000Z')
+  const now = new Date('2026-06-22T13:00:00.000Z')
   const pending = buildPendingFundList({
     positions: [{ fund_code: '000003', fund_name: '中证红利A' }],
     snapshots: [],
@@ -71,7 +72,7 @@ test('缺少快照的基金会进入 pending 列表', () => {
       fund_code: '000003',
       fund_name: '中证红利A',
       current_jzrq: null,
-      expected_jzrq: '2026-06-21',
+      expected_jzrq: '2026-06-22',
       category: 'normal',
       pending_reason: 'missing_snapshot',
     },
@@ -92,7 +93,7 @@ test('夜间未开启 includeQdii 时跳过 QDII 基金', () => {
 })
 
 test('QDII 以最后一个交易日为目标日期，避免强求当天净值', () => {
-  const now = new Date('2026-06-21T14:30:00.000Z') // 北京时间 22:30
+  const now = new Date('2026-06-22T14:30:00.000Z') // 北京时间周一 22:30
   const pending = buildPendingFundList({
     positions: [{ fund_code: '019118', fund_name: '摩根标普500指数(QDII)C' }],
     snapshots: [{ fund_code: '019118', jzrq: '2026-06-17' }],
@@ -128,10 +129,39 @@ test('QDII 已更新到上一交易日时不再进入重试队列', () => {
 })
 
 test('morning / pre_report 模式都以当天为目标净值日期', () => {
-  const now = new Date('2026-06-21T00:30:00.000Z') // 北京时间 08:30
+  const now = new Date('2026-06-23T00:30:00.000Z') // 北京时间周二 08:30
 
-  assert.equal(getExpectedNavDateForSyncMode({ now, mode: 'morning' }), '2026-06-21')
-  assert.equal(getExpectedNavDateForSyncMode({ now, mode: 'pre_report' }), '2026-06-21')
+  assert.equal(getExpectedNavDateForSyncMode({ now, mode: 'morning' }), '2026-06-23')
+  assert.equal(getExpectedNavDateForSyncMode({ now, mode: 'pre_report' }), '2026-06-23')
+})
+
+test('周末和法定节假日不产生净值待更新列表', () => {
+  const positions = [{ fund_code: '000001', fund_name: '普通债券A' }]
+  const snapshots = [{ fund_code: '000001', jzrq: '2026-07-09' }]
+  assert.deepEqual(buildPendingFundList({ positions, snapshots, now: new Date('2026-07-11T04:00:00.000Z'), mode: 'night' }), [])
+  assert.deepEqual(buildPendingFundList({ positions, snapshots, now: new Date('2026-10-05T04:00:00.000Z'), mode: 'night' }), [])
+})
+
+test('周末首页进度把滞后一天的 QDII 计为已更新', () => {
+  const positions = [
+    ...Array.from({ length: 26 }, (_, index) => ({ fund_code: `N${index}`, fund_name: `国内基金${index}`, quantity: 1 })),
+    { fund_code: 'Q1', fund_name: '海外指数(QDII)A', quantity: 1 },
+    { fund_code: 'Q2', fund_name: '纳斯达克(QDII)C', quantity: 1 },
+  ]
+  const snapshotMap = Object.fromEntries([
+    ...Array.from({ length: 26 }, (_, index) => [`N${index}`, { jzrq: '2026-07-10' }]),
+    ['Q1', { jzrq: '2026-07-09' }],
+    ['Q2', { jzrq: '2026-07-09' }],
+  ])
+  assert.deepEqual(summarizeFundNavFreshness({
+    positions,
+    snapshotMap,
+    now: new Date('2026-07-11T00:17:00.000Z'),
+  }), {
+    totalFundCount: 28,
+    updatedFundCount: 28,
+    staleFundCount: 0,
+  })
 })
 
 test('普通基金深夜及次日早晨仍未更新时标记为超时', () => {

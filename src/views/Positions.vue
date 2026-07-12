@@ -9,8 +9,15 @@
         </van-dropdown-menu>
       </div>
       <van-button class="sync-all-btn" size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
-        {{ syncingAll ? '同步中...' : '同步净值' }}
+        {{ syncingAll ? syncProgressText : '同步净值' }}
       </van-button>
+    </div>
+
+    <div class="position-tools">
+      <van-dropdown-menu>
+        <van-dropdown-item v-model="statusFilter" :options="statusOptions" />
+        <van-dropdown-item v-model="sortKey" :options="sortOptions" />
+      </van-dropdown-menu>
     </div>
 
     <!-- 顶部统计卡片 -->
@@ -76,11 +83,14 @@
               <span class="collapsed-tags">
                 <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
                 <span class="account-tag">{{ position.account_name }}</span>
+                <span class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
+                  {{ getPositionNavStatus(position).label }}
+                </span>
               </span>
             </div>
             <div class="collapsed-data">
               <div class="collapsed-center">
-                <span class="collapsed-value">¥{{ formatAmount(Number(position.cost) + Number(position.current_profit)) }}</span>
+                <span class="collapsed-value">¥{{ formatAmount(getPositionMarketValue(position)) }}</span>
                 <span class="collapsed-yesterday" :class="{ positive: Number(position.daily_profit ?? position.yesterday_profit) >= 0, negative: Number(position.daily_profit ?? position.yesterday_profit) < 0 }">
                   {{ Number(position.daily_profit ?? position.yesterday_profit) >= 0 ? '+' : '' }}{{ formatAmount(position.daily_profit ?? position.yesterday_profit) }}
                 </span>
@@ -196,7 +206,10 @@
         </div>
       </div>
 
-      <van-empty v-if="!positions.length && !loading" description="暂无持仓，点击下方添加" />
+      <van-empty
+        v-if="!positions.length && !loading"
+        :description="positionsRaw.length ? '没有符合筛选条件的持仓' : '暂无持仓，点击下方添加'"
+      />
     </div>
 
     <!-- 加载状态 -->
@@ -329,9 +342,10 @@
 import { ref, computed, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { positionApi, accountApi, memberApi, marketApi } from '../api'
+import { positionApi, accountApi, memberApi, marketApi, fundApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+import { filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../utils/positionList'
 
 const router = useRouter()
 const route = useRoute()
@@ -340,15 +354,18 @@ const syncingId = ref(null)
 const syncingAll = ref(false)
 const loading = ref(false)
 const positionsRaw = ref([])
-const positions = computed(() =>
-  [...positionsRaw.value].sort((a, b) => Number(b.profit_rate || 0) - Number(a.profit_rate || 0))
-)
+const statusFilter = ref('all')
+const sortKey = ref('market_value_desc')
+const syncProgressText = ref('同步中...')
+const positions = computed(() => filterAndSortPositions(positionsRaw.value, {
+  status: statusFilter.value,
+  sort: sortKey.value,
+}))
 const expandedIds = ref([])
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
 const metaLastLoadedAt = ref(0)
 const metaLoadedOnce = ref(false)
-const summary = ref(null)
 const accounts = ref([])
 const members = ref([])
 const selectedMemberId = ref(null)
@@ -359,6 +376,21 @@ const showAccountPicker = ref(false)
 const showDividendPicker = ref(false)
 const editingPosition = ref(null)
 const summaryExpanded = ref(false)
+
+const statusOptions = [
+  { text: '全部状态', value: 'all' },
+  { text: '净值异常', value: 'abnormal' },
+  { text: '仅看亏损', value: 'loss' },
+  { text: '仅看盈利', value: 'profit' },
+]
+
+const sortOptions = [
+  { text: '市值排序', value: 'market_value_desc' },
+  { text: '日收益排序', value: 'daily_profit_desc' },
+  { text: '持有收益排序', value: 'holding_profit_desc' },
+  { text: '收益率排序', value: 'profit_rate_desc' },
+  { text: '基金名称排序', value: 'name_asc' },
+]
 
 const dividendOptions = [
   { text: '红利再投', value: '红利再投' },
@@ -447,10 +479,9 @@ const onAccountChange = () => {
   fetchPositions()
 }
 
-const updateSummary = () => {
+const summary = computed(() => {
   if (!positions.value.length) {
-    summary.value = null
-    return
+    return null
   }
   let totalMarketValue = 0
   let totalYesterdayProfit = 0
@@ -462,21 +493,21 @@ const updateSummary = () => {
     const currentProfit = parseFloat(pos.current_profit) || 0
     const yesterdayProfit = parseFloat(pos.yesterday_profit) || 0
     totalCost += cost
-    totalMarketValue += cost + currentProfit  // 当前市值 = 买入成本 + 持有收益
+    totalMarketValue += getPositionMarketValue(pos)
     totalYesterdayProfit += yesterdayProfit
     totalHoldingProfit += currentProfit
   })
 
   const totalProfitRate = totalCost > 0 ? (totalHoldingProfit / totalCost * 100) : 0
 
-  summary.value = {
+  return {
     totalMarketValue: Number(totalMarketValue.toFixed(2)),
     totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
     totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
     totalProfitRate: Number(totalProfitRate.toFixed(2)),
     totalCost: Number(totalCost.toFixed(2)),
   }
-}
+})
 
 const fetchMembers = async () => {
   try {
@@ -515,7 +546,6 @@ const fetchPositions = async () => {
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
     positionsRaw.value = (data?.positions || []).filter(position => position.account_channel !== '雪球顾投')
-    updateSummary()
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     showToast('加载失败')
@@ -552,7 +582,6 @@ const refreshPositionsUntilChanged = async (previousPositions, maxAttempts = 4) 
     const hasChanged = nextPositions.some(item => nextMap.get(item.id) !== previousMap.get(item.id))
 
     positionsRaw.value = nextPositions
-    updateSummary()
 
     if (hasChanged || nextPositions.length !== previousPositions.length || attempt === maxAttempts - 1) {
       return hasChanged
@@ -646,16 +675,27 @@ const handleSync = async (position) => {
 const handleSyncAll = async () => {
   if (syncingAll.value) return
   syncingAll.value = true
+  syncProgressText.value = '检查待更新...'
   try {
     const previousPositions = positionsRaw.value.map(item => ({ ...item }))
-    await marketApi.sync()
+    let totalSynced = 0
+    let totalPending = 0
+    for (let batch = 0; batch < 12; batch += 1) {
+      const result = await fundApi.syncPending({ mode: 'night', includeQdii: true, batchSize: 3 })
+      if (batch === 0) totalPending = Number(result?.total_pending_before_sync || 0)
+      totalSynced += Number(result?.synced || 0)
+      syncProgressText.value = totalPending > 0 ? `${Math.min(totalSynced, totalPending)}/${totalPending}` : '已是最新'
+      const advanced = Object.values(result?.results || {}).filter(item => item?.advanced).length
+      if (Number(result?.still_pending_count || 0) === 0 || advanced === 0) break
+    }
     const changed = await refreshPositionsUntilChanged(previousPositions, 4)
-    showToast(changed ? '全部基金净值已刷新' : '同步已提交，昨日收益可能有几秒延迟')
+    showToast(changed ? `已同步 ${totalSynced} 只基金` : '已检查，暂无可更新净值')
   } catch (error) {
     console.error('同步所有失败:', error)
     showToast('同步所有失败')
   } finally {
     syncingAll.value = false
+    syncProgressText.value = '同步中...'
   }
 }
 
@@ -675,9 +715,14 @@ const handleOpenDetail = (position) => {
 
 const handleDelete = async (position) => {
   try {
+    const tradeCount = Number(position.trade_count || 0)
     await showConfirmDialog({
-      title: '确认删除',
-      message: `确定要删除 "${position.fund_name}" 持仓吗？`,
+      title: '删除持仓及交易记录',
+      message: tradeCount > 0
+        ? `删除“${position.fund_name}”将同时永久删除 ${tradeCount} 条关联交易记录，且无法恢复。确定继续吗？`
+        : `确定永久删除“${position.fund_name}”持仓吗？此操作无法恢复。`,
+      confirmButtonText: '确认删除',
+      confirmButtonColor: '#ee0a24',
     })
     await positionApi.delete(position.id)
     showToast('删除成功')
@@ -821,6 +866,18 @@ onDeactivated(() => {
   height: 36px !important;
   line-height: 36px !important;
   flex-shrink: 0;
+}
+
+.position-tools {
+  margin: 8px 12px 0;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.position-tools :deep(.van-dropdown-menu__bar) {
+  height: 40px;
+  box-shadow: none;
 }
 
 /* 顶部统计卡片 */
@@ -994,6 +1051,29 @@ onDeactivated(() => {
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
+}
+
+.nav-status-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.nav-status-tag.is-success {
+  color: #198754;
+  background: #eaf8f0;
+}
+
+.nav-status-tag.is-warning {
+  color: #b26a00;
+  background: #fff3d6;
+}
+
+.nav-status-tag.is-danger {
+  color: #d93025;
+  background: #fdecea;
 }
 
 /* 中：持有金额 / 昨日收益 */
