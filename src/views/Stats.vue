@@ -3,15 +3,20 @@
     <div class="overview-card">
       <div class="header-row">
         <div>
-          <div class="asset-label">总资产(元)</div>
+          <div class="asset-label">总资产</div>
           <div class="asset-amount">{{ formatAmount(overview?.summary?.totalMarketValue || 0) }}</div>
         </div>
         <van-button class="stats-refresh-btn" size="small" round @click="handleRefresh">刷新数据</van-button>
       </div>
 
+      <div class="update-status-row">
+        <span>{{ profitDateLabel }}收益</span>
+        <span>{{ navUpdateText }}</span>
+      </div>
+
       <div class="profit-row">
         <div class="profit-item">
-          <div class="profit-label">昨日收益</div>
+          <div class="profit-label">{{ profitDateLabel }}收益</div>
           <div class="profit-value" :class="profitClass(overview?.summary?.totalPositionYesterdayProfit)">
             {{ formatSignedAmount(overview?.summary?.totalPositionYesterdayProfit || 0) }}
           </div>
@@ -26,20 +31,11 @@
             {{ formatSignedAmount(overview?.summary?.totalHoldingProfit || 0) }}
           </div>
         </div>
-        <div class="profit-divider"></div>
-        <div class="profit-item">
-          <div class="profit-label">累计收益</div>
-          <div class="profit-value" :class="profitClass(overview?.summary?.totalCumulativeProfit)">
-            {{ formatSignedAmount(overview?.summary?.totalCumulativeProfit || 0) }}
-          </div>
-        </div>
       </div>
 
-      <div class="profit-rate-bar">
-        <span class="rate-label">持仓收益率</span>
-        <span class="rate-value" :class="profitClass(overview?.summary?.totalProfitRate)">
-          {{ formatSignedPercent(overview?.summary?.totalProfitRate || 0) }}
-        </span>
+      <div class="profit-rate-bar overview-secondary-row">
+        <span><span class="rate-label">累计收益</span><strong :class="profitClass(overview?.summary?.totalCumulativeProfit)">{{ formatSignedAmount(overview?.summary?.totalCumulativeProfit || 0) }}</strong></span>
+        <span><span class="rate-label">持仓收益率</span><strong :class="profitClass(overview?.summary?.totalProfitRate)">{{ formatSignedPercent(overview?.summary?.totalProfitRate || 0) }}</strong></span>
       </div>
 
       <div class="analysis-nav">
@@ -79,17 +75,23 @@
         </button>
       </div>
 
-      <div class="chip-row type-row">
-        <button
-          v-for="item in fundTypeOptions"
-          :key="item.value"
-          class="pill-chip small"
-          :class="{ active: selectedFundType === item.value }"
-          @click="selectedFundType = item.value"
-        >
-          {{ item.text }}
-        </button>
+      <div class="scope-summary-row">
+        <span>当前：{{ activeScopeName }}</span>
+        <button class="text-button" @click="resetFilters">重置</button>
       </div>
+
+      <details class="advanced-filters">
+        <summary>更多筛选</summary>
+        <div class="chip-row type-row">
+          <button
+            v-for="item in fundTypeOptions"
+            :key="item.value"
+            class="pill-chip small"
+            :class="{ active: selectedFundType === item.value }"
+            @click="selectedFundType = item.value"
+          >{{ item.text }}</button>
+        </div>
+      </details>
 
       <div class="chip-row">
         <button
@@ -127,11 +129,16 @@
         </button>
       </div>
 
+      <div class="chip-row metric-switch-row">
+        <button class="pill-chip small" :class="{ active: trendMetric === 'amount' }" @click="trendMetric = 'amount'">收益金额</button>
+        <button class="pill-chip small" :class="{ active: trendMetric === 'rate' }" @click="trendMetric = 'rate'">收益率</button>
+      </div>
+
       <TrendChart
         :points="trendSeries"
         :summary-label="trendSummaryLabel"
-        :formatter="formatCurrencyValue"
-        :y-axis-formatter="formatCompactAmount"
+        :formatter="trendMetric === 'rate' ? formatSignedPercent : formatCurrencyValue"
+        :y-axis-formatter="trendMetric === 'rate' ? formatAxisPercent : formatCompactAmount"
         :show-zero-baseline="true"
         @select="handleTrendSelect"
       />
@@ -172,6 +179,16 @@
         </div>
       </div>
 
+      <div class="chip-row period-selector-row">
+        <button
+          v-for="item in periodOptions"
+          :key="`summary-${item.value}`"
+          class="pill-chip small"
+          :class="{ active: periodMode === item.value }"
+          @click="periodMode = item.value"
+        >{{ item.text }}</button>
+      </div>
+
       <div v-if="periodRows.length" class="period-list">
         <div v-for="row in visiblePeriodRows" :key="row.period_key" class="period-card">
           <div class="period-top">
@@ -210,50 +227,32 @@
       </div>
       <van-empty v-else description="周期数据还不够，先多积累几天快照" />
 
-      <div v-if="monthPeriodRows.length" class="subsection month-period-subsection">
-        <div class="section-header subsection-header">
-          <div>
-            <div class="section-title subsection-title">📅 月视角阶段表现</div>
-            <div class="section-subtitle">按月查看阶段收益、收益率和最大亏损</div>
-          </div>
-        </div>
-        <div class="period-list compact">
-          <div v-for="row in visibleMonthPeriodRows" :key="`month-${row.period_key}`" class="period-card">
-            <div class="period-top">
-              <div>
-                <div class="period-title">{{ row.period_label }}</div>
-                <div class="period-date">{{ row.start_date }} ~ {{ row.end_date }}</div>
-              </div>
-              <div class="period-amount">¥{{ formatAmount(row.total_market_value) }}</div>
-            </div>
-            <div class="period-grid">
-              <div>
-                <span class="small-label">当月收益</span>
-                <div class="small-value" :class="profitClass(row.period_profit)">{{ formatSignedAmount(row.period_profit) }}</div>
-              </div>
-              <div>
-                <span class="small-label">当月收益率</span>
-                <div class="small-value" :class="profitClass(row.period_profit_rate)">{{ formatSignedPercent(row.period_profit_rate) }}</div>
-              </div>
-              <div>
-                <span class="small-label">最大亏损</span>
-                <div class="small-value" :class="profitClass(row.period_max_drawdown)">{{ formatSignedAmount(row.period_max_drawdown) }}</div>
-              </div>
-              <div>
-                <span class="small-label">月末总收益率</span>
-                <div class="small-value" :class="profitClass(row.total_profit_rate)">{{ formatSignedPercent(row.total_profit_rate) }}</div>
-              </div>
-            </div>
-          </div>
-          <button
-            v-if="monthPeriodRows.length > 2"
-            class="more-button"
-            @click="handleMoreMonthPeriodRows"
-          >
-            查询更多（已显示 {{ visibleMonthPeriodRows.length }}/{{ monthPeriodRows.length }}）
-          </button>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🏆 收益贡献与拖累</div>
+          <div class="section-subtitle">按当前筛选范围统计基金日收益贡献</div>
         </div>
       </div>
+      <div v-if="contributionRows.contributors.length || contributionRows.detractors.length" class="contribution-columns">
+        <div class="contribution-group">
+          <div class="contribution-heading positive">贡献最高</div>
+          <div v-for="fund in contributionRows.contributors" :key="`gain-${fund.fund_code}`" class="contribution-item">
+            <div><div class="fund-name">{{ fund.fund_name }}</div><div class="period-date">{{ fund.account_name }} · {{ fund.contribution_share.toFixed(2) }}%</div></div>
+            <strong class="positive">{{ formatSignedAmount(fund.daily_profit) }}</strong>
+          </div>
+        </div>
+        <div class="contribution-group">
+          <div class="contribution-heading negative">拖累最大</div>
+          <div v-for="fund in contributionRows.detractors" :key="`loss-${fund.fund_code}`" class="contribution-item">
+            <div><div class="fund-name">{{ fund.fund_name }}</div><div class="period-date">{{ fund.account_name }} · {{ fund.contribution_share.toFixed(2) }}%</div></div>
+            <strong class="negative">{{ formatSignedAmount(fund.daily_profit) }}</strong>
+          </div>
+        </div>
+      </div>
+      <van-empty v-else description="当前筛选范围暂无日收益贡献数据" />
     </div>
 
     <div class="section">
@@ -378,27 +377,6 @@
       <van-empty v-else description="当前筛选下暂无基金数据" />
     </div>
 
-    <div class="section">
-      <div class="section-title">🤖 顾投组合</div>
-      <div class="position-list">
-        <div v-for="product in advisoryProducts" :key="product.id" class="position-item">
-          <div class="position-info">
-            <div class="fund-name">{{ product.product_name }}</div>
-            <div class="fund-meta">
-              <span class="fund-code">顾投组合</span>
-              <span v-if="product.member_name" class="member-tag">{{ product.member_emoji }} {{ product.member_name }}</span>
-              <span class="account-tag">{{ product.account_name || '未绑定账户' }}</span>
-            </div>
-          </div>
-          <div class="position-profit" :class="profitClass(product.current_profit)">
-            <div class="profit">{{ formatSignedAmount(product.current_profit) }}</div>
-            <div class="rate">{{ formatSignedPercent(product.profit_rate || 0) }}</div>
-          </div>
-        </div>
-        <van-empty v-if="!advisoryProducts.length" description="暂无顾投组合" />
-      </div>
-    </div>
-
     <van-loading v-if="loading" type="spinner" class="loading" />
   </div>
 </template>
@@ -415,6 +393,7 @@ import { getProfitSnapshots } from '../utils/profitLedger'
 import {
   buildAccountFilterOptions,
   buildCurrentFundRows,
+  buildProfitContributionRows,
   buildDailyHistoryRows,
   buildDisplayTrendSeries,
   buildFundSelectorOptions,
@@ -427,7 +406,6 @@ import {
 
 const loading = ref(false)
 const overview = ref(null)
-const advisoryProducts = ref([])
 const allSnapshots = ref([])
 const lastLoadedAt = ref(0)
 const hasLoadedOnce = ref(false)
@@ -438,6 +416,7 @@ const selectedFundType = ref('all')
 const selectedFundCode = ref('all')
 const selectedTrendRow = ref(null)
 const trendMode = ref('daily')
+const trendMetric = ref('amount')
 const dailyRange = ref(30)
 const periodMode = ref('week')
 const periodVisibleCountMap = ref({
@@ -449,7 +428,6 @@ const periodVisibleCountMap = ref({
 })
 const dailyHistoryDisplay = ref('card')
 const dailyHistoryVisibleCount = ref(2)
-const monthPeriodVisibleCount = ref(2)
 
 const analysisLinks = [
   { label: '统计', to: '/stats', icon: '📈' },
@@ -486,7 +464,6 @@ const fetchData = async () => {
   try {
     const data = await captureProfitSnapshotFromApis()
     overview.value = data.overview
-    advisoryProducts.value = data.advisoryProducts
     refreshSnapshots()
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
@@ -530,6 +507,15 @@ const activeScopeName = computed(() => {
   return parts.join(' / ')
 })
 const currentPeriodLabel = computed(() => periodOptions.find(item => item.value === periodMode.value)?.text || '周')
+const profitDateLabel = computed(() => {
+  const date = overview.value?.summary?.dailyProfitDate || allDailyHistoryRows.value?.[0]?.date || ''
+  return date ? String(date).slice(5).replace('-', '/') : '最近交易日'
+})
+const navUpdateText = computed(() => {
+  const updated = Number(overview.value?.summary?.updatedFundCount || 0)
+  const total = Number(overview.value?.summary?.totalFundCount || 0)
+  return total > 0 ? `${updated}/${total}只已更新` : '暂无净值进度'
+})
 const yesterdayProfitRate = computed(() => {
   const marketValue = Number(overview.value?.summary?.totalMarketValue) || 0
   const yesterdayProfit = Number(overview.value?.summary?.totalPositionYesterdayProfit) || 0
@@ -552,30 +538,27 @@ const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   fundType: selectedFundType.value,
   period: periodMode.value,
 }))
-const monthPeriodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
-  memberId: selectedMember.value,
-  accountId: selectedAccount.value,
-  fundType: selectedFundType.value,
-  period: 'month',
-}))
 const visiblePeriodRows = computed(() => {
   const count = periodVisibleCountMap.value[periodMode.value] || 2
   return periodRows.value.slice(0, count)
 })
-const visibleMonthPeriodRows = computed(() => monthPeriodRows.value.slice(0, monthPeriodVisibleCount.value))
 const currentFundRows = computed(() => buildCurrentFundRows(allSnapshots.value, {
   memberId: selectedMember.value,
   accountId: selectedAccount.value,
   fundType: selectedFundType.value,
   fundCode: selectedFundCode.value,
 }))
+const contributionRows = computed(() => buildProfitContributionRows(currentFundRows.value, 3))
 const trendRows = computed(() => (trendMode.value === 'daily' ? trendDailyRows.value : periodRows.value))
-const trendSummaryLabel = computed(() => (trendMode.value === 'daily' ? '所选日期日收益' : '所选周期阶段收益'))
+const trendSummaryLabel = computed(() => {
+  const suffix = trendMetric.value === 'rate' ? '收益率' : '收益'
+  return trendMode.value === 'daily' ? `所选日期${suffix}` : `所选周期阶段${suffix}`
+})
 const trendSeries = computed(() => {
   if (trendMode.value === 'daily') {
-    return buildDisplayTrendSeries(trendDailyRows.value, { metric: 'daily_profit', mode: 'daily' })
+    return buildDisplayTrendSeries(trendDailyRows.value, { metric: trendMetric.value === 'rate' ? 'daily_profit_rate' : 'daily_profit', mode: 'daily' })
   }
-  return buildTrendSeries(periodRows.value, { metric: 'period_profit', mode: 'period' })
+  return buildTrendSeries(periodRows.value, { metric: trendMetric.value === 'rate' ? 'period_profit_rate' : 'period_profit', mode: 'period' })
 })
 const selectedTrendDateLabel = computed(() => {
   if (!selectedTrendRow.value) return '-'
@@ -591,6 +574,7 @@ const formatSignedPercent = (value) => {
 }
 
 const formatCurrencyValue = (value) => `¥${formatAmount(value)}`
+const formatAxisPercent = (value) => `${Number(value || 0).toFixed(2)}%`
 
 const formatCompactAmount = (value) => {
   const num = Number(value) || 0
@@ -619,13 +603,6 @@ const handleMoreDailyHistoryRows = () => {
   })
 }
 
-const handleMoreMonthPeriodRows = () => {
-  monthPeriodVisibleCount.value = getNextLoopDisplayCount({
-    total: monthPeriodRows.value.length,
-    current: monthPeriodVisibleCount.value,
-  })
-}
-
 const handleCollapseDailyHistoryRows = () => {
   dailyHistoryVisibleCount.value = Math.min(2, dailyHistoryRows.value.length)
 }
@@ -649,8 +626,14 @@ watch(dailyHistoryRows, (rows) => {
 
 watch([selectedMember, selectedAccount, selectedFundType, selectedFundCode], () => {
   dailyHistoryVisibleCount.value = 2
-  monthPeriodVisibleCount.value = 2
 })
+
+const resetFilters = () => {
+  selectedMember.value = 'all'
+  selectedAccount.value = 'all'
+  selectedFundType.value = 'all'
+  selectedFundCode.value = 'all'
+}
 
 watch(memberOptions, (options) => {
   const exists = options.some(item => item.value === selectedMember.value)
@@ -707,7 +690,22 @@ onActivated(() => {
 
 .header-row {
   align-items: flex-start;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
+}
+
+.update-status-row,
+.scope-summary-row,
+.overview-secondary-row,
+.contribution-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.update-status-row {
+  margin-bottom: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
 }
 
 .stats-refresh-btn {
@@ -790,6 +788,16 @@ onActivated(() => {
   border-radius: 8px;
 }
 
+.overview-secondary-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.overview-secondary-row > span:last-child {
+  text-align: right;
+}
+
 .rate-value {
   font-size: 15px;
   font-weight: 700;
@@ -823,6 +831,38 @@ onActivated(() => {
   overflow-x: auto;
   padding-bottom: 4px;
   margin-bottom: 10px;
+}
+
+.scope-summary-row {
+  margin: 2px 0 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.text-button {
+  border: 0;
+  padding: 2px 0 2px 12px;
+  background: transparent;
+  color: #1e80ff;
+  font-size: 12px;
+}
+
+.advanced-filters {
+  margin-bottom: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.advanced-filters summary {
+  cursor: pointer;
+  padding: 4px 0 8px;
+}
+
+.advanced-filters .chip-row {
+  margin: 0;
 }
 
 .member-row,
@@ -919,6 +959,45 @@ onActivated(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.contribution-columns {
+  display: grid;
+  gap: 12px;
+}
+
+.contribution-group {
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.contribution-heading {
+  padding: 10px 12px;
+  background: #f8fbff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.contribution-item {
+  gap: 12px;
+  padding: 11px 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.contribution-item > div {
+  min-width: 0;
+}
+
+.contribution-item .fund-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contribution-item strong {
+  flex-shrink: 0;
+  font-family: 'Courier New', monospace;
 }
 
 .subsection {

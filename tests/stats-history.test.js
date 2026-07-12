@@ -11,9 +11,24 @@ import {
   buildFundTypeFilterOptions,
   buildFundSelectorOptions,
   buildCurrentFundRows,
+  buildProfitContributionRows,
   getNextLoopDisplayCount,
   getDailyProfitUpdateStatus,
 } from '../src/utils/statsHistory.js'
+
+test('收益贡献榜分别输出贡献和拖累基金及占比', () => {
+  const result = buildProfitContributionRows([
+    { fund_code: 'A', daily_profit: 30 },
+    { fund_code: 'B', daily_profit: -50 },
+    { fund_code: 'C', daily_profit: 20 },
+    { fund_code: 'D', daily_profit: 0 },
+  ], 2)
+
+  assert.deepEqual(result.contributors.map(item => item.fund_code), ['A', 'C'])
+  assert.deepEqual(result.detractors.map(item => item.fund_code), ['B'])
+  assert.equal(result.contributors[0].contribution_share, 30)
+  assert.equal(result.detractors[0].contribution_share, 50)
+})
 
 const snapshots = [
   {

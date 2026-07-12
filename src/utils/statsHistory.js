@@ -563,6 +563,25 @@ export const buildCurrentFundRows = (snapshots = [], { memberId = 'all', account
   })).sort((a, b) => b.total_market_value - a.total_market_value)
 }
 
+export const buildProfitContributionRows = (fundRows = [], limit = 3) => {
+  const rows = (fundRows || []).map(item => ({
+    ...item,
+    daily_profit: Number(safeNumber(item.daily_profit).toFixed(2)),
+  }))
+  const absoluteTotal = rows.reduce((sum, item) => sum + Math.abs(item.daily_profit), 0)
+  const withShare = rows.map(item => ({
+    ...item,
+    contribution_share: absoluteTotal > 0
+      ? Number(((Math.abs(item.daily_profit) / absoluteTotal) * 100).toFixed(2))
+      : 0,
+  }))
+
+  return {
+    contributors: withShare.filter(item => item.daily_profit > 0).sort((a, b) => b.daily_profit - a.daily_profit).slice(0, limit),
+    detractors: withShare.filter(item => item.daily_profit < 0).sort((a, b) => a.daily_profit - b.daily_profit).slice(0, limit),
+  }
+}
+
 export const getNextLoopDisplayCount = ({ total = 0, current = 2, initial = 2, batch = 10 } = {}) => {
   const safeTotal = Math.max(0, Number(total) || 0)
   if (safeTotal <= 0) return 0
