@@ -23,4 +23,5 @@ test('持仓支持市值和日收益排序并生成净值状态', () => {
   assert.deepEqual(filterAndSortPositions(positions, { sort: 'daily_profit_desc' }).map(item => item.id), ['2', '1'])
   assert.equal(getPositionNavStatus(positions[1]).label, '净值待更新')
   assert.equal(getPositionNavStatus({ sync_state: 'error' }).key, 'error')
+  assert.equal(getPositionNavStatus({ nav_update_status: 'idle' }).key, 'updated')
 })

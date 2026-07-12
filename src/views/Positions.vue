@@ -6,6 +6,7 @@
         <van-dropdown-menu>
           <van-dropdown-item v-model="selectedMemberId" :title="selectedMemberTitle" :options="memberOptions" @change="onMemberChange" />
           <van-dropdown-item v-model="selectedAccountId" :title="selectedAccountTitle" :options="filteredAccountOptions" @change="onAccountChange" />
+          <van-dropdown-item v-model="viewOption" title="筛选排序" :options="viewOptions" />
         </van-dropdown-menu>
       </div>
       <van-button class="sync-all-btn" size="small" type="primary" :loading="syncingAll" :disabled="syncingAll" @click="handleSyncAll">
@@ -13,24 +14,15 @@
       </van-button>
     </div>
 
-    <div class="position-tools">
-      <van-dropdown-menu>
-        <van-dropdown-item v-model="statusFilter" :options="statusOptions" />
-        <van-dropdown-item v-model="sortKey" :options="sortOptions" />
-      </van-dropdown-menu>
-    </div>
-
     <!-- 顶部统计卡片 -->
     <div class="summary-card" v-if="summary">
-      <div class="summary-header" @click="summaryExpanded = !summaryExpanded">
+      <div class="summary-header">
         <div class="summary-asset">
           <div class="summary-label">总资产(元)</div>
           <div class="summary-amount">{{ formatAmount(summary.totalMarketValue) }}</div>
-          <div class="summary-hint">{{ summaryExpanded ? '收起统计' : '展开统计' }}</div>
         </div>
-        <van-icon :name="summaryExpanded ? 'arrow-up' : 'arrow-down'" class="summary-toggle-icon" />
       </div>
-      <div v-if="summaryExpanded" class="summary-profit-row">
+      <div class="summary-profit-row">
         <div class="summary-profit-item">
           <div class="sp-label">日收益</div>
           <div class="sp-value" :class="{ positive: summary.totalYesterdayProfit >= 0, negative: summary.totalYesterdayProfit < 0 }">
@@ -83,7 +75,7 @@
               <span class="collapsed-tags">
                 <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
                 <span class="account-tag">{{ position.account_name }}</span>
-                <span class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
+                <span v-if="position.is_trading_day" class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
                   {{ getPositionNavStatus(position).label }}
                 </span>
               </span>
@@ -96,7 +88,7 @@
                 </span>
               </div>
               <div class="collapsed-right">
-                <span v-if="position.daily_profit_updated" class="profit-update-badge">
+                <span v-if="position.is_trading_day && position.daily_profit_updated" class="profit-update-badge">
                   {{ position.daily_profit_update_text || '今日收益更新' }}
                 </span>
                 <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
@@ -140,7 +132,7 @@
             <div class="data-item">
               <span class="data-label">
                 {{ position.daily_profit_label || '昨日收益' }}
-                <span v-if="position.daily_profit_updated" class="profit-update-badge inline">
+                <span v-if="position.is_trading_day && position.daily_profit_updated" class="profit-update-badge inline">
                   {{ position.daily_profit_update_text || '今日收益更新' }}
                 </span>
               </span>
@@ -354,12 +346,21 @@ const syncingId = ref(null)
 const syncingAll = ref(false)
 const loading = ref(false)
 const positionsRaw = ref([])
-const statusFilter = ref('all')
-const sortKey = ref('market_value_desc')
+const viewOption = ref('market_value_desc')
 const syncProgressText = ref('同步中...')
+const viewModeConfig = computed(() => ({
+  abnormal: { status: 'abnormal', sort: 'market_value_desc' },
+  loss: { status: 'loss', sort: 'market_value_desc' },
+  profit: { status: 'profit', sort: 'market_value_desc' },
+  market_value_desc: { status: 'all', sort: 'market_value_desc' },
+  daily_profit_desc: { status: 'all', sort: 'daily_profit_desc' },
+  holding_profit_desc: { status: 'all', sort: 'holding_profit_desc' },
+  profit_rate_desc: { status: 'all', sort: 'profit_rate_desc' },
+  name_asc: { status: 'all', sort: 'name_asc' },
+}[viewOption.value] || { status: 'all', sort: 'market_value_desc' }))
 const positions = computed(() => filterAndSortPositions(positionsRaw.value, {
-  status: statusFilter.value,
-  sort: sortKey.value,
+  status: viewModeConfig.value.status,
+  sort: viewModeConfig.value.sort,
 }))
 const expandedIds = ref([])
 const lastLoadedAt = ref(0)
@@ -375,21 +376,15 @@ const showMemberPicker = ref(false)
 const showAccountPicker = ref(false)
 const showDividendPicker = ref(false)
 const editingPosition = ref(null)
-const summaryExpanded = ref(false)
-
-const statusOptions = [
-  { text: '全部状态', value: 'all' },
+const viewOptions = [
+  { text: '按市值排序', value: 'market_value_desc' },
+  { text: '按日收益排序', value: 'daily_profit_desc' },
+  { text: '按持有收益排序', value: 'holding_profit_desc' },
+  { text: '按收益率排序', value: 'profit_rate_desc' },
+  { text: '按基金名称排序', value: 'name_asc' },
   { text: '净值异常', value: 'abnormal' },
   { text: '仅看亏损', value: 'loss' },
   { text: '仅看盈利', value: 'profit' },
-]
-
-const sortOptions = [
-  { text: '市值排序', value: 'market_value_desc' },
-  { text: '日收益排序', value: 'daily_profit_desc' },
-  { text: '持有收益排序', value: 'holding_profit_desc' },
-  { text: '收益率排序', value: 'profit_rate_desc' },
-  { text: '基金名称排序', value: 'name_asc' },
 ]
 
 const dividendOptions = [
@@ -862,22 +857,24 @@ onDeactivated(() => {
   height: 36px;
 }
 
+.filter-dropdowns :deep(.van-dropdown-menu__item) {
+  min-width: 0;
+}
+
+.filter-dropdowns :deep(.van-dropdown-menu__title) {
+  max-width: 92px;
+  padding: 0 10px 0 4px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sync-all-btn {
   height: 36px !important;
   line-height: 36px !important;
   flex-shrink: 0;
-}
-
-.position-tools {
-  margin: 8px 12px 0;
-  overflow: hidden;
-  background: #fff;
-  border-radius: 12px;
-}
-
-.position-tools :deep(.van-dropdown-menu__bar) {
-  height: 40px;
-  box-shadow: none;
+  padding: 0 10px !important;
 }
 
 /* 顶部统计卡片 */

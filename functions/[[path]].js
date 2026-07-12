@@ -1025,10 +1025,14 @@ export async function onRequest(context) {
         prevNav,
       });
       const navDate = r.nav_jzrq || null;
-      const dailyProfitMeta = getDailyProfitMeta(navDate, new Date(), r.fund_name || '');
+      const positionNow = new Date();
+      const tradingDay = isChinaTradingDay(positionNow);
+      const dailyProfitMeta = getDailyProfitMeta(navDate, positionNow, r.fund_name || '');
       const navCategory = isDelayedNavFund(r.fund_name || '') ? 'qdii' : 'normal';
-      const expectedNavDate = getExpectedNavDateForFund({ now: new Date(), mode: 'night', category: navCategory });
-      const navUpdateStatus = r.sync_state === 'error'
+      const expectedNavDate = getExpectedNavDateForFund({ now: positionNow, mode: 'night', category: navCategory });
+      const navUpdateStatus = !tradingDay
+        ? 'idle'
+        : r.sync_state === 'error'
         ? 'error'
         : (navDate && navDate >= expectedNavDate ? 'updated' : 'waiting');
 
@@ -1055,6 +1059,7 @@ export async function onRequest(context) {
         daily_profit_rate_label: dailyProfitMeta.daily_profit_rate_label,
         daily_profit_updated: dailyProfitMeta.daily_profit_updated,
         daily_profit_update_text: dailyProfitMeta.daily_profit_update_text,
+        is_trading_day: tradingDay,
         initial_profit: r.initial_profit || 0,
         realized_profit: r.realized_profit || 0,
         cash_dividend: r.cash_dividend || 0,
