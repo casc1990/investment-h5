@@ -50,5 +50,4 @@ fi
 echo "[deploy] wrangler pages deploy -> ${PROJECT_NAME} (${PRODUCTION_BRANCH})"
 npx wrangler pages deploy dist \
   --project-name="${PROJECT_NAME}" \
-  --branch="${PRODUCTION_BRANCH}" \
-  --commit-dirty=true
+  --branch="${PRODUCTION_BRANCH}"
