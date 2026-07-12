@@ -308,17 +308,17 @@ watch(selectedPoint, (point) => {
 
 .chart-body {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   align-items: stretch;
 }
 
 .y-axis-labels {
-  width: 56px;
+  width: 42px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 4px 0 26px;
-  font-size: 11px;
+  font-size: 10px;
   color: #8a94a6;
   text-align: right;
   flex-shrink: 0;
@@ -380,7 +380,7 @@ watch(selectedPoint, (point) => {
 }
 
 .reference-axis-label {
-  max-width: 52px;
+  max-width: 40px;
   text-align: right;
 }
 

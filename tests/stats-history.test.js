@@ -12,6 +12,7 @@ import {
   buildFundSelectorOptions,
   buildCurrentFundRows,
   buildProfitContributionRows,
+  buildPeriodProfitContributionRows,
   getNextLoopDisplayCount,
   getDailyProfitUpdateStatus,
 } from '../src/utils/statsHistory.js'
@@ -28,6 +29,23 @@ test('收益贡献榜分别输出贡献和拖累基金及占比', () => {
   assert.deepEqual(result.detractors.map(item => item.fund_code), ['B'])
   assert.equal(result.contributors[0].contribution_share, 30)
   assert.equal(result.detractors[0].contribution_share, 50)
+})
+
+test('收益贡献榜可按快照时间区间累计基金贡献与拖累', () => {
+  const rangedSnapshots = [
+    { date: '2026-07-10', positions: [
+      { fund_code: 'A', fund_name: '基金A', account_id: 'one', account_name: '账户一', yesterday_profit: 10, nav_jzrq: '2026-07-10' },
+      { fund_code: 'B', fund_name: '基金B', account_id: 'one', account_name: '账户一', yesterday_profit: -8, nav_jzrq: '2026-07-10' },
+    ] },
+    { date: '2026-07-11', positions: [
+      { fund_code: 'A', fund_name: '基金A', account_id: 'one', account_name: '账户一', yesterday_profit: 20, nav_jzrq: '2026-07-11' },
+      { fund_code: 'B', fund_name: '基金B', account_id: 'one', account_name: '账户一', yesterday_profit: -2, nav_jzrq: '2026-07-11' },
+    ] },
+  ]
+  const result = buildPeriodProfitContributionRows(rangedSnapshots, { days: 7 })
+  assert.equal(result.contributors[0].daily_profit, 30)
+  assert.equal(result.detractors[0].daily_profit, -10)
+  assert.equal(result.contributors[0].contribution_share, 75)
 })
 
 const snapshots = [

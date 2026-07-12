@@ -582,6 +582,53 @@ export const buildProfitContributionRows = (fundRows = [], limit = 3) => {
   }
 }
 
+export const buildPeriodProfitContributionRows = (snapshots = [], {
+  memberId = 'all',
+  accountId = 'all',
+  fundType = 'all',
+  days = 30,
+  limit = 3,
+} = {}) => {
+  const latestByFundDate = new Map()
+  const sorted = [...snapshots].sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  const selectedDates = [...new Set(sorted.map(item => String(item.date || '')).filter(Boolean))].slice(0, Math.max(1, Number(days) || 30))
+  const selectedDateSet = new Set(selectedDates)
+
+  sorted.filter(snapshot => selectedDateSet.has(String(snapshot.date || ''))).forEach((snapshot) => {
+    filterSnapshotPositions(snapshot, { memberId, accountId, fundType })
+      .filter(item => !isAdvisoryPosition(item))
+      .forEach((item) => {
+        const profitDate = String(item.nav_jzrq || snapshot.date || '')
+        const fundKey = item.fund_code || item.fund_name || item.id
+        const accountKey = item.account_id || item.account_name || ''
+        const key = `${profitDate}::${accountKey}::${fundKey}`
+        if (!latestByFundDate.has(key)) latestByFundDate.set(key, item)
+      })
+  })
+
+  const grouped = new Map()
+  latestByFundDate.forEach((item) => {
+    const key = item.fund_code || item.fund_name || item.id
+    const existing = grouped.get(key) || {
+      fund_code: item.fund_code,
+      fund_name: item.fund_name,
+      accountNames: new Set(),
+      daily_profit: 0,
+    }
+    if (item.account_name) existing.accountNames.add(item.account_name)
+    existing.daily_profit += safeNumber(item.yesterday_profit)
+    grouped.set(key, existing)
+  })
+
+  const rows = Array.from(grouped.values()).map(item => ({
+    fund_code: item.fund_code,
+    fund_name: item.fund_name,
+    account_name: item.accountNames.size <= 1 ? (Array.from(item.accountNames)[0] || '') : `${item.accountNames.size}个账户`,
+    daily_profit: Number(item.daily_profit.toFixed(2)),
+  }))
+  return buildProfitContributionRows(rows, limit)
+}
+
 export const getNextLoopDisplayCount = ({ total = 0, current = 2, initial = 2, batch = 10 } = {}) => {
   const safeTotal = Math.max(0, Number(total) || 0)
   if (safeTotal <= 0) return 0
