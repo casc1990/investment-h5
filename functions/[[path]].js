@@ -729,6 +729,23 @@ export function buildPendingFundList({
   return pending;
 }
 
+export function buildNavEventPendingFundList({
+  positions = [],
+  snapshots = [],
+  now = new Date(),
+  includeQdii = true,
+} = {}) {
+  const chinaDate = getChinaDateString(now);
+  const nextDayCheckTime = new Date(`${chinaDate}T08:00:00+08:00`);
+  return buildPendingFundList({
+    positions,
+    snapshots,
+    now: nextDayCheckTime,
+    mode: 'night',
+    includeQdii,
+  });
+}
+
 export function isPendingFundOverdue(fund = {}, now = new Date()) {
   if (Number(fund.consecutive_failures || 0) > 0 || fund.sync_state === 'error') return true;
 
@@ -1333,17 +1350,28 @@ export async function onRequest(context) {
       `).run();
 
       const now = new Date();
+      await env.DB.prepare(`
+        DELETE FROM events
+        WHERE event_type = 'nav_update' AND status = 'pending' AND source_type = 'fund_nav'
+      `).run();
       if (!isChinaTradingDay(now)) {
-        await env.DB.prepare(`
-          DELETE FROM events
-          WHERE event_type = 'nav_update' AND status = 'pending' AND source_type = 'fund_nav'
-        `).run();
+        // 周末和休市日不比较净值。
       } else {
-        const expectedDate = getExpectedNavDateForSyncMode({ now, mode: 'night' });
-        const pendingFunds = await getPendingFunds(env, { now, mode: 'night', includeQdii: true });
+        const { results: navPositions } = await env.DB.prepare(
+          'SELECT DISTINCT fund_code, fund_name FROM positions WHERE fund_code IS NOT NULL AND fund_code != ""'
+        ).all();
+        const { results: navSnapshots } = await env.DB.prepare(
+          'SELECT fund_code, jzrq FROM market_snapshot'
+        ).all();
+        const pendingFunds = buildNavEventPendingFundList({
+          positions: navPositions,
+          snapshots: navSnapshots,
+          now,
+          includeQdii: true,
+        });
         for (const fund of pendingFunds) {
           const detail = JSON.stringify({
-            target_nav_date: expectedDate,
+            target_nav_date: fund.expected_jzrq,
             current_nav_date: fund.current_jzrq || null,
             category: fund.category || 'normal',
           });
@@ -1355,7 +1383,7 @@ export async function onRequest(context) {
           `).bind(
             generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
             `最新净值仍停留在 ${fund.current_jzrq || '未知日期'}，可能影响今日收益统计。`,
-            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${expectedDate}`, detail,
+            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${fund.expected_jzrq}`, detail,
           ).run();
         }
       }

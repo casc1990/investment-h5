@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildNavEventPendingFundList,
   buildPendingFundList,
   getExpectedNavDateForFund,
   getExpectedNavDateForSyncMode,
@@ -9,6 +10,33 @@ import {
   isPendingFundOverdue,
   summarizeFundNavFreshness,
 } from '../functions/[[path]].js'
+
+test('净值事件在交易日当天晚上不比较当天净值', () => {
+  const pending = buildNavEventPendingFundList({
+    positions: [{ fund_code: '000001', fund_name: '普通混合A' }],
+    snapshots: [{ fund_code: '000001', jzrq: '2026-07-10' }],
+    now: new Date('2026-07-13T14:30:00.000Z'), // 北京时间周一 22:30
+  })
+
+  assert.deepEqual(pending, [])
+})
+
+test('次日凌晨仍未更新时才生成净值待处理事件', () => {
+  const pending = buildNavEventPendingFundList({
+    positions: [{ fund_code: '000001', fund_name: '普通混合A' }],
+    snapshots: [{ fund_code: '000001', jzrq: '2026-07-10' }],
+    now: new Date('2026-07-13T16:30:00.000Z'), // 北京时间周二 00:30
+  })
+
+  assert.deepEqual(pending, [{
+    fund_code: '000001',
+    fund_name: '普通混合A',
+    current_jzrq: '2026-07-10',
+    expected_jzrq: '2026-07-13',
+    category: 'normal',
+    pending_reason: 'date_not_advanced',
+  }])
+})
 
 test('事件净值比较只在中国交易日执行', () => {
   assert.equal(isChinaTradingDay(new Date('2026-07-10T04:00:00.000Z')), true)
