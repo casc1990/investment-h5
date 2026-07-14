@@ -4,7 +4,7 @@
     <div class="account-list">
       <div v-for="account in accounts" :key="account.id" class="account-card">
         <div class="account-header">
-          <div class="account-icon"><span>{{ getChannelIcon(account.channel) }}</span></div>
+          <div class="account-icon"><span>{{ account.emoji || getChannelIcon(account.channel) }}</span></div>
           <div class="account-info">
             <div class="account-name">{{ account.account_name }}</div>
             <div class="account-channel">{{ account.channel }}</div>
@@ -38,7 +38,7 @@
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <van-popup v-model:show="showAddModal" position="bottom" round>
+    <van-popup v-model:show="showAddModal" position="bottom" round teleport="body" safe-area-inset-bottom :z-index="11000" :overlay-style="{ zIndex: 10999 }" class="management-editor-popup">
       <div class="modal-content">
         <div class="modal-title">{{ editingAccount ? '✏️ 编辑账户' : '➕ 添加账户' }}</div>
 
@@ -50,6 +50,20 @@
               placeholder="如：支付宝-主账户"
               :rules="[{ required: true, message: '请输入账户名称' }]"
             />
+            <van-cell title="账户头像" label="选择一个便于识别的图标" class="avatar-cell">
+              <template #value>
+                <div class="emoji-picker account-emoji-picker">
+                  <button
+                    v-for="emoji in accountEmojiList"
+                    :key="emoji"
+                    type="button"
+                    class="emoji-option"
+                    :class="{ selected: formData.emoji === emoji }"
+                    @click="formData.emoji = emoji"
+                  >{{ emoji }}</button>
+                </div>
+              </template>
+            </van-cell>
             <van-field
               v-model="formData.channel"
               is-link
@@ -86,7 +100,7 @@
     </van-popup>
 
     <!-- 渠道选择器 -->
-    <van-popup v-model:show="showChannelPicker" position="bottom">
+    <van-popup v-model:show="showChannelPicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker
         :columns="channelOptions"
         @confirm="onChannelConfirm"
@@ -95,7 +109,7 @@
     </van-popup>
 
     <!-- 成员选择器 -->
-    <van-popup v-model:show="showMemberPicker" position="bottom">
+    <van-popup v-model:show="showMemberPicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker
         :columns="memberOptions"
         @confirm="onMemberConfirm"
@@ -130,7 +144,10 @@ const formData = ref({
   memberId: '',
   memberName: '',
   remark: '',
+  emoji: '',
 })
+
+const accountEmojiList = ['💳', '💰', '👛', '🏦', '🏧', '📈', '📊', '💎', '🪙', '💵', '🧧', '🛡️', '🌱', '⭐', '🏠', '✈️']
 
 const channelOptions = [
   { text: '支付宝', value: '支付宝' },
@@ -208,6 +225,7 @@ const openAddModal = () => {
     memberId: '',
     memberName: '',
     remark: '',
+    emoji: '💳',
   }
   showAddModal.value = true
 }
@@ -221,6 +239,7 @@ const handleEdit = (account) => {
     memberId: account.member_id || '',
     memberName: account.member_name || '',
     remark: account.remark || '',
+    emoji: account.emoji || getChannelIcon(account.channel),
   }
   showAddModal.value = true
 }
@@ -258,6 +277,7 @@ const handleSubmit = async () => {
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
         member_id: formData.value.memberId || null,
+        emoji: formData.value.emoji || '',
       })
       showSuccessToast('更新成功')
     } else {
@@ -266,6 +286,7 @@ const handleSubmit = async () => {
         channel: formData.value.channel,
         remark: formData.value.remark?.trim() || '',
         member_id: formData.value.memberId || null,
+        emoji: formData.value.emoji || '',
       })
       showSuccessToast('添加成功')
     }
@@ -293,7 +314,7 @@ const closeModal = () => {
   showAddModal.value = false
   editingAccount.value = null
   editingAccountMemberId.value = null
-  formData.value = { accountName: '', channel: '', memberId: '', memberName: '', remark: '' }
+  formData.value = { accountName: '', channel: '', memberId: '', memberName: '', remark: '', emoji: '' }
 }
 
 onMounted(() => {
@@ -463,7 +484,33 @@ onActivated(() => {
 }
 
 .modal-content {
-  padding: 20px;
+  max-height: min(82vh, 720px);
+  overflow-y: auto;
+  padding: 20px 20px calc(22px + env(safe-area-inset-bottom));
+}
+
+.avatar-cell :deep(.van-cell__value) { flex: 1.7; }
+
+.emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 42px);
+  justify-content: end;
+  gap: 8px;
+}
+
+.emoji-option {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #e8edf4;
+  border-radius: 12px;
+  background: #f6f8fb;
+  font-size: 23px;
+}
+
+.emoji-option.selected {
+  border-color: #1e80ff;
+  background: #eaf4ff;
+  box-shadow: 0 0 0 2px rgba(30, 128, 255, 0.12);
 }
 
 .modal-title {

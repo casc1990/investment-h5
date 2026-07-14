@@ -32,7 +32,7 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { accountApi, memberApi } from '../api'
+import apiClient, { accountApi, memberApi } from '../api'
 import Accounts from './Accounts.vue'
 import Members from './Members.vue'
 
@@ -53,6 +53,7 @@ watch(() => [route.path, route.query.tab], ([path, tab]) => {
 
 onMounted(async () => {
   try {
+    await apiClient.post('/migrate')
     const [accountData, memberData] = await Promise.all([accountApi.list(), memberApi.list()])
     accounts.value = accountData?.accounts || []
     members.value = memberData?.members || []

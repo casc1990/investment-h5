@@ -1102,6 +1102,7 @@ export async function onRequest(context) {
         channel: r.channel,
         status: r.status,
         remark: r.remark || '',
+        emoji: r.emoji || '',
         member_id: r.member_id,
         member_name: r.member_name || '',
         created_at: r.created_at,
@@ -2099,10 +2100,11 @@ export async function onRequest(context) {
       const status = body.status || '正常';
       const remark = body.remark || '';
       const member_id = body.member_id || null;
+      const emoji = body.emoji || '';
 
       await env.DB.prepare(
-        'INSERT INTO accounts (id, name, channel, status, remark, member_id) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(id, name, channel, status, remark, member_id).run();
+        'INSERT INTO accounts (id, name, channel, status, remark, member_id, emoji) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, name, channel, status, remark, member_id, emoji).run();
 
       return jsonResponse({ code: 0, data: serializeAccountRow({
         id,
@@ -2110,6 +2112,7 @@ export async function onRequest(context) {
         channel,
         status,
         remark,
+        emoji,
         member_id,
         member_name: '',
         created_at: Math.floor(Date.now() / 1000),
@@ -2146,6 +2149,7 @@ export async function onRequest(context) {
       const status = body.status;
       const remark = body.remark;
       const member_id = body.member_id;
+      const emoji = body.emoji;
 
       const fields = [];
       const values = [];
@@ -2154,6 +2158,7 @@ export async function onRequest(context) {
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
       if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
       if (member_id !== undefined) { fields.push('member_id = ?'); values.push(member_id); }
+      if (emoji !== undefined) { fields.push('emoji = ?'); values.push(emoji); }
 
       if (fields.length > 0) {
         values.push(id);
@@ -2918,6 +2923,12 @@ export async function onRequest(context) {
 
         if (!hasEmoji) {
           await env.DB.prepare('ALTER TABLE members ADD COLUMN emoji TEXT DEFAULT "👤"').run();
+        }
+
+        const accountTableInfo = await env.DB.prepare('PRAGMA table_info(accounts)').all();
+        const hasAccountEmoji = accountTableInfo.results.some(col => col.name === 'emoji');
+        if (!hasAccountEmoji) {
+          await env.DB.prepare("ALTER TABLE accounts ADD COLUMN emoji TEXT DEFAULT ''").run();
         }
 
         // market_snapshot 表：加 prev_nav（前日净值）、last_nav（上次同步时的净值）、last_gszzl（上次同步时的涨跌幅）

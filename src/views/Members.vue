@@ -39,7 +39,7 @@
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <van-popup v-model:show="showModal" position="bottom" round>
+    <van-popup v-model:show="showModal" position="bottom" round teleport="body" safe-area-inset-bottom :z-index="11000" :overlay-style="{ zIndex: 10999 }" class="management-editor-popup">
       <div class="modal-content">
         <div class="modal-title">{{ editingMember ? '✏️ 编辑成员' : '➕ 添加成员' }}</div>
 
@@ -54,13 +54,14 @@
             <van-cell title="选择头像">
               <template #value>
                 <div class="emoji-picker">
-                  <span
+                  <button
                     v-for="emoji in emojiList"
                     :key="emoji"
+                    type="button"
                     class="emoji-option"
                     :class="{ selected: formData.emoji === emoji }"
                     @click="formData.emoji = emoji"
-                  >{{ emoji }}</span>
+                  >{{ emoji }}</button>
                 </div>
               </template>
             </van-cell>
@@ -97,7 +98,7 @@ const formData = ref({
   emoji: '👤',
 })
 
-const emojiList = ['👤', '👨', '👩', '👴', '👵', '👦', '👧', '🧑', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '🐱', '🐶', '🦊', '🐼']
+const emojiList = ['👤', '🧑', '👨', '👩', '👴', '👵', '👦', '👧', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '🧔', '👱‍♀️', '🦸', '🧚', '🐱', '🐶', '🦊', '🐼']
 
 const formatDate = (timestamp) => {
   if (!timestamp) return '-'
@@ -209,7 +210,7 @@ const handleSubmit = async () => {
 const closeModal = () => {
   showModal.value = false
   editingMember.value = null
-  formData.value = { name: '' }
+  formData.value = { name: '', emoji: '👤' }
 }
 
 onMounted(() => {
@@ -353,7 +354,9 @@ onActivated(() => {
 }
 
 .modal-content {
-  padding: 20px;
+  max-height: min(82vh, 720px);
+  overflow-y: auto;
+  padding: 20px 20px calc(22px + env(safe-area-inset-bottom));
 }
 
 .modal-title {
@@ -364,17 +367,22 @@ onActivated(() => {
 }
 
 .emoji-picker {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, 42px);
+  justify-content: end;
   gap: 8px;
   padding: 8px 0;
 }
 
 .emoji-option {
-  font-size: 24px;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #e8edf4;
+  font-size: 23px;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  padding: 0;
+  border-radius: 12px;
+  background: #f6f8fb;
   transition: background 0.2s;
 }
 
@@ -383,8 +391,9 @@ onActivated(() => {
 }
 
 .emoji-option.selected {
-  background: #e6f4ff;
-  box-shadow: 0 0 0 2px #1677ff;
+  border-color: #1e80ff;
+  background: #eaf4ff;
+  box-shadow: 0 0 0 2px rgba(30, 128, 255, 0.12);
 }
 
 .modal-actions {
