@@ -4,12 +4,10 @@
     <div class="member-list">
       <div v-for="member in members" :key="member.id" class="member-card">
         <div class="member-main">
-          <div class="member-avatar">{{ member.emoji || '👤' }}</div>
+          <div class="member-avatar"><span>{{ member.emoji || '👤' }}</span></div>
           <div class="member-info">
             <div class="member-name">{{ member.name }}</div>
-            <div class="member-meta">
-              创建于 {{ formatDate(member.created_at) }}
-            </div>
+            <div class="member-meta">创建于 {{ formatDate(member.created_at) }}</div>
           </div>
           <div class="member-stats">
             <div class="stat-item">
@@ -19,8 +17,8 @@
           </div>
         </div>
         <div class="member-actions">
-          <van-button size="small" type="primary" @click="handleEdit(member)">编辑</van-button>
-          <van-button size="small" type="danger" @click="handleDelete(member)">删除</van-button>
+          <button class="card-action edit" @click="handleEdit(member)"><van-icon name="edit" />编辑</button>
+          <button class="card-action delete" @click="handleDelete(member)"><van-icon name="delete-o" />删除</button>
         </div>
       </div>
 
@@ -228,7 +226,7 @@ onActivated(() => {
 <style scoped>
 .members-page {
   min-height: 100vh;
-  background: #f5f5f5;
+  background: transparent;
   padding: 12px;
   padding-bottom: var(--app-floating-page-space);
 }
@@ -236,13 +234,15 @@ onActivated(() => {
 .member-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .member-card {
   background: white;
-  border-radius: 12px;
-  padding: 16px;
+  border: 1px solid #e9edf3;
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 5px 18px rgba(45, 69, 100, 0.05);
 }
 
 .member-main {
@@ -252,8 +252,13 @@ onActivated(() => {
 }
 
 .member-avatar {
-  font-size: 48px;
-  line-height: 1;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 15px;
+  background: #f1f6ff;
+  font-size: 27px;
 }
 
 .member-info {
@@ -263,28 +268,32 @@ onActivated(() => {
 .member-name {
   font-weight: 600;
   font-size: 17px;
-  color: #333;
+  color: #20293a;
 }
 
 .member-meta {
   font-size: 12px;
-  color: #999;
+  color: #8b96a8;
   margin-top: 4px;
 }
 
 .member-stats {
   display: flex;
-  gap: 16px;
+  gap: 8px;
 }
 
 .stat-item {
   text-align: center;
+  min-width: 48px;
+  padding: 7px 9px;
+  border-radius: 11px;
+  background: #f4f8ff;
 }
 
 .stat-value {
   font-weight: 600;
   font-size: 14px;
-  color: #333;
+  color: #1e80ff;
 }
 
 .stat-label {
@@ -294,11 +303,26 @@ onActivated(() => {
 }
 
 .member-actions {
-  margin-top: 12px;
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f5;
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
+
+.card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 4px 7px;
+  background: transparent;
+  font-size: 12px;
+}
+
+.card-action.edit { color: #397ee8; }
+.card-action.delete { color: #a1a9b5; }
 
 .loading {
   display: block;
@@ -315,9 +339,9 @@ onActivated(() => {
 .add-btn {
   height: 42px;
   padding: 0 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1e80ff 0%, #536be9 100%);
   border: none;
-  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+  box-shadow: 0 10px 24px rgba(30, 128, 255, 0.25);
 }
 
 .add-btn-content {

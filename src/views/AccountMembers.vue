@@ -1,11 +1,16 @@
 <template>
   <div class="account-members-page">
     <div class="management-header">
-      <div>
+      <div class="header-copy">
+        <div class="header-eyebrow">资产归属管理</div>
         <div class="management-title">成员与账户</div>
         <div class="management-subtitle">统一管理家庭成员及其名下投资账户</div>
       </div>
-      <div class="summary-pill">{{ members.length }} 位成员 · {{ accounts.length }} 个账户</div>
+      <div class="management-summary">
+        <div><strong>{{ members.length }}</strong><span>成员</span></div>
+        <i></i>
+        <div><strong>{{ accounts.length }}</strong><span>账户</span></div>
+      </div>
     </div>
 
     <div class="management-tabs" role="tablist" aria-label="成员与账户管理">
@@ -60,49 +65,93 @@ onMounted(async () => {
 <style scoped>
 .account-members-page {
   min-height: 100vh;
-  background: #f5f5f5;
-  padding-top: 12px;
+  background: linear-gradient(180deg, #eef5ff 0, #f6f7f9 210px);
+  padding-top: 10px;
 }
 
 .management-header {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 12px 10px;
-  padding: 15px 16px;
-  border-radius: 14px;
-  color: #fff;
-  background: linear-gradient(135deg, #1e80ff, #5b67e8);
+  margin: 0 12px 12px;
+  padding: 18px;
+  border: 1px solid rgba(116, 159, 219, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 30px rgba(55, 94, 145, 0.08);
+}
+
+.header-copy {
+  min-width: 0;
+}
+
+.header-eyebrow {
+  margin-bottom: 5px;
+  color: #1e80ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 
 .management-title {
-  font-size: 19px;
-  font-weight: 700;
+  color: #172033;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
 }
 
 .management-subtitle {
   margin-top: 4px;
-  font-size: 11px;
-  opacity: 0.82;
+  color: #8490a3;
+  font-size: 12px;
 }
 
-.summary-pill {
+.management-summary {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 10px;
   flex-shrink: 0;
-  padding: 6px 9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  font-size: 11px;
+  padding: 9px 11px;
+  border-radius: 13px;
+  background: #f4f8ff;
+}
+
+.management-summary div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 30px;
+}
+
+.management-summary strong {
+  color: #1e80ff;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.management-summary span {
+  margin-top: 4px;
+  color: #8b96a8;
+  font-size: 10px;
+}
+
+.management-summary i {
+  width: 1px;
+  height: 24px;
+  background: #dce6f4;
 }
 
 .management-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  margin: 0 12px;
+  margin: 0 12px 2px;
   padding: 4px;
-  border-radius: 12px;
-  background: #e9edf3;
+  border: 1px solid #e4eaf2;
+  border-radius: 14px;
+  background: rgba(239, 243, 248, 0.9);
 }
 
 .management-tabs button {
@@ -110,11 +159,11 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 42px;
+  height: 44px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 11px;
   background: transparent;
-  color: #64748b;
+  color: #758196;
   font-size: 15px;
   font-weight: 600;
 }
@@ -130,7 +179,7 @@ onMounted(async () => {
 .management-tabs button.active {
   background: #fff;
   color: #1e80ff;
-  box-shadow: 0 2px 8px rgba(37, 59, 91, 0.1);
+  box-shadow: 0 3px 10px rgba(37, 59, 91, 0.09);
 }
 
 .management-tabs button.active span {
@@ -146,6 +195,6 @@ onMounted(async () => {
 
 @media (max-width: 380px) {
   .management-subtitle { display: none; }
-  .summary-pill { font-size: 10px; }
+  .management-header { padding: 15px; }
 }
 </style>

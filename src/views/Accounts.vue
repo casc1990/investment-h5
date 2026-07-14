@@ -4,25 +4,20 @@
     <div class="account-list">
       <div v-for="account in accounts" :key="account.id" class="account-card">
         <div class="account-header">
-          <div class="account-icon">{{ getChannelIcon(account.channel) }}</div>
+          <div class="account-icon"><span>{{ getChannelIcon(account.channel) }}</span></div>
           <div class="account-info">
             <div class="account-name">{{ account.account_name }}</div>
             <div class="account-channel">{{ account.channel }}</div>
           </div>
-          <div class="account-status" :class="account.status === '正常' ? 'active' : 'inactive'">
-            {{ account.status }}
-          </div>
+          <div class="account-status" :class="account.status === '正常' ? 'active' : 'inactive'"><i></i>{{ account.status }}</div>
         </div>
-        <div class="account-remark" v-if="account.remark">
-          📝 {{ account.remark }}
-        </div>
-        <!-- 成员标签 -->
-        <div class="account-member" v-if="account.member_name">
-          <span class="member-tag">{{ getMemberEmoji(account.member_id) }} {{ account.member_name }}</span>
+        <div class="account-details">
+          <span class="member-tag" :class="{ unassigned: !account.member_name }">{{ account.member_name ? `${getMemberEmoji(account.member_id)} ${account.member_name}` : '未分配成员' }}</span>
+          <span v-if="account.remark" class="account-remark"><van-icon name="notes-o" />{{ account.remark }}</span>
         </div>
         <div class="account-actions">
-          <van-button size="small" type="primary" @click="handleEdit(account)">编辑</van-button>
-          <van-button size="small" type="danger" @click="handleDelete(account)">删除</van-button>
+          <button class="card-action edit" @click="handleEdit(account)"><van-icon name="edit" />编辑</button>
+          <button class="card-action delete" @click="handleDelete(account)"><van-icon name="delete-o" />删除</button>
         </div>
       </div>
 
@@ -313,7 +308,7 @@ onActivated(() => {
 <style scoped>
 .accounts-page {
   min-height: 100vh;
-  background: #f5f5f5;
+  background: transparent;
   padding: 12px;
   padding-bottom: var(--app-floating-page-space);
 }
@@ -321,13 +316,15 @@ onActivated(() => {
 .account-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .account-card {
   background: white;
-  border-radius: 12px;
-  padding: 16px;
+  border: 1px solid #e9edf3;
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 5px 18px rgba(45, 69, 100, 0.05);
 }
 
 .account-header {
@@ -337,7 +334,13 @@ onActivated(() => {
 }
 
 .account-icon {
-  font-size: 36px;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 14px;
+  background: #f1f6ff;
+  font-size: 25px;
 }
 
 .account-info {
@@ -347,20 +350,25 @@ onActivated(() => {
 .account-name {
   font-weight: 600;
   font-size: 16px;
-  color: #333;
+  color: #20293a;
 }
 
 .account-channel {
   font-size: 13px;
-  color: #999;
+  color: #8b96a8;
   margin-top: 2px;
 }
 
 .account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 10px;
   border-radius: 12px;
   font-size: 12px;
 }
+
+.account-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 .account-status.active {
   background: #e6f7ed;
@@ -372,33 +380,59 @@ onActivated(() => {
   color: #999;
 }
 
-.account-remark {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #666;
-  padding-left: 48px;
-}
-
-.account-member {
-  margin-top: 8px;
-  padding-left: 48px;
+.account-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  padding-left: 58px;
+  min-width: 0;
 }
 
 .member-tag {
   display: inline-block;
-  padding: 2px 8px;
-  background: #e8f0fe;
+  padding: 4px 9px;
+  background: #edf5ff;
   color: #1a73e8;
-  border-radius: 4px;
+  border-radius: 999px;
   font-size: 12px;
 }
 
+.member-tag.unassigned { color: #8b96a8; background: #f1f3f6; }
+
+.account-remark {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: #8b96a8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .account-actions {
-  margin-top: 12px;
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f5;
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
+
+.card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 4px 7px;
+  background: transparent;
+  font-size: 12px;
+}
+
+.card-action.edit { color: #397ee8; }
+.card-action.delete { color: #a1a9b5; }
 
 .loading {
   display: block;
@@ -415,9 +449,9 @@ onActivated(() => {
 .add-btn {
   height: 42px;
   padding: 0 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1e80ff 0%, #536be9 100%);
   border: none;
-  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.28);
+  box-shadow: 0 10px 24px rgba(30, 128, 255, 0.25);
 }
 
 .add-btn-content {
