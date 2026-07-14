@@ -297,6 +297,45 @@ export function parsePingzhongdataNetWorth(text = '') {
   }
 }
 
+export function parseEastmoneyHistoricalSnapshot(payload = '') {
+  let parsed = payload;
+  if (typeof payload === 'string') {
+    try {
+      parsed = JSON.parse(payload);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const rows = Array.isArray(parsed?.Data?.LSJZList) ? parsed.Data.LSJZList : [];
+  const normalizedRows = rows
+    .map((row) => {
+      const rawChangeRate = String(row?.JZZZL ?? '').trim();
+      return {
+        nav: Number(row?.DWJZ),
+        navDate: String(row?.FSRQ || '').split(' ')[0],
+        changeRate: rawChangeRate ? Number(rawChangeRate) : Number.NaN,
+      };
+    })
+    .filter((row) => row.nav > 0 && /^\d{4}-\d{2}-\d{2}$/.test(row.navDate))
+    .sort((a, b) => b.navDate.localeCompare(a.navDate));
+
+  const latest = normalizedRows[0];
+  if (!latest) return null;
+
+  const previous = normalizedRows.find((row) => row.navDate < latest.navDate);
+  const calculatedChangeRate = previous?.nav > 0
+    ? Number((((latest.nav - previous.nav) / previous.nav) * 100).toFixed(4))
+    : null;
+
+  return {
+    nav: latest.nav,
+    navDate: latest.navDate,
+    prevNAV: previous?.nav || null,
+    changeRate: Number.isFinite(latest.changeRate) ? latest.changeRate : calculatedChangeRate,
+  };
+}
+
 
 function parsePingzhongdataJsonVar(text, varName) {
   const source = String(text || '');
@@ -622,6 +661,54 @@ export function mergeFundEstimateIntoSnapshot({
   return merged;
 }
 
+export function mergeConfirmedHistoricalSnapshot({
+  nav = null,
+  navDate = null,
+  gszzl = null,
+  prev_nav = null,
+  dwjz = null,
+  historicalSnapshot = null,
+} = {}) {
+  const merged = { nav, navDate, gszzl, prev_nav, dwjz };
+  const confirmedNav = Number(historicalSnapshot?.nav || 0);
+  const confirmedDate = String(historicalSnapshot?.navDate || '');
+  if (!(confirmedNav > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(confirmedDate)) return merged;
+
+  const currentDate = String(navDate || '');
+  if (currentDate && confirmedDate < currentDate) return merged;
+
+  const historicalPrevNav = Number(historicalSnapshot?.prevNAV || 0);
+  const rawHistoricalChangeRate = historicalSnapshot?.changeRate;
+  const historicalChangeRate = rawHistoricalChangeRate !== null
+    && rawHistoricalChangeRate !== undefined
+    && rawHistoricalChangeRate !== ''
+    ? Number(rawHistoricalChangeRate)
+    : Number.NaN;
+  const fallbackPrevNav = Number(dwjz || nav || prev_nav || 0);
+  const nextPrevNav = historicalPrevNav > 0 ? historicalPrevNav : fallbackPrevNav;
+  const fallbackChangeRate = nextPrevNav > 0
+    ? Number((((confirmedNav - nextPrevNav) / nextPrevNav) * 100).toFixed(4))
+    : gszzl;
+
+  if (!currentDate || confirmedDate > currentDate) {
+    return {
+      nav: confirmedNav,
+      navDate: confirmedDate,
+      gszzl: Number.isFinite(historicalChangeRate) ? historicalChangeRate : fallbackChangeRate,
+      prev_nav: nextPrevNav || prev_nav,
+      dwjz: confirmedNav,
+    };
+  }
+
+  return {
+    ...merged,
+    nav: Number(nav || 0) > 0 ? nav : confirmedNav,
+    gszzl: Number.isFinite(historicalChangeRate) ? historicalChangeRate : gszzl,
+    prev_nav: nextPrevNav || prev_nav,
+    dwjz: confirmedNav,
+  };
+}
+
 function getChinaHour(date = new Date()) {
   const hour = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Shanghai',
@@ -792,7 +879,7 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
   let dwjz = null;
   let name = fundNameFallback || '';
 
-  const [res2, resGz] = await Promise.all([
+  const [res2, resGz, resHistory] = await Promise.all([
     fetch(`https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
     }),
@@ -801,7 +888,13 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         'Referer': 'http://fundgz.1234567.com.cn/'
       }
-    })
+    }),
+    fetch(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${fundCode}&pageIndex=1&pageSize=2&startDate=&endDate=`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Referer': 'https://fundf10.eastmoney.com/'
+      }
+    }).catch(() => null)
   ]);
 
   const text2 = await res2.text();
@@ -842,6 +935,23 @@ async function syncOneFundSnapshot(env, fundCode, fundNameFallback = '') {
         dwjz = mergedSnapshot.dwjz || dwjz;
       }
     } catch (_) {}
+  }
+
+  if (resHistory?.ok) {
+    const historicalSnapshot = parseEastmoneyHistoricalSnapshot(await resHistory.text());
+    const mergedSnapshot = mergeConfirmedHistoricalSnapshot({
+      nav,
+      navDate,
+      gszzl,
+      prev_nav,
+      dwjz,
+      historicalSnapshot,
+    });
+    nav = mergedSnapshot.nav;
+    navDate = mergedSnapshot.navDate;
+    gszzl = mergedSnapshot.gszzl;
+    prev_nav = mergedSnapshot.prev_nav;
+    dwjz = mergedSnapshot.dwjz;
   }
 
   const { results: oldSnap } = await env.DB.prepare(
@@ -3064,7 +3174,7 @@ export async function onRequest(context) {
         const fundNameMap = {};
         allPositions.forEach(p => { fundNameMap[p.fund_code] = p.fund_name || ''; });
 
-        // 2. 批量调 pingzhongdata + fundgz 实时估算（并行）
+        // 2. 批量调 pingzhongdata、fundgz 实时估算及 F10 历史净值（并行）
         const syncResults = {};
         for (const code of fundCodes) {
           try {
@@ -3073,14 +3183,20 @@ export async function onRequest(context) {
             let dwjz = null;              // 真正要写入 market_snapshot.dwjz 的值
             let dwjzFromFundGz = null;    // fundgz 返回的 dwjz（仅在确认需要替换时才采用）
 
-            // 同时请求两个接口
-            const [res2, resGz] = await Promise.all([
+            // 同时请求三个接口；F10 历史净值只作为较新确认净值的兜底
+            const [res2, resGz, resHistory] = await Promise.all([
               fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
               }),
               fetch(`https://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Referer': 'http://fundgz.1234567.com.cn/' }
-              })
+              }),
+              fetch(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=2&startDate=&endDate=`, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                  'Referer': 'https://fundf10.eastmoney.com/'
+                }
+              }).catch(() => null)
             ]);
 
             // 解析 pingzhongdata（官方净值）
@@ -3107,8 +3223,7 @@ export async function onRequest(context) {
                   dwjzFromFundGz = parseFloat(gzData.dwjz);
                 // jzrq 是 fundgz 返回的「净值日期」（即实际交易日），不是 gztime（估算发布时间）
                 // QDII基金在非交易日 fundgz 仍返回上一交易日作为 jzrq，此时 jzrq < navDate
-                // pingzhongdata 的 navDate 永远是真实最新净值日期（哪怕是节假日后的第一个交易日）
-                // 所以用 jzrq 做日期比较：fundgz 的 jzrq > navDate 才说明 fundgz 有更新的净值
+                // 先用 jzrq 做日期比较；随后再由 F10 历史净值接口补齐更晚发布的确认净值
                 const fundGzNavDate = (gzData.jzrq || '').split(' ')[0];
                 const officialNavYesterday = parseFloat(gzData.dwjz);
                 const mergedSnapshot = mergeFundEstimateIntoSnapshot({
@@ -3128,6 +3243,22 @@ export async function onRequest(context) {
                 dwjz = mergedSnapshot.dwjz || dwjz;
               }
               } catch (_) {}
+            }
+            if (resHistory?.ok) {
+              const historicalSnapshot = parseEastmoneyHistoricalSnapshot(await resHistory.text());
+              const mergedSnapshot = mergeConfirmedHistoricalSnapshot({
+                nav,
+                navDate,
+                gszzl,
+                prev_nav,
+                dwjz,
+                historicalSnapshot,
+              });
+              nav = mergedSnapshot.nav;
+              navDate = mergedSnapshot.navDate;
+              gszzl = mergedSnapshot.gszzl;
+              prev_nav = mergedSnapshot.prev_nav;
+              dwjz = mergedSnapshot.dwjz;
             }
             // upsert market_snapshot（含 prev_nav）
             const { results: oldSnap } = await env.DB.prepare(
