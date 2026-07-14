@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App.vue'
 import router from './router'
+import { isStaleAssetLoadError, recoverFromStalePwaAssets } from './utils/pwaRecovery'
 import { Icon } from 'vant'
 import 'vant/lib/index.css'
 import 'vant/lib/toast/style'
@@ -33,6 +34,26 @@ const updateSW = registerSW({
       registration.update().catch(() => {})
     }, 60 * 1000)
   },
+})
+
+const recoverStaleAssets = (error) => {
+  if (!isStaleAssetLoadError(error)) return false
+  recoverFromStalePwaAssets().catch(recoveryError => {
+    console.error('PWA asset recovery failed:', recoveryError)
+  })
+  return true
+}
+
+router.onError((error) => {
+  if (!recoverStaleAssets(error)) console.error('Router error:', error)
+})
+
+window.addEventListener('error', (event) => {
+  recoverStaleAssets(event.error || event.message)
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (recoverStaleAssets(event.reason)) event.preventDefault()
 })
 
 const app = createApp(App)
