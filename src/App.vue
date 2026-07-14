@@ -92,6 +92,22 @@ html, body {
   --app-tabbar-space: calc(96px + env(safe-area-inset-bottom));
   --app-floating-bottom: calc(108px + env(safe-area-inset-bottom));
   --app-floating-page-space: calc(170px + env(safe-area-inset-bottom));
+  --van-toast-text-color: #ffffff;
+  --van-toast-loading-icon-color: #ffffff;
+  --van-toast-background: rgba(15, 23, 42, 0.92);
+}
+
+/* Toast 挂载在 body 下，显式锁定前景与背景，避免系统主题出现白底白字。 */
+.van-toast {
+  color: #ffffff !important;
+  background: rgba(15, 23, 42, 0.92) !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.24);
+}
+
+.van-toast .van-toast__text,
+.van-toast .van-toast__loading,
+.van-toast .van-icon {
+  color: #ffffff !important;
 }
 
 /* 统一等宽字体 */
