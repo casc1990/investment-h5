@@ -243,22 +243,24 @@ import { showConfirmDialog, showToast } from 'vant'
 import { authApi, eventApi, fundApi, statsApi } from '../api'
 import { formatAmount as formatNumber } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+import { clearPageCaches, readPageCache, writePageCache } from '../utils/pageCache'
 
 const router = useRouter()
+const cachedHome = readPageCache('home')
 const loading = ref(false)
 const refreshing = ref(false)
 const amountsHidden = ref(false)
-const overview = ref(null)
+const overview = ref(cachedHome?.overview || null)
 const eventSyncing = ref(false)
 const eventProcessing = ref(false)
 const activeEventTab = ref('pending')
-const eventGroups = ref({ pending: [], confirmed: [] })
-const eventCounts = ref({ pending: 0, confirmed: 0 })
+const eventGroups = ref(cachedHome?.eventGroups || { pending: [], confirmed: [] })
+const eventCounts = ref(cachedHome?.eventCounts || { pending: 0, confirmed: 0 })
 const selectedEvent = ref(null)
 const eventDetailVisible = ref(false)
 const selectedContributionMemberId = ref(null)
-const lastLoadedAt = ref(0)
-const hasLoadedOnce = ref(false)
+const lastLoadedAt = ref(cachedHome?.savedAt || 0)
+const hasLoadedOnce = ref(Boolean(cachedHome?.overview))
 
 // 未分配到成员的账户（直接使用后端返回的 unassignedAccounts）
 const unassignedAccounts = computed(() => {
@@ -310,15 +312,16 @@ const freshnessText = computed(() => {
 })
 
 const fetchEvents = async () => {
-  const [pending, confirmed] = await Promise.all([
-    eventApi.list({ group: 'pending', limit: 5 }),
-    eventApi.list({ group: 'confirmed', limit: 5 }),
-  ])
-  eventGroups.value = {
-    pending: pending?.events || [],
-    confirmed: confirmed?.events || [],
-  }
-  eventCounts.value = pending?.counts || confirmed?.counts || { pending: 0, confirmed: 0 }
+  const data = await eventApi.list({ group: 'all', limit: 5 })
+  eventGroups.value = data?.groups || { pending: [], confirmed: [] }
+  eventCounts.value = data?.counts || { pending: 0, confirmed: 0 }
+  writePageCache('home', { overview: overview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
+}
+
+const reconcileEventsInBackground = () => {
+  eventApi.reconcile()
+    .then(() => fetchEvents())
+    .catch(error => console.warn('Failed to refresh events in background:', error))
 }
 
 const fetchData = async () => {
@@ -346,6 +349,8 @@ const fetchData = async () => {
 
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
+    writePageCache('home', { overview: overview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
+    reconcileEventsInBackground()
   } catch (error) {
     console.error('Failed to fetch overview:', error)
     showToast('数据加载失败: ' + (error.message || '网络错误'))
@@ -484,6 +489,7 @@ const handleLogout = async () => {
   }
   localStorage.removeItem('auth_token')
   localStorage.removeItem('auth_username')
+  clearPageCaches()
   router.push('/login')
 }
 

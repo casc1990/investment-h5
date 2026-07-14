@@ -23,7 +23,11 @@ export const captureProfitSnapshotFromApis = async () => {
     summary: payload.overview?.summary,
     positions: payload.snapshotPositions,
   })
-  if (snapshotResult.saved) await persistProfitSnapshot(snapshotResult.snapshot)
+  if (snapshotResult.saved) {
+    persistProfitSnapshot(snapshotResult.snapshot).catch(error => {
+      console.warn('[profitSnapshot] background save failed:', error)
+    })
+  }
 
   return {
     ...payload,

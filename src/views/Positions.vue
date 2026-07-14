@@ -338,14 +338,16 @@ import { positionApi, accountApi, memberApi, marketApi, fundApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../utils/positionList'
+import { readPageCache, writePageCache } from '../utils/pageCache'
 
 const router = useRouter()
 const route = useRoute()
+const cachedPositions = readPageCache('positions')
 
 const syncingId = ref(null)
 const syncingAll = ref(false)
 const loading = ref(false)
-const positionsRaw = ref([])
+const positionsRaw = ref(cachedPositions?.positions || [])
 const viewOption = ref('market_value_desc')
 const syncProgressText = ref('同步中...')
 const viewModeConfig = computed(() => ({
@@ -363,12 +365,12 @@ const positions = computed(() => filterAndSortPositions(positionsRaw.value, {
   sort: viewModeConfig.value.sort,
 }))
 const expandedIds = ref([])
-const lastLoadedAt = ref(0)
-const hasLoadedOnce = ref(false)
-const metaLastLoadedAt = ref(0)
-const metaLoadedOnce = ref(false)
-const accounts = ref([])
-const members = ref([])
+const lastLoadedAt = ref(cachedPositions?.savedAt || 0)
+const hasLoadedOnce = ref(Boolean(cachedPositions?.positions?.length))
+const metaLastLoadedAt = ref(cachedPositions?.savedAt || 0)
+const metaLoadedOnce = ref(Boolean(cachedPositions?.accounts || cachedPositions?.members))
+const accounts = ref(cachedPositions?.accounts || [])
+const members = ref(cachedPositions?.members || [])
 const selectedMemberId = ref(null)
 const selectedAccountId = ref(null)
 const showAddModal = ref(false)
@@ -508,6 +510,7 @@ const fetchMembers = async () => {
   try {
     const data = await memberApi.list()
     members.value = data?.members || []
+    writePageCache('positions', { positions: positionsRaw.value, accounts: accounts.value, members: members.value })
   } catch (error) {
     console.error('Failed to fetch members:', error)
   }
@@ -517,6 +520,7 @@ const fetchAccounts = async () => {
   try {
     const data = await accountApi.list()
     accounts.value = data?.accounts || []
+    writePageCache('positions', { positions: positionsRaw.value, accounts: accounts.value, members: members.value })
   } catch (error) {
     console.error('Failed to fetch accounts:', error)
   }
@@ -541,6 +545,9 @@ const fetchPositions = async () => {
   try {
     const data = await positionApi.list({ member_id: selectedMemberId.value, account_id: selectedAccountId.value })
     positionsRaw.value = (data?.positions || []).filter(position => position.account_channel !== '雪球顾投')
+    if (!selectedMemberId.value && !selectedAccountId.value) {
+      writePageCache('positions', { positions: positionsRaw.value, accounts: accounts.value, members: members.value })
+    }
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     showToast('加载失败')

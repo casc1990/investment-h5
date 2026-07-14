@@ -1367,6 +1367,16 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
+          const runtimeSchemaVersion = '2026-07-15-v1';
+          try {
+            const { results: schemaVersions } = await env.DB.prepare(
+              "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
+            ).all();
+            if (schemaVersions?.[0]?.meta_value === runtimeSchemaVersion) return;
+          } catch (_) {
+            // 首次部署尚未创建 app_meta，继续执行一次完整迁移。
+          }
+
           const userTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").all();
           if (userTableInfo.results.length === 0) {
             await env.DB.prepare(`
@@ -1467,6 +1477,18 @@ export async function onRequest(context) {
               updated_at INTEGER DEFAULT (unixepoch())
             )
           `).run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS app_meta (
+              meta_key TEXT PRIMARY KEY,
+              meta_value TEXT NOT NULL,
+              updated_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO app_meta (meta_key, meta_value, updated_at)
+            VALUES ('runtime_schema_version', ?, unixepoch())
+            ON CONFLICT(meta_key) DO UPDATE SET meta_value = excluded.meta_value, updated_at = unixepoch()
+          `).bind(runtimeSchemaVersion).run();
         })().catch(error => {
           runtimeSchemaInitPromise = null;
           throw error;
@@ -2055,24 +2077,45 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/events' && method === 'GET') {
-      await seedBusinessEvents();
-      const group = url.searchParams.get('group') === 'confirmed' ? 'confirmed' : 'pending';
+      const requestedGroup = url.searchParams.get('group');
+      const group = requestedGroup === 'confirmed' ? 'confirmed' : (requestedGroup === 'all' ? 'all' : 'pending');
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') || 5)));
-      const where = group === 'confirmed' ? "status IN ('processed', 'ignored')" : "status = 'pending'";
-      const { results } = await env.DB.prepare(
-        `SELECT * FROM events WHERE ${where} ORDER BY event_time DESC, created_at DESC LIMIT ?`
-      ).bind(limit).all();
-      const { results: counts } = await env.DB.prepare(`
-        SELECT
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN status IN ('processed', 'ignored') THEN 1 ELSE 0 END) AS confirmed
-        FROM events
-      `).all();
-      const events = (results || []).map(row => ({
+      const statements = group === 'all'
+        ? [
+            env.DB.prepare("SELECT * FROM events WHERE status = 'pending' ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(limit),
+            env.DB.prepare("SELECT * FROM events WHERE status IN ('processed', 'ignored') ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(limit),
+          ]
+        : [env.DB.prepare(
+            `SELECT * FROM events WHERE ${group === 'confirmed' ? "status IN ('processed', 'ignored')" : "status = 'pending'"} ORDER BY event_time DESC, created_at DESC LIMIT ?`
+          ).bind(limit)];
+      statements.push(env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status IN ('processed', 'ignored') THEN 1 ELSE 0 END) AS confirmed
+          FROM events
+        `));
+      const queryResults = await env.DB.batch(statements);
+      const parseEvents = rows => (rows || []).map(row => ({
         ...row,
         detail: (() => { try { return JSON.parse(row.detail_json || '{}'); } catch { return {}; } })(),
       }));
-      return jsonResponse({ code: 0, data: { events, counts: { pending: Number(counts?.[0]?.pending || 0), confirmed: Number(counts?.[0]?.confirmed || 0) } } });
+      const countRows = queryResults.at(-1)?.results || [];
+      const counts = { pending: Number(countRows?.[0]?.pending || 0), confirmed: Number(countRows?.[0]?.confirmed || 0) };
+      if (group === 'all') {
+        return jsonResponse({ code: 0, data: {
+          groups: {
+            pending: parseEvents(queryResults[0]?.results),
+            confirmed: parseEvents(queryResults[1]?.results),
+          },
+          counts,
+        } });
+      }
+      return jsonResponse({ code: 0, data: { events: parseEvents(queryResults[0]?.results), counts } });
+    }
+
+    if (path === '/api/events/reconcile' && method === 'POST') {
+      await seedBusinessEvents();
+      return jsonResponse({ code: 0, message: '事件已更新' });
     }
 
     if (path.match(/^\/api\/events\/[\w-]+$/) && method === 'GET') {

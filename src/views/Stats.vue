@@ -253,6 +253,7 @@ import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '..
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
+import { readPageCache, writePageCache } from '../utils/pageCache'
 import {
   buildAccountFilterOptions,
   buildPeriodProfitContributionRows,
@@ -265,11 +266,12 @@ import {
   getNextLoopDisplayCount,
 } from '../utils/statsHistory'
 
+const cachedStats = readPageCache('stats')
 const loading = ref(false)
-const overview = ref(null)
-const allSnapshots = ref([])
-const lastLoadedAt = ref(0)
-const hasLoadedOnce = ref(false)
+const overview = ref(cachedStats?.overview || null)
+const allSnapshots = ref(getProfitSnapshots())
+const lastLoadedAt = ref(cachedStats?.savedAt || 0)
+const hasLoadedOnce = ref(Boolean(cachedStats?.overview))
 
 const selectedMember = ref('all')
 const selectedAccount = ref('all')
@@ -333,6 +335,7 @@ const fetchData = async () => {
     const data = await captureProfitSnapshotFromApis()
     overview.value = data.overview
     refreshSnapshots()
+    writePageCache('stats', { overview: overview.value })
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
   } catch (error) {
@@ -510,14 +513,14 @@ watch(fundTypeOptions, (options) => {
   if (!exists) selectedFundType.value = 'all'
 }, { immediate: true })
 
-onMounted(async () => {
-  await syncSnapshots()
+onMounted(() => {
   ensureFreshData({ force: true })
+  syncSnapshots().catch(() => {})
 })
 
-onActivated(async () => {
-  await syncSnapshots()
+onActivated(() => {
   ensureFreshData()
+  syncSnapshots().catch(() => {})
 })
 </script>
 

@@ -13,11 +13,20 @@ const ENABLE_API_LOG = shouldLogApi(APP_ENV)
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 12000,
   headers: {
     'Content-Type': 'application/json',
   },
 })
+
+const pendingGetRequests = new Map()
+const dedupedGet = (url, config = {}) => {
+  const key = `${url}?${JSON.stringify(config.params || {})}`
+  if (pendingGetRequests.has(key)) return pendingGetRequests.get(key)
+  const request = apiClient.get(url, config).finally(() => pendingGetRequests.delete(key))
+  pendingGetRequests.set(key, request)
+  return request
+}
 
 // 请求拦截：注入 token
 apiClient.interceptors.request.use(
@@ -59,6 +68,13 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('auth_username')
       window.location.href = '/login'
     }
+    const config = error.config
+    const retryableStatus = [502, 503, 504].includes(Number(error.response?.status || 0))
+    const retryableNetworkError = !error.response || error.code === 'ECONNABORTED'
+    if (config?.method === 'get' && !config.__retried && (retryableStatus || retryableNetworkError)) {
+      config.__retried = true
+      return apiClient.request(config)
+    }
     return Promise.reject(error)
   }
 )
@@ -75,7 +91,7 @@ export const authApi = {
 // ============ 账户 API ============
 
 export const accountApi = {
-  list: () => apiClient.get('/accounts'),
+  list: () => dedupedGet('/accounts'),
   get: (id) => apiClient.get(`/accounts/${id}`),
   create: (data) => apiClient.post('/accounts', data),
   update: (id, data) => apiClient.put(`/accounts/${id}`, data),
@@ -85,7 +101,7 @@ export const accountApi = {
 // ============ 持仓 API ============
 
 export const positionApi = {
-  list: (params) => apiClient.get('/positions', { params }),
+  list: (params) => dedupedGet('/positions', { params }),
   get: (id) => apiClient.get(`/positions/${id}`),
   create: (data) => apiClient.post('/positions', data),
   update: (id, data) => apiClient.put(`/positions/${id}`, data),
@@ -116,7 +132,8 @@ export const fundApi = {
 }
 
 export const eventApi = {
-  list: (params) => apiClient.get('/events', { params }),
+  list: (params) => dedupedGet('/events', { params }),
+  reconcile: () => apiClient.post('/events/reconcile'),
   get: (id) => apiClient.get(`/events/${id}`),
   updateStatus: (id, data) => apiClient.patch(`/events/${id}/status`, data),
 }
@@ -124,7 +141,7 @@ export const eventApi = {
 // ============ 成员 API ============
 
 export const memberApi = {
-  list: () => apiClient.get('/members'),
+  list: () => dedupedGet('/members'),
   get: (id) => apiClient.get(`/members/${id}`),
   create: (data) => apiClient.post('/members', data),
   update: (id, data) => apiClient.put(`/members/${id}`, data),
@@ -134,7 +151,7 @@ export const memberApi = {
 // ============ 顾投组合 API ============
 
 export const advisoryApi = {
-  list: (params) => apiClient.get('/advisory-products', { params }),
+  list: (params) => dedupedGet('/advisory-products', { params }),
   createProduct: (data) => apiClient.post('/advisory-products', data),
   updateProduct: (id, data) => apiClient.put(`/advisory-products/${id}`, data),
   deleteProduct: (id) => apiClient.delete(`/advisory-products/${id}`),
@@ -144,7 +161,7 @@ export const advisoryApi = {
 // ============ 统计 API ============
 
 export const statsApi = {
-  overview: () => apiClient.get('/stats/overview'),
+  overview: () => dedupedGet('/stats/overview'),
   positionDetail: (id) => apiClient.get(`/stats/position/${id}`),
   history: (params) => apiClient.get('/stats/history', { params }),
 }
@@ -159,7 +176,7 @@ export const allocationProfileApi = {
 }
 
 export const profitSnapshotApi = {
-  list: () => apiClient.get('/profit-snapshots'),
+  list: () => dedupedGet('/profit-snapshots'),
   save: (snapshot) => apiClient.put(`/profit-snapshots/${snapshot.date}`, { snapshot }),
 }
 
