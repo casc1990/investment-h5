@@ -19,7 +19,7 @@ const routes = [
   {
     path: '/accounts',
     name: 'Accounts',
-    component: () => import('../views/Accounts.vue'),
+    component: () => import('../views/AccountMembers.vue'),
   },
   {
     path: '/positions',
@@ -78,7 +78,7 @@ const routes = [
   {
     path: '/members',
     name: 'Members',
-    component: () => import('../views/Members.vue'),
+    component: () => import('../views/AccountMembers.vue'),
   },
   {
     path: '/advisory',

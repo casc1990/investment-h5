@@ -116,6 +116,8 @@ import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { accountApi, memberApi } from '../api'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 
+const emit = defineEmits(['data-loaded'])
+
 const loading = ref(false)
 const accounts = ref([])
 const members = ref([])
@@ -184,6 +186,7 @@ const fetchAccounts = async () => {
   try {
     const data = await accountApi.list()
     accounts.value = data?.accounts || []
+    emit('data-loaded', accounts.value)
   } catch (error) {
     console.error('Failed to fetch accounts:', error)
     showToast('加载失败')

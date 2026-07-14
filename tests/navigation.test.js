@@ -28,6 +28,13 @@ test('统计相关别名路由仍映射到统计菜单高亮', () => {
   assert.equal(MAIN_TAB_INDEX_MAP['/ledger'], MAIN_TAB_INDEX_MAP['/stats'])
 })
 
+test('成员和账户合并为同一个底部入口', () => {
+  const managementTab = MAIN_TABS.find(tab => tab.to === '/accounts')
+  assert.equal(managementTab?.label, '成员账户')
+  assert.equal(MAIN_TABS.some(tab => tab.to === '/members'), false)
+  assert.equal(resolveMainTabIndex('/members'), MAIN_TAB_INDEX_MAP['/accounts'])
+})
+
 test('策略详情页和分类基金页仍映射到配置菜单高亮', () => {
   assert.equal(resolveMainTabIndex('/allocation/demo'), MAIN_TAB_INDEX_MAP['/allocation'])
   assert.equal(resolveMainTabIndex('/allocation/demo/bucket/pure_bond/select'), MAIN_TAB_INDEX_MAP['/allocation'])

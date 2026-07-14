@@ -84,6 +84,8 @@ import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { memberApi, accountApi, default as apiClient } from '../api'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 
+const emit = defineEmits(['data-loaded'])
+
 const loading = ref(false)
 const members = ref([])
 const memberStats = ref({})
@@ -115,6 +117,7 @@ const fetchMembers = async () => {
     members.value = membersData?.members || []
 
     const accounts = accountsData?.accounts || []
+    emit('data-loaded', { members: members.value, accounts })
     const stats = {}
     members.value.forEach(m => {
       const memberAccounts = accounts.filter(a => a.member_id === m.id)
