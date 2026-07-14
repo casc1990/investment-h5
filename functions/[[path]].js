@@ -199,6 +199,12 @@ function isQdiiFund(fundName = '') {
   return /QDII/i.test(String(fundName || ''));
 }
 
+const NON_DAILY_NAV_FUND_CODES = new Set(['002826']);
+
+export function isDailyNavTrackingFund(fundCode = '') {
+  return !NON_DAILY_NAV_FUND_CODES.has(String(fundCode || '').trim());
+}
+
 export function getDailyProfitMeta(navDate, now = new Date(), fundName = '') {
   const chinaToday = getChinaDateString(now);
   const isTodayUpdated = Boolean(navDate) && navDate === chinaToday;
@@ -212,6 +218,23 @@ export function getDailyProfitMeta(navDate, now = new Date(), fundName = '') {
       ? '今日收益更新'
       : (isLatestUpdated ? '最新收益已更新' : ''),
   };
+}
+
+export function shouldShowNavUpdateNotice({
+  status = 'idle',
+  snapshotUpdatedAt = null,
+  navDate = null,
+  now = new Date(),
+} = {}) {
+  if (status === 'waiting' || status === 'error') return true;
+  if (status !== 'updated') return false;
+
+  const chinaToday = getChinaDateString(now);
+  const updatedAt = Number(snapshotUpdatedAt || 0);
+  if (updatedAt > 0) {
+    return getChinaDateString(new Date(updatedAt * 1000)) === chinaToday;
+  }
+  return Boolean(navDate) && String(navDate) === chinaToday;
 }
 
 export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryDailyProfit = 0) {
@@ -671,7 +694,9 @@ export function isFundNavUpdated({ navDate = null, fundName = '', now = new Date
 }
 
 export function summarizeFundNavFreshness({ positions = [], snapshotMap = {}, now = new Date() } = {}) {
-  const heldPositions = (positions || []).filter(position => Number(position.quantity || 0) > 0);
+  const heldPositions = (positions || []).filter(position => (
+    Number(position.quantity || 0) > 0 && isDailyNavTrackingFund(position.fund_code)
+  ));
   const fundNameMap = new Map(heldPositions.map(position => [position.fund_code, position.fund_name || '']));
   const fundCodes = [...fundNameMap.keys()];
   const updatedFundCount = fundCodes.filter(code => isFundNavUpdated({
@@ -706,6 +731,7 @@ export function buildPendingFundList({
     const fundCode = String(position.fund_code || '').trim();
     if (!fundCode || seen.has(fundCode)) continue;
     seen.add(fundCode);
+    if (!isDailyNavTrackingFund(fundCode)) continue;
 
     const fundName = position.fund_name || position.name || '';
     const category = isDelayedNavFund(fundName) ? 'qdii' : 'normal';
@@ -1122,11 +1148,18 @@ export async function onRequest(context) {
       const dailyProfitMeta = getDailyProfitMeta(navDate, positionNow, r.fund_name || '');
       const navCategory = isDelayedNavFund(r.fund_name || '') ? 'qdii' : 'normal';
       const expectedNavDate = getExpectedNavDateForFund({ now: positionNow, mode: 'night', category: navCategory });
-      const navUpdateStatus = !tradingDay
+      const navTrackingExempt = !isDailyNavTrackingFund(r.fund_code);
+      const navUpdateStatus = navTrackingExempt || !tradingDay
         ? 'idle'
         : r.sync_state === 'error'
         ? 'error'
         : (navDate && navDate >= expectedNavDate ? 'updated' : 'waiting');
+      const showNavUpdateNotice = !navTrackingExempt && shouldShowNavUpdateNotice({
+        status: navUpdateStatus,
+        snapshotUpdatedAt: r.nav_updated_at,
+        navDate,
+        now: positionNow,
+      });
 
       return {
         id: r.id,
@@ -1152,6 +1185,8 @@ export async function onRequest(context) {
         daily_profit_updated: dailyProfitMeta.daily_profit_updated,
         daily_profit_update_text: dailyProfitMeta.daily_profit_update_text,
         is_trading_day: tradingDay,
+        nav_tracking_exempt: navTrackingExempt,
+        show_nav_update_notice: showNavUpdateNotice,
         initial_profit: r.initial_profit || 0,
         realized_profit: r.realized_profit || 0,
         cash_dividend: r.cash_dividend || 0,
@@ -1476,7 +1511,7 @@ export async function onRequest(context) {
     async function fetchPositionDetailById(id) {
       const { results } = await env.DB.prepare(
         `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
-                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq, s.updated_at as nav_updated_at,
                 s.prev_nav
          FROM positions p
          LEFT JOIN accounts a ON p.account_id = a.id
@@ -2286,7 +2321,7 @@ export async function onRequest(context) {
       const memberId = url.searchParams.get('member_id');
       
       let query = `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
-                   s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                   s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq, s.updated_at as nav_updated_at,
                    s.prev_nav, fs.state as sync_state, fs.last_attempt_at as sync_last_attempt_at,
                    fs.consecutive_failures as sync_consecutive_failures, fs.last_error as sync_last_error,
                    (SELECT COUNT(1) FROM trades t WHERE t.account_id = p.account_id AND t.fund_code = p.fund_code) as trade_count
@@ -2329,7 +2364,7 @@ export async function onRequest(context) {
       const id = path.split('/').pop();
       const { results } = await env.DB.prepare(
         `SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id, m.name as member_name, m.emoji as member_emoji,
-                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq,
+                s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz, s.jzrq as nav_jzrq, s.updated_at as nav_updated_at,
                 s.prev_nav
          FROM positions p
          LEFT JOIN accounts a ON p.account_id = a.id

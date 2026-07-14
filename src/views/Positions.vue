@@ -75,7 +75,7 @@
               <span class="collapsed-tags">
                 <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
                 <span class="account-tag">{{ position.account_name }}</span>
-                <span v-if="position.is_trading_day" class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
+                <span v-if="position.is_trading_day && position.show_nav_update_notice" class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
                   {{ getPositionNavStatus(position).label }}
                 </span>
               </span>
@@ -88,7 +88,7 @@
                 </span>
               </div>
               <div class="collapsed-right">
-                <span v-if="position.is_trading_day && position.daily_profit_updated" class="profit-update-badge">
+                <span v-if="position.is_trading_day && position.daily_profit_updated && position.show_nav_update_notice" class="profit-update-badge">
                   {{ position.daily_profit_update_text || '今日收益更新' }}
                 </span>
                 <span class="collapsed-profit" :class="{ positive: Number(position.current_profit) >= 0, negative: Number(position.current_profit) < 0 }">
@@ -132,7 +132,7 @@
             <div class="data-item">
               <span class="data-label">
                 {{ position.daily_profit_label || '昨日收益' }}
-                <span v-if="position.is_trading_day && position.daily_profit_updated" class="profit-update-badge inline">
+                <span v-if="position.is_trading_day && position.daily_profit_updated && position.show_nav_update_notice" class="profit-update-badge inline">
                   {{ position.daily_profit_update_text || '今日收益更新' }}
                 </span>
               </span>

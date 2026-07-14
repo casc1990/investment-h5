@@ -17,6 +17,6 @@ test('总览卡默认展示全部收益统计', () => {
 })
 
 test('净值更新标签只在交易日展示', () => {
-  assert.match(source, /position\.is_trading_day && position\.daily_profit_updated/)
-  assert.match(source, /v-if="position\.is_trading_day" class="nav-status-tag"/)
+  assert.match(source, /position\.is_trading_day && position\.daily_profit_updated && position\.show_nav_update_notice/)
+  assert.match(source, /position\.is_trading_day && position\.show_nav_update_notice" class="nav-status-tag"/)
 })

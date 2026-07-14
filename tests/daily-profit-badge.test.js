@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getDailyProfitMeta } from '../functions/[[path]].js'
+import { getDailyProfitMeta, shouldShowNavUpdateNotice } from '../functions/[[path]].js'
 
 test('净值日期等于北京时间今天时，标记为今日收益已更新', () => {
   const meta = getDailyProfitMeta('2026-05-25', new Date('2026-05-25T14:10:00Z'))
@@ -46,4 +46,26 @@ test('缺少净值日期时回退到昨日收益口径', () => {
   assert.equal(meta.daily_profit_rate_label, '昨日收益率')
   assert.equal(meta.daily_profit_updated, false)
   assert.equal(meta.daily_profit_update_text, '')
+})
+
+test('已更新提示只保留在实际同步当天，次日凌晨自动隐藏', () => {
+  const snapshotUpdatedAt = Date.parse('2026-07-13T22:10:00+08:00') / 1000
+  assert.equal(shouldShowNavUpdateNotice({
+    status: 'updated',
+    snapshotUpdatedAt,
+    navDate: '2026-07-13',
+    now: new Date('2026-07-13T15:00:00.000Z'),
+  }), true)
+  assert.equal(shouldShowNavUpdateNotice({
+    status: 'updated',
+    snapshotUpdatedAt,
+    navDate: '2026-07-13',
+    now: new Date('2026-07-13T16:30:00.000Z'),
+  }), false)
+})
+
+test('待更新和同步失败提示跨日后继续保留', () => {
+  const now = new Date('2026-07-13T16:30:00.000Z')
+  assert.equal(shouldShowNavUpdateNotice({ status: 'waiting', now }), true)
+  assert.equal(shouldShowNavUpdateNotice({ status: 'error', now }), true)
 })

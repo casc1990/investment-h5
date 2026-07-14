@@ -107,6 +107,23 @@ test('缺少快照的基金会进入 pending 列表', () => {
   ])
 })
 
+test('002826 非每日净值基金不进入待更新队列和首页更新统计', () => {
+  const now = new Date('2026-07-13T14:30:00.000Z')
+  const positions = [{ fund_code: '002826', fund_name: '半年定期开放债券', quantity: 1 }]
+  const snapshots = [{ fund_code: '002826', jzrq: '2026-07-09' }]
+
+  assert.deepEqual(buildPendingFundList({ positions, snapshots, now, mode: 'night' }), [])
+  assert.deepEqual(summarizeFundNavFreshness({
+    positions,
+    snapshotMap: { '002826': snapshots[0] },
+    now,
+  }), {
+    totalFundCount: 0,
+    updatedFundCount: 0,
+    staleFundCount: 0,
+  })
+})
+
 test('夜间未开启 includeQdii 时跳过 QDII 基金', () => {
   const now = new Date('2026-06-21T13:00:00.000Z')
   const pending = buildPendingFundList({
