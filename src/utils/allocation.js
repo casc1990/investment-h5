@@ -172,6 +172,41 @@ export const getPositionOccupancy = (occupancyMap, position) => {
   return occupancyMap.get(buildAllocationPositionKey(position)) || []
 }
 
+export const buildPositionAllocationStatusMap = (profiles = []) => {
+  const entriesByPositionId = new Map()
+
+  for (const rawProfile of profiles || []) {
+    const profile = normalizeAllocationProfile(rawProfile)
+    for (const fund of profile.funds) {
+      if (!fund.positionId) continue
+      const entries = entriesByPositionId.get(fund.positionId) || []
+      entries.push({
+        profileId: profile.id,
+        profileName: profile.name,
+        assetType: fund.assetType,
+        status: fund.status,
+      })
+      entriesByPositionId.set(fund.positionId, entries)
+    }
+  }
+
+  return new Map([...entriesByPositionId].map(([positionId, entries]) => {
+    if (entries.length === 1) {
+      return [positionId, {
+        ...entries[0],
+        label: entries[0].status,
+        conflict: false,
+        entries,
+      }]
+    }
+    return [positionId, {
+      label: '多策略',
+      conflict: true,
+      entries,
+    }]
+  }))
+}
+
 export const buildAllocationSelectablePositions = ({
   positions = [],
   profiles = [],

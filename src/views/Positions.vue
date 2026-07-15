@@ -75,6 +75,15 @@
               <span class="collapsed-tags">
                 <span v-if="position.member_name" class="member-tag">{{ position.member_emoji }} {{ position.member_name }}</span>
                 <span class="account-tag">{{ position.account_name }}</span>
+                <span
+                  v-if="getPositionAllocationStatus(position)"
+                  class="allocation-status-tag"
+                  :class="`is-${getAllocationStatusTone(getPositionAllocationStatus(position))}`"
+                  :title="getAllocationStatusTitle(getPositionAllocationStatus(position))"
+                  @click.stop="openPositionAllocation(getPositionAllocationStatus(position))"
+                >
+                  {{ getPositionAllocationStatus(position).label }}
+                </span>
                 <span v-if="position.is_trading_day && position.show_nav_update_notice" class="nav-status-tag" :class="`is-${getPositionNavStatus(position).tone}`">
                   {{ getPositionNavStatus(position).label }}
                 </span>
@@ -338,6 +347,12 @@ import { positionApi, accountApi, memberApi, marketApi, fundApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../utils/positionList'
+import { ALLOCATION_FUND_STATUSES, buildPositionAllocationStatusMap } from '../utils/allocation'
+import {
+  ALLOCATION_PROFILES_UPDATED_EVENT,
+  fetchAllocationProfiles,
+  loadAllocationProfiles,
+} from '../utils/allocationStorage'
 import { readPageCache, writePageCache } from '../utils/pageCache'
 
 const router = useRouter()
@@ -371,6 +386,8 @@ const metaLastLoadedAt = ref(cachedPositions?.savedAt || 0)
 const metaLoadedOnce = ref(Boolean(cachedPositions?.accounts || cachedPositions?.members))
 const accounts = ref(cachedPositions?.accounts || [])
 const members = ref(cachedPositions?.members || [])
+const allocationProfiles = ref(loadAllocationProfiles())
+const allocationLastLoadedAt = ref(0)
 const selectedMemberId = ref(null)
 const selectedAccountId = ref(null)
 const showAddModal = ref(false)
@@ -393,6 +410,25 @@ const dividendOptions = [
   { text: '红利再投', value: '红利再投' },
   { text: '现金分红', value: '现金分红' },
 ]
+
+const allocationStatusMap = computed(() => buildPositionAllocationStatusMap(allocationProfiles.value))
+const getPositionAllocationStatus = position => allocationStatusMap.value.get(position?.id) || null
+const getAllocationStatusTone = meta => {
+  if (meta?.conflict) return 'conflict'
+  if (meta?.status === ALLOCATION_FUND_STATUSES.KEEP) return 'keep'
+  if (meta?.status === ALLOCATION_FUND_STATUSES.WATCH) return 'watch'
+  if (meta?.status === ALLOCATION_FUND_STATUSES.REDUCE) return 'reduce'
+  return 'forbid'
+}
+const getAllocationStatusTitle = meta => {
+  if (!meta) return ''
+  if (meta.conflict) return `同时纳入：${meta.entries.map(item => item.profileName).join('、')}`
+  return `${meta.profileName} · ${meta.status}`
+}
+const openPositionAllocation = meta => {
+  if (!meta) return
+  router.push(meta.conflict || !meta.profileId ? '/allocation' : `/allocation/${meta.profileId}`)
+}
 
 const formData = ref({
   memberName: '',
@@ -538,6 +574,26 @@ const ensureFreshMetaData = async ({ force = false } = {}) => {
   } catch (error) {
     console.error('Failed to refresh meta data:', error)
   }
+}
+
+const refreshAllocationProfiles = async ({ force = false } = {}) => {
+  if (!shouldRefreshPageData({
+    hasData: allocationProfiles.value.length > 0,
+    lastLoadedAt: allocationLastLoadedAt.value,
+    force,
+    ttl: 5 * 60 * 1000,
+  })) return
+
+  try {
+    allocationProfiles.value = await fetchAllocationProfiles()
+    allocationLastLoadedAt.value = Date.now()
+  } catch (error) {
+    console.error('Failed to fetch allocation profiles:', error)
+  }
+}
+
+const handleAllocationProfilesUpdated = () => {
+  allocationProfiles.value = loadAllocationProfiles()
 }
 
 const fetchPositions = async () => {
@@ -797,6 +853,7 @@ const closeModal = () => {
 }
 
 const ensureFreshData = async ({ force = false } = {}) => {
+  refreshAllocationProfiles({ force }).catch(() => {})
   if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
     ensureFreshMetaData().catch(() => {})
     return
@@ -813,6 +870,7 @@ const applyRouteFilters = () => {
 }
 
 onMounted(() => {
+  window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleAllocationProfilesUpdated)
   applyRouteFilters()
   ensureFreshData({ force: true })
 })
@@ -832,6 +890,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  window.removeEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleAllocationProfilesUpdated)
   setAppTabbarVisible(true)
 })
 
@@ -1064,6 +1123,21 @@ onDeactivated(() => {
   line-height: 1.5;
   white-space: nowrap;
 }
+
+.allocation-status-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.allocation-status-tag.is-keep { color: #166534; background: #dcfce7; }
+.allocation-status-tag.is-watch { color: #92400e; background: #fef3c7; }
+.allocation-status-tag.is-reduce { color: #b91c1c; background: #fee2e2; }
+.allocation-status-tag.is-forbid { color: #374151; background: #e5e7eb; }
+.allocation-status-tag.is-conflict { color: #6d28d9; background: #ede9fe; }
 
 .nav-status-tag.is-success {
   color: #198754;

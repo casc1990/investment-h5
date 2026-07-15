@@ -20,3 +20,11 @@ test('净值更新标签只在交易日展示', () => {
   assert.match(source, /position\.is_trading_day && position\.daily_profit_updated && position\.show_nav_update_notice/)
   assert.match(source, /position\.is_trading_day && position\.show_nav_update_notice" class="nav-status-tag"/)
 })
+
+test('持仓卡片复用投资策略状态并支持跳转到对应策略', () => {
+  assert.match(source, /buildPositionAllocationStatusMap/)
+  assert.match(source, /class="allocation-status-tag"/)
+  assert.match(source, /getPositionAllocationStatus\(position\)\.label/)
+  assert.match(source, /`\/allocation\/\$\{meta\.profileId\}`/)
+  assert.match(source, /meta\.conflict/)
+})

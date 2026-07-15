@@ -8,6 +8,7 @@ import {
   applyAllocationBucketSelection,
   buildAllocationProfitTrend,
   buildAllocationBucketDailyProfitTrend,
+  buildPositionAllocationStatusMap,
   buildAllocationSelectablePositions,
   createDefaultAllocationBuckets,
   buildAllocationDailyProfitTrend,
@@ -611,6 +612,46 @@ test('配置建议详情可按分类拆出补仓与调仓数据', () => {
 test('基金归类页面可输出用户与账户文案', () => {
   assert.equal(getAllocationPositionOwnerText(positions[0]), '用户：爸爸 · 账户：京东金融')
   assert.equal(getAllocationPositionOwnerText({}), '用户：未分配用户 · 账户：未命名账户')
+})
+
+test('持仓页可按 positionId 复用策略状态，未纳入策略的持仓不生成状态', () => {
+  const statusMap = buildPositionAllocationStatusMap([profile])
+
+  assert.deepEqual(statusMap.get('p1'), {
+    profileId: profile.id,
+    profileName: profile.name,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    status: ALLOCATION_FUND_STATUSES.KEEP,
+    label: ALLOCATION_FUND_STATUSES.KEEP,
+    conflict: false,
+    entries: [{
+      profileId: profile.id,
+      profileName: profile.name,
+      assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+      status: ALLOCATION_FUND_STATUSES.KEEP,
+    }],
+  })
+  assert.equal(statusMap.has('not-configured'), false)
+})
+
+test('同一持仓异常出现在多个策略时标记多策略冲突', () => {
+  const statusMap = buildPositionAllocationStatusMap([
+    profile,
+    {
+      ...profile,
+      id: 'strategy-2',
+      name: '第二策略',
+      funds: [{
+        positionId: 'p1',
+        assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+        status: ALLOCATION_FUND_STATUSES.WATCH,
+      }],
+    },
+  ])
+
+  assert.equal(statusMap.get('p1').label, '多策略')
+  assert.equal(statusMap.get('p1').conflict, true)
+  assert.equal(statusMap.get('p1').entries.length, 2)
 })
 
 test('分类基金持仓页顶部摘要使用新的收益与配比文案', () => {
