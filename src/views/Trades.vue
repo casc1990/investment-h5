@@ -208,7 +208,7 @@
             </div>
           </div>
 
-          <div class="type-hint">{{ currentTradeConfig.hint }}</div>
+          <div class="type-hint">{{ currentTypeHint }}</div>
 
           <div class="modal-actions">
             <van-button round @click="closeModal">取消</van-button>
@@ -357,7 +357,7 @@ const accountPickerOptions = computed(() => accounts.value
 })))
 
 const existingFundPickerOptions = computed(() => positions.value
-  .filter(position => position.account_id === formData.value.accountId && Number(position.quantity || 0) > 0)
+  .filter(position => position.account_id === formData.value.accountId && Number(position.shares ?? position.quantity ?? 0) > 0)
   .map(position => ({
     text: `${position.fund_name || position.fund_code} · ${position.fund_code}`,
     value: position.fund_code,
@@ -376,6 +376,9 @@ const currentTradeConfig = computed(() => TRADE_CONFIGS[formData.value.tradeType
 const isConversion = computed(() => formData.value.tradeType === '转换')
 const isExistingBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'existing')
 const isNewBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'new')
+const currentTypeHint = computed(() => isExistingBuy.value
+  ? '只需填写本次新增份额和手续费；买入成本按该基金最新净值自动计算，提交后更新原持仓。'
+  : currentTradeConfig.value.hint)
 const requiresQuantity = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
 const showsAmountField = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType) && !isExistingBuy.value)
 const showsFeeField = computed(() => ['买入', '卖出'].includes(formData.value.tradeType))
@@ -391,6 +394,7 @@ const quantityLabel = computed(() => {
 })
 
 const quantityPlaceholder = computed(() => {
+  if (isExistingBuy.value) return '请输入本次新增份额'
   switch (formData.value.tradeType) {
     case '买入': return '可不填，系统会按净值估算'
     case '卖出': return '请输入卖出份额'
@@ -777,8 +781,9 @@ function onMemberConfirm({ selectedOptions }) {
 
 function onExistingFundConfirm({ selectedOptions }) {
   const selected = selectedOptions[0]
+  const position = positions.value.find(item => item.account_id === formData.value.accountId && item.fund_code === selected.value)
   formData.value.fundCode = selected.value
-  formData.value.fundName = selected.fundName || selected.text.split(' · ')[0]
+  formData.value.fundName = position?.fund_name || selected.fundName || selected.text.split(' · ')[0]
   showExistingFundPicker.value = false
   onFundCodeBlur()
 }
