@@ -57,6 +57,10 @@
         <div class="modal-title">{{ currentTradeConfig.icon }} {{ currentTradeConfig.title }}</div>
 
         <van-form @submit="handleTrade">
+          <div v-if="formData.tradeType === '买入'" class="buy-mode-switch">
+            <button type="button" :class="{ active: formData.buyMode === 'new' }" @click="setBuyMode('new')">买入新基金</button>
+            <button type="button" :class="{ active: formData.buyMode === 'existing' }" @click="setBuyMode('existing')">追加已有基金</button>
+          </div>
           <van-cell-group inset>
             <van-field
               :model-value="formData.tradeType"
@@ -68,18 +72,30 @@
               :rules="[{ required: true, message: '请选择交易类型' }]"
             />
             <van-field
+              :model-value="formData.memberName"
+              is-link
+              readonly
+              label="成员"
+              placeholder="选择成员"
+              @click="showMemberPicker = true"
+              :rules="[{ required: true, message: '请选择成员' }]"
+            />
+            <van-field
               :model-value="formData.accountName"
               is-link
               readonly
               label="账户"
               placeholder="选择账户"
-              @click="showAccountPicker = true"
+              @click="openAccountPicker"
               :rules="[{ required: true, message: '请选择账户' }]"
             />
             <van-field
               v-model="formData.fundCode"
               :label="isConversion ? '转出基金代码' : '基金代码'"
-              placeholder="如：008163"
+              :placeholder="isExistingBuy ? '选择该账户已有基金' : '如：008163'"
+              :readonly="isExistingBuy"
+              :is-link="isExistingBuy"
+              @click="isExistingBuy && (showExistingFundPicker = true)"
               @blur="onFundCodeBlur"
               :rules="[{ required: true, message: '请输入基金代码' }]"
             />
@@ -87,6 +103,7 @@
               v-model="formData.fundName"
               :label="isConversion ? '转出基金名称' : '基金名称'"
               placeholder="自动填充，也可手填"
+              :readonly="isExistingBuy"
             />
             <template v-if="isConversion">
               <van-field
@@ -145,7 +162,7 @@
             />
           </van-cell-group>
 
-          <div v-if="recommendedFunds.length" class="quick-fund-card">
+          <div v-if="recommendedFunds.length && !isNewBuy" class="quick-fund-card">
             <div class="quick-fund-title">当前账户常用基金</div>
             <div class="quick-fund-list">
               <button
@@ -186,6 +203,14 @@
       <van-picker :columns="accountPickerOptions" @confirm="onAccountConfirm" @cancel="showAccountPicker = false" />
     </van-popup>
 
+    <van-popup v-model:show="showMemberPicker" position="bottom">
+      <van-picker :columns="memberPickerOptions" @confirm="onMemberConfirm" @cancel="showMemberPicker = false" />
+    </van-popup>
+
+    <van-popup v-model:show="showExistingFundPicker" position="bottom">
+      <van-picker :columns="existingFundPickerOptions" @confirm="onExistingFundConfirm" @cancel="showExistingFundPicker = false" />
+    </van-popup>
+
     <van-popup v-model:show="showTypePicker" position="bottom">
       <van-picker :columns="tradeTypePickerOptions" @confirm="onTypeConfirm" @cancel="showTypePicker = false" />
     </van-popup>
@@ -206,7 +231,7 @@
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { accountApi, marketApi, positionApi, tradeApi } from '../api'
+import { accountApi, marketApi, memberApi, positionApi, tradeApi } from '../api'
 import { formatAmount as formatNumber, formatDateLabel as formatDate, todayDateParts } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { buildTradeQuickFundOptions, resolveTradeDraft } from '../utils/tradeForm'
@@ -230,12 +255,15 @@ const CORE_TRADE_TYPES = ['买入', '卖出', '转换']
 const loading = ref(false)
 const trades = ref([])
 const accounts = ref([])
+const members = ref([])
 const positions = ref([])
 const marketCache = ref({})
 const selectedAccount = ref(null)
 const selectedType = ref(null)
 const showTradeModal = ref(false)
 const showAccountPicker = ref(false)
+const showMemberPicker = ref(false)
+const showExistingFundPicker = ref(false)
 const showTypePicker = ref(false)
 const showDatePicker = ref(false)
 const currentDate = ref(todayDateParts())
@@ -257,6 +285,7 @@ function saveTradeDraftPreference() {
   try {
     localStorage.setItem(TRADE_DRAFT_STORAGE_KEY, JSON.stringify({
       accountId: formData.value.accountId || '',
+      memberId: formData.value.memberId || '',
       tradeType: formData.value.tradeType || '买入',
     }))
   } catch {
@@ -267,6 +296,9 @@ function saveTradeDraftPreference() {
 function createEmptyForm() {
   return {
     tradeType: '买入',
+    buyMode: 'new',
+    memberId: '',
+    memberName: '',
     accountId: '',
     accountName: '',
     fundCode: '',
@@ -293,16 +325,33 @@ const typeFilterOptions = computed(() => [
   { text: '卖出', value: '卖出' },
 ])
 
-const accountPickerOptions = computed(() => accounts.value.map(account => ({
+const memberPickerOptions = computed(() => members.value.map(member => ({
+  text: `${member.emoji || '👤'} ${member.name}`,
+  value: member.id,
+})))
+
+const accountPickerOptions = computed(() => accounts.value
+  .filter(account => account.member_id === formData.value.memberId)
+  .map(account => ({
   text: getAccountName(account),
   value: getAccountId(account),
 })))
+
+const existingFundPickerOptions = computed(() => positions.value
+  .filter(position => position.account_id === formData.value.accountId && Number(position.quantity || 0) > 0)
+  .map(position => ({
+    text: `${position.fund_name || position.fund_code} · ${position.fund_code}`,
+    value: position.fund_code,
+    fundName: position.fund_name || '',
+  })))
 
 const tradeTypePickerOptions = computed(() => CORE_TRADE_TYPES.map(type => ({ text: type, value: type })))
 const recommendedFunds = computed(() => buildTradeQuickFundOptions(positions.value, formData.value.accountId || selectedAccount.value || ''))
 
 const currentTradeConfig = computed(() => TRADE_CONFIGS[formData.value.tradeType] || TRADE_CONFIGS.买入)
 const isConversion = computed(() => formData.value.tradeType === '转换')
+const isExistingBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'existing')
+const isNewBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'new')
 const requiresQuantity = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
 const showsAmountField = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
 const showsFeeField = computed(() => ['买入', '卖出'].includes(formData.value.tradeType))
@@ -373,6 +422,13 @@ function getAccountName(account) {
   return account?.name || account?.account_name || account?.['账户名称'] || ''
 }
 
+function applyMemberForAccount(accountId) {
+  const account = accounts.value.find(item => getAccountId(item) === accountId)
+  const member = members.value.find(item => item.id === account?.member_id)
+  formData.value.memberId = member?.id || ''
+  formData.value.memberName = member ? `${member.emoji || '👤'} ${member.name}` : ''
+}
+
 function tradeUi(type, note = '') {
   if ((type === '转入' || type === '转出') && note.startsWith('[转换:')) return TRADE_CONFIGS.转换
   return TRADE_CONFIGS[type] || { icon: '📝', className: 'default', title: type, hint: '' }
@@ -421,12 +477,23 @@ async function fetchAccounts() {
     if (!formData.value.accountId && defaults.accountId) {
       formData.value.accountId = defaults.accountId
       formData.value.accountName = defaults.accountName
+      applyMemberForAccount(defaults.accountId)
     }
     if (!formData.value.tradeType || formData.value.tradeType === '买入') {
       formData.value.tradeType = defaults.tradeType
     }
   } catch (error) {
     console.error('Failed to fetch accounts:', error)
+  }
+}
+
+async function fetchMembers() {
+  try {
+    const data = await memberApi.list()
+    members.value = data?.members || []
+    if (formData.value.accountId) applyMemberForAccount(formData.value.accountId)
+  } catch (error) {
+    console.error('Failed to fetch members:', error)
   }
 }
 
@@ -459,7 +526,8 @@ async function ensureFreshData({ force = false } = {}) {
   if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
     return
   }
-  await Promise.all([fetchAccounts(), fetchPositions(), fetchTrades()])
+  await Promise.all([fetchMembers(), fetchAccounts(), fetchPositions(), fetchTrades()])
+  if (formData.value.accountId) applyMemberForAccount(formData.value.accountId)
   hasLoadedOnce.value = true
   lastLoadedAt.value = Date.now()
 }
@@ -506,8 +574,18 @@ function openTradeModal(type = '买入') {
     formData.value.accountId = defaults.accountId
     formData.value.accountName = defaults.accountName
   }
+  if (formData.value.accountId) applyMemberForAccount(formData.value.accountId)
   currentDate.value = todayDateParts(new Date(formData.value.tradeDate || Date.now()))
   showTradeModal.value = true
+}
+
+function setBuyMode(mode) {
+  if (formData.value.buyMode === mode) return
+  formData.value.buyMode = mode
+  formData.value.fundCode = ''
+  formData.value.fundName = ''
+  formData.value.quantity = null
+  formData.value.amount = null
 }
 
 function applyQuickFund(fund) {
@@ -517,6 +595,10 @@ function applyQuickFund(fund) {
 }
 
 async function handleTrade() {
+  if (!formData.value.memberId) {
+    showToast('请选择成员')
+    return
+  }
   if (!formData.value.accountId) {
     showToast('请选择账户')
     return
@@ -615,8 +697,42 @@ async function handleDeleteTrade(trade) {
 function onAccountConfirm({ selectedOptions }) {
   formData.value.accountId = selectedOptions[0].value
   formData.value.accountName = selectedOptions[0].text
+  formData.value.fundCode = ''
+  formData.value.fundName = ''
   saveTradeDraftPreference()
   showAccountPicker.value = false
+}
+
+function openAccountPicker() {
+  if (!formData.value.memberId) {
+    showToast('请先选择成员')
+    return
+  }
+  if (!accountPickerOptions.value.length) {
+    showToast('该成员名下暂无账户')
+    return
+  }
+  showAccountPicker.value = true
+}
+
+function onMemberConfirm({ selectedOptions }) {
+  const selected = selectedOptions[0]
+  formData.value.memberId = selected.value
+  formData.value.memberName = selected.text
+  formData.value.accountId = ''
+  formData.value.accountName = ''
+  formData.value.fundCode = ''
+  formData.value.fundName = ''
+  showMemberPicker.value = false
+  if (!accountPickerOptions.value.length) showToast('该成员名下暂无账户')
+}
+
+function onExistingFundConfirm({ selectedOptions }) {
+  const selected = selectedOptions[0]
+  formData.value.fundCode = selected.value
+  formData.value.fundName = selected.fundName || selected.text.split(' · ')[0]
+  showExistingFundPicker.value = false
+  onFundCodeBlur()
 }
 
 function onTypeConfirm({ selectedOptions }) {
@@ -661,6 +777,7 @@ function closeModal() {
     accountId: defaults.accountId,
     accountName: defaults.accountName,
   }
+  if (formData.value.accountId) applyMemberForAccount(formData.value.accountId)
   currentDate.value = todayDateParts()
 }
 
@@ -690,11 +807,11 @@ watch(() => route.query.type, () => {
   padding: 18px;
   color: #fff;
   border-radius: 20px;
-  background: linear-gradient(145deg, #0f2747 0%, #164e63 100%);
-  box-shadow: 0 14px 34px rgba(15, 39, 71, .18);
+  background: linear-gradient(135deg, #1e80ff 0%, #0969da 100%);
+  box-shadow: 0 14px 34px rgba(30, 128, 255, .22);
 }
 
-.eyebrow { font-size: 11px; letter-spacing: 2px; color: #99f6e4; }
+.eyebrow { font-size: 11px; letter-spacing: 2px; color: #dbeafe; }
 .trade-hero h1 { margin: 5px 0 3px; font-size: 22px; }
 .trade-hero p { margin: 0; color: #cbd5e1; font-size: 12px; }
 
@@ -719,7 +836,7 @@ watch(() => route.query.type, () => {
 }
 
 .scene-card:active { transform: scale(.97); background: rgba(255, 255, 255, .16); }
-.scene-icon { font-size: 20px; line-height: 1; color: #5eead4; }
+.scene-icon { font-size: 20px; line-height: 1; color: #dbeafe; }
 .scene-card strong { font-size: 14px; }
 .scene-card small { color: #cbd5e1; font-size: 10px; }
 
@@ -939,6 +1056,32 @@ watch(() => route.query.type, () => {
 
 .modal-content {
   padding: 18px 0 24px;
+}
+
+.buy-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 16px 12px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+.buy-mode-switch button {
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 8px;
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.buy-mode-switch button.active {
+  background: #fff;
+  color: #1677ff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(30, 128, 255, .12);
 }
 
 .modal-title {
