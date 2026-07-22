@@ -28,3 +28,18 @@ test('持仓卡片复用投资策略状态并支持跳转到对应策略', () =>
   assert.match(source, /`\/allocation\/\$\{meta\.profileId\}`/)
   assert.match(source, /meta\.conflict/)
 })
+
+test('持仓筛选状态跨页面保留，空路由参数不会重置现有筛选', () => {
+  assert.match(source, /readPositionViewState/)
+  assert.match(source, /writePositionViewState/)
+  assert.match(source, /hasOwnProperty\.call\(route\.query, 'member_id'\)/)
+  assert.match(source, /hasOwnProperty\.call\(route\.query, 'account_id'\)/)
+})
+
+test('编辑持仓弹层挂载到 body 并在关闭后恢复滚动位置', () => {
+  assert.match(source, /teleport="body"/)
+  assert.match(source, /@closed="restorePositionsScroll"/)
+  assert.match(source, /capturePositionsScroll\(\)/)
+  assert.match(source, /position: sticky;/)
+  assert.match(source, /showAddModal\.value = false[\s\S]*onDeactivated/)
+})

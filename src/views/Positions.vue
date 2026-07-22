@@ -231,10 +231,12 @@
       v-model:show="showAddModal"
       position="bottom"
       round
+      teleport="body"
       class="position-form-popup"
       :overlay-style="{ zIndex: 10998 }"
       :z-index="10999"
       safe-area-inset-bottom
+      @closed="restorePositionsScroll"
     >
       <div class="modal-content">
         <div class="modal-title">{{ editingPosition ? '✏️ 编辑持仓' : '📦 添加持仓' }}</div>
@@ -311,7 +313,7 @@
     </van-popup>
 
     <!-- 成员选择器 -->
-    <van-popup v-model:show="showMemberPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
+    <van-popup v-model:show="showMemberPicker" position="bottom" teleport="body" :overlay-style="{ zIndex: 11000 }" :z-index="11001" safe-area-inset-bottom>
       <van-picker
         :columns="memberPickerOptions"
         @confirm="onMemberConfirm"
@@ -320,7 +322,7 @@
     </van-popup>
 
     <!-- 账户选择器 -->
-    <van-popup v-model:show="showAccountPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
+    <van-popup v-model:show="showAccountPicker" position="bottom" teleport="body" :overlay-style="{ zIndex: 11000 }" :z-index="11001" safe-area-inset-bottom>
       <van-picker
         :columns="accountPickerOptions"
         @confirm="onAccountConfirm"
@@ -329,7 +331,7 @@
     </van-popup>
 
     <!-- 分红方式选择器 -->
-    <van-popup v-model:show="showDividendPicker" position="bottom" :overlay-style="{ zIndex: 10998 }" :z-index="10999" safe-area-inset-bottom>
+    <van-popup v-model:show="showDividendPicker" position="bottom" teleport="body" :overlay-style="{ zIndex: 11000 }" :z-index="11001" safe-area-inset-bottom>
       <van-picker
         :columns="dividendOptions"
         @confirm="onDividendConfirm"
@@ -340,7 +342,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
+import { ref, computed, nextTick, onActivated, onMounted, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi, fundApi } from '../api'
@@ -354,16 +356,18 @@ import {
   loadAllocationProfiles,
 } from '../utils/allocationStorage'
 import { readPageCache, writePageCache } from '../utils/pageCache'
+import { readPositionViewState, writePositionViewState } from '../utils/positionViewState'
 
 const router = useRouter()
 const route = useRoute()
 const cachedPositions = readPageCache('positions')
+const cachedViewState = readPositionViewState()
 
 const syncingId = ref(null)
 const syncingAll = ref(false)
 const loading = ref(false)
 const positionsRaw = ref(cachedPositions?.positions || [])
-const viewOption = ref('market_value_desc')
+const viewOption = ref(cachedViewState.viewOption)
 const syncProgressText = ref('同步中...')
 const viewModeConfig = computed(() => ({
   abnormal: { status: 'abnormal', sort: 'market_value_desc' },
@@ -388,8 +392,9 @@ const accounts = ref(cachedPositions?.accounts || [])
 const members = ref(cachedPositions?.members || [])
 const allocationProfiles = ref(loadAllocationProfiles())
 const allocationLastLoadedAt = ref(0)
-const selectedMemberId = ref(null)
-const selectedAccountId = ref(null)
+const selectedMemberId = ref(cachedViewState.memberId)
+const selectedAccountId = ref(cachedViewState.accountId)
+const positionsScrollTop = ref(0)
 const showAddModal = ref(false)
 const showMemberPicker = ref(false)
 const showAccountPicker = ref(false)
@@ -698,6 +703,7 @@ const handleSubmit = async () => {
 }
 
 const handleEdit = (position) => {
+  capturePositionsScroll()
   editingPosition.value = position
   formData.value = {
     memberId: position.member_id || '',
@@ -815,6 +821,7 @@ const onDividendConfirm = ({ selectedOptions }) => {
 }
 
 const openAddModal = () => {
+  capturePositionsScroll()
   editingPosition.value = null
   formData.value = {
     memberName: '',
@@ -852,6 +859,23 @@ const closeModal = () => {
   }
 }
 
+const getPositionsScroller = () => document.querySelector('.app-content')
+
+const capturePositionsScroll = () => {
+  positionsScrollTop.value = Number(getPositionsScroller()?.scrollTop || 0)
+}
+
+const restorePositionsScroll = async () => {
+  await nextTick()
+  const scrollTop = positionsScrollTop.value
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const scroller = getPositionsScroller()
+      if (scroller) scroller.scrollTop = scrollTop
+    })
+  })
+}
+
 const ensureFreshData = async ({ force = false } = {}) => {
   refreshAllocationProfiles({ force }).catch(() => {})
   if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) {
@@ -865,9 +889,21 @@ const ensureFreshData = async ({ force = false } = {}) => {
 }
 
 const applyRouteFilters = () => {
-  selectedAccountId.value = route.query.account_id ? String(route.query.account_id) : null
-  selectedMemberId.value = route.query.member_id ? String(route.query.member_id) : null
+  if (Object.prototype.hasOwnProperty.call(route.query, 'member_id')) {
+    selectedMemberId.value = route.query.member_id && route.query.member_id !== 'all'
+      ? String(route.query.member_id)
+      : null
+  }
+  if (Object.prototype.hasOwnProperty.call(route.query, 'account_id')) {
+    selectedAccountId.value = route.query.account_id && route.query.account_id !== 'all'
+      ? String(route.query.account_id)
+      : null
+  }
 }
+
+watch([selectedMemberId, selectedAccountId, viewOption], ([memberId, accountId, nextViewOption]) => {
+  writePositionViewState({ memberId, accountId, viewOption: nextViewOption })
+}, { immediate: true })
 
 onMounted(() => {
   window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleAllocationProfilesUpdated)
@@ -895,6 +931,10 @@ onBeforeUnmount(() => {
 })
 
 onDeactivated(() => {
+  showAddModal.value = false
+  showMemberPicker.value = false
+  showAccountPicker.value = false
+  showDividendPicker.value = false
   setAppTabbarVisible(true)
 })
 </script>
@@ -912,6 +952,9 @@ onDeactivated(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .filter-dropdowns {
