@@ -52,7 +52,16 @@
 
     <van-loading v-if="loading" type="spinner" class="loading" />
 
-    <van-popup v-model:show="showTradeModal" position="bottom" round>
+    <van-popup
+      v-model:show="showTradeModal"
+      position="bottom"
+      round
+      teleport="body"
+      safe-area-inset-bottom
+      :z-index="11000"
+      :overlay-style="{ zIndex: 10999 }"
+      class="trade-editor-popup"
+    >
       <div class="modal-content">
         <div class="modal-title">{{ currentTradeConfig.icon }} {{ currentTradeConfig.title }}</div>
 
@@ -63,6 +72,7 @@
           </div>
           <van-cell-group inset>
             <van-field
+              v-if="!isExistingBuy"
               :model-value="formData.tradeType"
               is-link
               readonly
@@ -100,6 +110,7 @@
               :rules="[{ required: true, message: '请输入基金代码' }]"
             />
             <van-field
+              v-if="!isExistingBuy"
               v-model="formData.fundName"
               :label="isConversion ? '转出基金名称' : '基金名称'"
               placeholder="自动填充，也可手填"
@@ -162,7 +173,7 @@
             />
           </van-cell-group>
 
-          <div v-if="recommendedFunds.length && !isNewBuy" class="quick-fund-card">
+          <div v-if="recommendedFunds.length && !isNewBuy && !isExistingBuy" class="quick-fund-card">
             <div class="quick-fund-title">当前账户常用基金</div>
             <div class="quick-fund-list">
               <button
@@ -199,23 +210,23 @@
       </div>
     </van-popup>
 
-    <van-popup v-model:show="showAccountPicker" position="bottom">
+    <van-popup v-model:show="showAccountPicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker :columns="accountPickerOptions" @confirm="onAccountConfirm" @cancel="showAccountPicker = false" />
     </van-popup>
 
-    <van-popup v-model:show="showMemberPicker" position="bottom">
+    <van-popup v-model:show="showMemberPicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker :columns="memberPickerOptions" @confirm="onMemberConfirm" @cancel="showMemberPicker = false" />
     </van-popup>
 
-    <van-popup v-model:show="showExistingFundPicker" position="bottom">
+    <van-popup v-model:show="showExistingFundPicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker :columns="existingFundPickerOptions" @confirm="onExistingFundConfirm" @cancel="showExistingFundPicker = false" />
     </van-popup>
 
-    <van-popup v-model:show="showTypePicker" position="bottom">
+    <van-popup v-model:show="showTypePicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-picker :columns="tradeTypePickerOptions" @confirm="onTypeConfirm" @cancel="showTypePicker = false" />
     </van-popup>
 
-    <van-popup v-model:show="showDatePicker" position="bottom">
+    <van-popup v-model:show="showDatePicker" position="bottom" teleport="body" safe-area-inset-bottom :z-index="12000" :overlay-style="{ zIndex: 11999 }">
       <van-date-picker
         v-model="currentDate"
         :min-date="minDate"
@@ -353,15 +364,16 @@ const isConversion = computed(() => formData.value.tradeType === '转换')
 const isExistingBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'existing')
 const isNewBuy = computed(() => formData.value.tradeType === '买入' && formData.value.buyMode === 'new')
 const requiresQuantity = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
-const showsAmountField = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
+const showsAmountField = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType) && !isExistingBuy.value)
 const showsFeeField = computed(() => ['买入', '卖出'].includes(formData.value.tradeType))
-const amountRequired = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
+const amountRequired = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType) && !isExistingBuy.value)
 const showBuyEstimate = computed(() => formData.value.tradeType === '买入' && formData.value.amount && formData.value.fundCode)
 
 const quantityLabel = computed(() => {
   if (formData.value.tradeType === '手动校准') return '目标份额'
   if (formData.value.tradeType === '红利再投') return '新增份额'
   if (formData.value.tradeType === '转换') return '转出份额'
+  if (isExistingBuy.value) return '买入份额'
   return '交易份额'
 })
 
@@ -646,6 +658,17 @@ async function handleTrade() {
       await Promise.all([fetchTrades(), fetchPositions()])
       return
     }
+    let resolvedAmount = Number(formData.value.amount || 0)
+    if (isExistingBuy.value) {
+      const position = positions.value.find(item => item.account_id === formData.value.accountId && item.fund_code === formData.value.fundCode)
+      let nav = Number(position?.nav_dwjz || position?.nav_gsz || 0)
+      if (nav <= 0) {
+        const market = await marketApi.get(formData.value.fundCode.trim())
+        nav = Number(market?.confirmed_nav || market?.nav || 0)
+      }
+      if (nav <= 0) throw new Error('该基金暂无可用净值，暂时无法计算买入成本')
+      resolvedAmount = Number((Number(formData.value.quantity) * nav).toFixed(4))
+    }
     const payload = {
       accountId: formData.value.accountId,
       account_id: formData.value.accountId,
@@ -656,7 +679,7 @@ async function handleTrade() {
       tradeType: formData.value.tradeType,
       trade_type: formData.value.tradeType,
       quantity: requiresQuantity.value ? Number(formData.value.quantity || 0) : null,
-      amount: showsAmountField.value ? Number(formData.value.amount || 0) : null,
+      amount: formData.value.tradeType === '买入' ? resolvedAmount : (showsAmountField.value ? Number(formData.value.amount || 0) : null),
       fee: showsFeeField.value ? Number(formData.value.fee || 0) : 0,
       tradeDate: formData.value.tradeDate,
       trade_date: formData.value.tradeDate,
@@ -1055,7 +1078,16 @@ watch(() => route.query.type, () => {
 }
 
 .modal-content {
-  padding: 18px 0 24px;
+  max-height: min(90vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 0 calc(28px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+.trade-editor-popup {
+  max-height: 92vh;
+  overflow: hidden;
 }
 
 .buy-mode-switch {
