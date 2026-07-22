@@ -113,6 +113,7 @@ export const positionApi = {
 export const tradeApi = {
   list: (params) => apiClient.get('/trades', { params }),
   create: (data) => apiClient.post('/trades', data),
+  convert: (data) => apiClient.post('/trades/convert', data),
   delete: (id) => apiClient.delete(`/trades/${id}`),
 }
 

@@ -1,8 +1,9 @@
 const normalizeTradeType = (type) => {
   if (type === 'buy') return '买入'
   if (type === 'sell') return '卖出'
+  if (type === 'convert') return '转换'
   if (!type) return ''
-  return type
+  return ['买入', '卖出', '转换'].includes(type) ? type : '买入'
 }
 
 const getAccountId = (account = {}) => account?.id || account?.account_id || ''

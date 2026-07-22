@@ -30,9 +30,14 @@ test('resolveTradeDraft 在偏好账户不存在时回退到首个账户', () =>
     preferredTradeType: '红利再投',
   })
 
-  assert.equal(result.tradeType, '红利再投')
+  assert.equal(result.tradeType, '买入')
   assert.equal(result.accountId, 'a1')
   assert.equal(result.accountName, '默认账户')
+})
+
+test('resolveTradeDraft 支持转换路由并收敛旧交易类型', () => {
+  assert.equal(resolveTradeDraft({ routeType: 'convert' }).tradeType, '转换')
+  assert.equal(resolveTradeDraft({ preferredTradeType: '现金分红' }).tradeType, '买入')
 })
 
 test('buildTradeQuickFundOptions 按账户过滤、去重并按市值排序', () => {

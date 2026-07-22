@@ -2782,6 +2782,68 @@ export async function onRequest(context) {
       return jsonResponse({ code: 0, data: { total: trades.length, trades } });
     }
 
+    // 基金转换：以一组配对的转出/转入流水原子化呈现给前端
+    if (path === '/api/trades/convert' && method === 'POST') {
+      const body = await context.request.json();
+      const accountId = body.accountId || body.account_id;
+      const fromFundCode = String(body.fromFundCode || body.from_fund_code || '').trim();
+      const toFundCode = String(body.toFundCode || body.to_fund_code || '').trim();
+      const fromQuantity = toNumber(body.fromQuantity ?? body.from_quantity);
+      const toQuantity = toNumber(body.toQuantity ?? body.to_quantity);
+      const transferCost = toNumber(body.amount ?? body.transferCost ?? body.transfer_cost);
+      const tradeDate = body.tradeDate || body.trade_date || new Date().toISOString().slice(0, 10);
+      if (!accountId || !fromFundCode || !toFundCode) {
+        return jsonResponse({ code: 400, message: '账户、转出基金和转入基金不能为空' }, 400);
+      }
+      if (fromFundCode === toFundCode) {
+        return jsonResponse({ code: 400, message: '转出基金和转入基金不能相同' }, 400);
+      }
+      if (fromQuantity <= 0 || toQuantity <= 0 || transferCost <= 0) {
+        return jsonResponse({ code: 400, message: '转出份额、转入份额和转换成本必须大于0' }, 400);
+      }
+
+      const groupId = generateId();
+      const outId = generateId();
+      const inId = generateId();
+      const userNote = String(body.note || '').trim();
+      const note = `[转换:${groupId}]${userNote ? ` ${userNote}` : ''}`;
+      try {
+        await ensurePositionBaseForTrade({
+          account_id: accountId, fund_code: fromFundCode, fund_name: body.fromFundName || body.from_fund_name || '',
+          trade_type: TRADE_TYPES.TRANSFER_OUT,
+        });
+        await ensurePositionBaseForTrade({
+          account_id: accountId, fund_code: toFundCode, fund_name: body.toFundName || body.to_fund_name || '',
+          trade_type: TRADE_TYPES.TRANSFER_IN,
+        });
+        const insertSql = `INSERT INTO trades (
+          id, account_id, fund_code, fund_name, trade_type, quantity, amount, fee, trade_date, note,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, unixepoch(), unixepoch())`;
+        await env.DB.batch([
+          env.DB.prepare(insertSql).bind(outId, accountId, fromFundCode, body.fromFundName || body.from_fund_name || '', TRADE_TYPES.TRANSFER_OUT, fromQuantity, transferCost, tradeDate, note),
+          env.DB.prepare(insertSql).bind(inId, accountId, toFundCode, body.toFundName || body.to_fund_name || '', TRADE_TYPES.TRANSFER_IN, toQuantity, transferCost, tradeDate, note),
+        ]);
+        const [fromPosition, toPosition] = await Promise.all([
+          recomputeAndPersistPosition(accountId, fromFundCode),
+          recomputeAndPersistPosition(accountId, toFundCode),
+        ]);
+        return jsonResponse({ code: 0, data: {
+          group_id: groupId,
+          trade_ids: [outId, inId],
+          from_position: fromPosition ? serializePositionRow(fromPosition) : null,
+          to_position: toPosition ? serializePositionRow(toPosition) : null,
+        } });
+      } catch (error) {
+        await env.DB.prepare('DELETE FROM trades WHERE id IN (?, ?)').bind(outId, inId).run();
+        await Promise.allSettled([
+          recomputeAndPersistPosition(accountId, fromFundCode),
+          recomputeAndPersistPosition(accountId, toFundCode),
+        ]);
+        return jsonResponse({ code: 400, message: error.message || '基金转换失败' }, 400);
+      }
+    }
+
     // 创建交易
     if (path === '/api/trades' && method === 'POST') {
       const body = await context.request.json();

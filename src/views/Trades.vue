@@ -1,5 +1,18 @@
 <template>
   <div class="trades-page">
+    <section class="trade-hero">
+      <div class="eyebrow">交易中心</div>
+      <h1>今天要做什么？</h1>
+      <p>只保留真实发生的三类交易，录入后自动更新持仓。</p>
+      <div class="scene-grid">
+        <button v-for="type in CORE_TRADE_TYPES" :key="type" type="button" class="scene-card" :class="type" @click="openTradeModal(type)">
+          <span class="scene-icon">{{ TRADE_CONFIGS[type].icon }}</span>
+          <strong>{{ type }}</strong>
+          <small>{{ TRADE_CONFIGS[type].shortHint }}</small>
+        </button>
+      </div>
+    </section>
+
     <div class="filter-bar">
       <van-dropdown-menu>
         <van-dropdown-item v-model="selectedAccount" :options="accountFilterOptions" @change="fetchTrades" />
@@ -7,33 +20,17 @@
       </van-dropdown-menu>
     </div>
 
-    <div class="tips-card">
-      <div class="tips-title">真实交易支持</div>
-      <div class="tips-text">买入、卖出、现金分红、红利再投、转入、转出、手动校准都会自动回写持仓。</div>
-    </div>
-
-    <div class="quick-type-bar">
-      <button
-        v-for="type in TRADE_TYPES"
-        :key="type"
-        class="quick-type-chip"
-        type="button"
-        @click="openTradeModal(type)"
-      >
-        {{ TRADE_CONFIGS[type].icon }} {{ type }}
-      </button>
-    </div>
-
     <div class="trade-list">
+      <div class="list-heading"><strong>交易记录</strong><span>共 {{ trades.length }} 笔</span></div>
       <div v-for="trade in trades" :key="trade.id" class="trade-card">
-        <div class="trade-icon" :class="tradeUi(trade.trade_type).className">
-          {{ tradeUi(trade.trade_type).icon }}
+        <div class="trade-icon" :class="tradeUi(trade.trade_type, trade.note).className">
+          {{ tradeUi(trade.trade_type, trade.note).icon }}
         </div>
 
         <div class="trade-info">
           <div class="trade-title-row">
             <span class="fund-name">{{ getFundName(trade) }}</span>
-            <span class="trade-type" :class="tradeUi(trade.trade_type).className">{{ trade.trade_type }}</span>
+            <span class="trade-type" :class="tradeUi(trade.trade_type, trade.note).className">{{ tradeDisplayType(trade) }}</span>
           </div>
           <div class="trade-meta">
             <span>{{ trade.account_name || '未命名账户' }}</span>
@@ -54,12 +51,6 @@
     </div>
 
     <van-loading v-if="loading" type="spinner" class="loading" />
-
-    <div class="fab-wrapper">
-      <van-button round type="primary" class="fab" @click="openTradeModal('买入')">💵 买入</van-button>
-      <van-button round type="warning" class="fab" @click="openTradeModal('卖出')">💸 卖出</van-button>
-      <van-button round type="default" class="fab" @click="openTradeModal('现金分红')">➕ 更多类型</van-button>
-    </div>
 
     <van-popup v-model:show="showTradeModal" position="bottom" round>
       <div class="modal-content">
@@ -87,16 +78,32 @@
             />
             <van-field
               v-model="formData.fundCode"
-              label="基金代码"
+              :label="isConversion ? '转出基金代码' : '基金代码'"
               placeholder="如：008163"
               @blur="onFundCodeBlur"
               :rules="[{ required: true, message: '请输入基金代码' }]"
             />
             <van-field
               v-model="formData.fundName"
-              label="基金名称"
+              :label="isConversion ? '转出基金名称' : '基金名称'"
               placeholder="自动填充，也可手填"
             />
+            <template v-if="isConversion">
+              <van-field
+                v-model="formData.targetFundCode"
+                label="转入基金代码"
+                placeholder="请输入转入基金代码"
+                :rules="[{ required: true, message: '请输入转入基金代码' }]"
+              />
+              <van-field v-model="formData.targetFundName" label="转入基金名称" placeholder="选填" />
+              <van-field
+                v-model.number="formData.targetQuantity"
+                label="转入份额"
+                type="number"
+                placeholder="请输入确认后的转入份额"
+                :rules="[{ required: true, message: '请输入转入份额' }]"
+              />
+            </template>
             <van-field
               v-if="requiresQuantity"
               v-model.number="formData.quantity"
@@ -208,8 +215,9 @@ const route = useRoute()
 const TRADE_DRAFT_STORAGE_KEY = 'investment-h5:trade-draft'
 
 const TRADE_CONFIGS = {
-  买入: { title: '买入', icon: '📥', className: 'buy', hint: '金额填买入成交金额，手续费单独填写；若不填份额，会按最新净值自动估算。' },
-  卖出: { title: '卖出', icon: '📤', className: 'sell', hint: '金额填卖出成交金额，系统会自动按移动平均成本减少持仓并累计已实现收益。' },
+  买入: { title: '买入', icon: '＋', className: 'buy', shortHint: '新增持仓', hint: '金额填买入成交金额，手续费单独填写；若不填份额，会按最新净值自动估算。' },
+  卖出: { title: '卖出', icon: '－', className: 'sell', shortHint: '减少持仓', hint: '金额填卖出成交金额，系统会自动按移动平均成本减少持仓并累计已实现收益。' },
+  转换: { title: '基金转换', icon: '⇄', className: 'convert', shortHint: '基金互转', hint: '填写转出和转入的确认份额，转换成本会在两只基金间平移，不计为一次卖出收益。' },
   现金分红: { title: '现金分红', icon: '💰', className: 'dividend', hint: '金额填实际到账分红，份额不变。' },
   红利再投: { title: '红利再投', icon: '🌱', className: 'reinvest', hint: '填写新增份额，金额可填本次红利金额用于留痕；系统会增加份额但不增加剩余持仓成本。' },
   转入: { title: '转入', icon: '↘️', className: 'transfer', hint: '用于跨账户转入或补录转仓，金额填转入后的成本。' },
@@ -217,7 +225,7 @@ const TRADE_CONFIGS = {
   手动校准: { title: '手动校准', icon: '🧮', className: 'calibration', hint: '当平台持仓与系统不一致时使用，直接把份额/成本校准到目标值。' },
 }
 
-const TRADE_TYPES = Object.keys(TRADE_CONFIGS)
+const CORE_TRADE_TYPES = ['买入', '卖出', '转换']
 
 const loading = ref(false)
 const trades = ref([])
@@ -268,6 +276,9 @@ function createEmptyForm() {
     fee: 0,
     tradeDate: new Date().toISOString().split('T')[0],
     note: '',
+    targetFundCode: '',
+    targetFundName: '',
+    targetQuantity: null,
   }
 }
 
@@ -278,7 +289,8 @@ const accountFilterOptions = computed(() => [
 
 const typeFilterOptions = computed(() => [
   { text: '全部类型', value: null },
-  ...TRADE_TYPES.map(type => ({ text: type, value: type })),
+  { text: '买入', value: '买入' },
+  { text: '卖出', value: '卖出' },
 ])
 
 const accountPickerOptions = computed(() => accounts.value.map(account => ({
@@ -286,19 +298,21 @@ const accountPickerOptions = computed(() => accounts.value.map(account => ({
   value: getAccountId(account),
 })))
 
-const tradeTypePickerOptions = computed(() => TRADE_TYPES.map(type => ({ text: type, value: type })))
+const tradeTypePickerOptions = computed(() => CORE_TRADE_TYPES.map(type => ({ text: type, value: type })))
 const recommendedFunds = computed(() => buildTradeQuickFundOptions(positions.value, formData.value.accountId || selectedAccount.value || ''))
 
 const currentTradeConfig = computed(() => TRADE_CONFIGS[formData.value.tradeType] || TRADE_CONFIGS.买入)
-const requiresQuantity = computed(() => ['买入', '卖出', '红利再投', '转入', '转出', '手动校准'].includes(formData.value.tradeType))
-const showsAmountField = computed(() => ['买入', '卖出', '现金分红', '红利再投', '转入', '转出', '手动校准'].includes(formData.value.tradeType))
+const isConversion = computed(() => formData.value.tradeType === '转换')
+const requiresQuantity = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
+const showsAmountField = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
 const showsFeeField = computed(() => ['买入', '卖出'].includes(formData.value.tradeType))
-const amountRequired = computed(() => ['买入', '卖出', '现金分红', '转入'].includes(formData.value.tradeType))
+const amountRequired = computed(() => ['买入', '卖出', '转换'].includes(formData.value.tradeType))
 const showBuyEstimate = computed(() => formData.value.tradeType === '买入' && formData.value.amount && formData.value.fundCode)
 
 const quantityLabel = computed(() => {
   if (formData.value.tradeType === '手动校准') return '目标份额'
   if (formData.value.tradeType === '红利再投') return '新增份额'
+  if (formData.value.tradeType === '转换') return '转出份额'
   return '交易份额'
 })
 
@@ -309,6 +323,7 @@ const quantityPlaceholder = computed(() => {
     case '红利再投': return '请输入新增份额'
     case '转入': return '请输入转入份额'
     case '转出': return '请输入转出份额'
+    case '转换': return '请输入确认后的转出份额'
     case '手动校准': return '请输入校准后的总份额'
     default: return '请输入份额'
   }
@@ -323,6 +338,7 @@ const amountLabel = computed(() => {
     case '转入': return '转入成本'
     case '转出': return '转出成本'
     case '手动校准': return '目标成本'
+    case '转换': return '转换成本'
     default: return '金额'
   }
 })
@@ -332,6 +348,7 @@ const amountPlaceholder = computed(() => {
     case '红利再投': return '选填：本次红利金额'
     case '转出': return '选填：不填则按平均成本自动扣减'
     case '手动校准': return '请输入校准后的总成本'
+    case '转换': return '请输入转出份额对应的持仓成本'
     default: return `请输入${amountLabel.value}`
   }
 })
@@ -356,8 +373,16 @@ function getAccountName(account) {
   return account?.name || account?.account_name || account?.['账户名称'] || ''
 }
 
-function tradeUi(type) {
+function tradeUi(type, note = '') {
+  if ((type === '转入' || type === '转出') && note.startsWith('[转换:')) return TRADE_CONFIGS.转换
   return TRADE_CONFIGS[type] || { icon: '📝', className: 'default', title: type, hint: '' }
+}
+
+function tradeDisplayType(trade) {
+  if ((trade.trade_type === '转入' || trade.trade_type === '转出') && trade.note?.startsWith('[转换:')) {
+    return trade.trade_type === '转出' ? '转换·转出' : '转换·转入'
+  }
+  return trade.trade_type
 }
 
 function getFundName(trade) {
@@ -508,8 +533,37 @@ async function handleTrade() {
     showToast(`请输入${amountLabel.value}`)
     return
   }
+  if (isConversion.value) {
+    if (!formData.value.targetFundCode?.trim() || !formData.value.targetQuantity) {
+      showToast('请填写转入基金和转入份额')
+      return
+    }
+    if (formData.value.targetFundCode.trim() === formData.value.fundCode.trim()) {
+      showToast('转出和转入基金不能相同')
+      return
+    }
+  }
 
   try {
+    if (isConversion.value) {
+      await tradeApi.convert({
+        accountId: formData.value.accountId,
+        fromFundCode: formData.value.fundCode.trim(),
+        fromFundName: formData.value.fundName?.trim(),
+        fromQuantity: Number(formData.value.quantity),
+        toFundCode: formData.value.targetFundCode.trim(),
+        toFundName: formData.value.targetFundName?.trim(),
+        toQuantity: Number(formData.value.targetQuantity),
+        amount: Number(formData.value.amount),
+        tradeDate: formData.value.tradeDate,
+        note: formData.value.note?.trim(),
+      })
+      saveTradeDraftPreference()
+      showToast('转换成功')
+      closeModal()
+      await Promise.all([fetchTrades(), fetchPositions()])
+      return
+    }
     const payload = {
       accountId: formData.value.accountId,
       account_id: formData.value.accountId,
@@ -627,12 +681,62 @@ watch(() => route.query.type, () => {
 <style scoped>
 .trades-page {
   min-height: 100vh;
-  background: #f5f5f5;
-  padding-bottom: calc(220px + env(safe-area-inset-bottom));
+  background: #f4f7fb;
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
 }
 
+.trade-hero {
+  margin: 12px;
+  padding: 18px;
+  color: #fff;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #0f2747 0%, #164e63 100%);
+  box-shadow: 0 14px 34px rgba(15, 39, 71, .18);
+}
+
+.eyebrow { font-size: 11px; letter-spacing: 2px; color: #99f6e4; }
+.trade-hero h1 { margin: 5px 0 3px; font-size: 22px; }
+.trade-hero p { margin: 0; color: #cbd5e1; font-size: 12px; }
+
+.scene-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.scene-card {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 10px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .09);
+  color: #fff;
+  text-align: left;
+}
+
+.scene-card:active { transform: scale(.97); background: rgba(255, 255, 255, .16); }
+.scene-icon { font-size: 20px; line-height: 1; color: #5eead4; }
+.scene-card strong { font-size: 14px; }
+.scene-card small { color: #cbd5e1; font-size: 10px; }
+
+.list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 2px 0;
+  color: #0f172a;
+}
+.list-heading span { color: #94a3b8; font-size: 12px; }
+
 .filter-bar {
+  margin: 0 12px 10px;
+  overflow: hidden;
   background: white;
+  border-radius: 12px;
 }
 
 .quick-type-bar {
@@ -685,8 +789,8 @@ watch(() => route.query.type, () => {
 
 .trade-card {
   background: white;
-  border-radius: 14px;
-  padding: 14px;
+  border-radius: 13px;
+  padding: 12px;
   display: flex;
   gap: 12px;
   align-items: flex-start;
@@ -737,6 +841,12 @@ watch(() => route.query.type, () => {
 .trade-type.calibration {
   background: #f3e8ff;
   color: #9333ea;
+}
+
+.trade-icon.convert,
+.trade-type.convert {
+  background: #ecfeff;
+  color: #0e7490;
 }
 
 .trade-icon.default,
