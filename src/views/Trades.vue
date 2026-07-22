@@ -100,12 +100,20 @@
               :rules="[{ required: true, message: '请选择账户' }]"
             />
             <van-field
+              v-if="isExistingBuy"
+              :model-value="existingFundDisplay"
+              label="已有基金"
+              placeholder="请选择该账户下的基金"
+              readonly
+              is-link
+              @click="openExistingFundPicker"
+              :rules="[{ required: true, message: '请选择已有基金' }]"
+            />
+            <van-field
+              v-else
               v-model="formData.fundCode"
               :label="isConversion ? '转出基金代码' : '基金代码'"
-              :placeholder="isExistingBuy ? '选择该账户已有基金' : '如：008163'"
-              :readonly="isExistingBuy"
-              :is-link="isExistingBuy"
-              @click="isExistingBuy && (showExistingFundPicker = true)"
+              placeholder="如：008163"
               @blur="onFundCodeBlur"
               :rules="[{ required: true, message: '请输入基金代码' }]"
             />
@@ -355,6 +363,11 @@ const existingFundPickerOptions = computed(() => positions.value
     value: position.fund_code,
     fundName: position.fund_name || '',
   })))
+const existingFundDisplay = computed(() => {
+  if (!formData.value.fundCode) return ''
+  const position = positions.value.find(item => item.account_id === formData.value.accountId && item.fund_code === formData.value.fundCode)
+  return `${position?.fund_name || formData.value.fundName || formData.value.fundCode} · ${formData.value.fundCode}`
+})
 
 const tradeTypePickerOptions = computed(() => CORE_TRADE_TYPES.map(type => ({ text: type, value: type })))
 const recommendedFunds = computed(() => buildTradeQuickFundOptions(positions.value, formData.value.accountId || selectedAccount.value || ''))
@@ -736,6 +749,18 @@ function openAccountPicker() {
     return
   }
   showAccountPicker.value = true
+}
+
+function openExistingFundPicker() {
+  if (!formData.value.accountId) {
+    showToast('请先选择成员和账户')
+    return
+  }
+  if (!existingFundPickerOptions.value.length) {
+    showToast('该账户下暂无可追加的基金')
+    return
+  }
+  showExistingFundPicker.value = true
 }
 
 function onMemberConfirm({ selectedOptions }) {
