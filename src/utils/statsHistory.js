@@ -51,6 +51,21 @@ const getPeriodKey = (dateKey, period) => {
   return String(dateKey)
 }
 
+const getPeriodStartDate = (period, periodKey) => {
+  if (period === 'week') return String(periodKey)
+  if (period === 'month') return `${periodKey}-01`
+  if (period === 'quarter') {
+    const [year, quarter] = String(periodKey).split('-Q').map(Number)
+    return `${year}-${String((quarter - 1) * 3 + 1).padStart(2, '0')}-01`
+  }
+  if (period === 'halfyear') {
+    const [year, half] = String(periodKey).split('-H').map(Number)
+    return `${year}-${half === 1 ? '01' : '07'}-01`
+  }
+  if (period === 'year') return `${periodKey}-01-01`
+  return String(periodKey)
+}
+
 const calcProfitRate = (profit, marketValue) => {
   const principal = safeNumber(marketValue) - safeNumber(profit)
   if (principal <= 0) return 0
@@ -307,7 +322,7 @@ export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accou
     return {
       period_key: periodKey,
       period_label: formatPeriodLabel(period, periodKey),
-      start_date: rows[0]?.date || '',
+      start_date: getPeriodStartDate(period, periodKey),
       end_date: latest?.date || '',
       member_id: latest?.member_id || memberId,
       member_name: latest?.member_name || '全部成员',
@@ -359,7 +374,7 @@ const aggregateTrendRows = (rows = [], period) => {
       ...latest,
       period_key: periodKey,
       period_label: formatPeriodLabel(period, periodKey),
-      start_date: groupRows[0]?.date,
+      start_date: getPeriodStartDate(period, periodKey),
       end_date: latest?.date,
     }
   })
@@ -644,6 +659,7 @@ export const __test__ = {
   calcProfitRate,
   calcDailyProfitRate,
   getPeriodKey,
+  getPeriodStartDate,
   formatPeriodLabel,
   pickAggregationPeriod,
   getChinaDateString,
