@@ -1,4 +1,5 @@
 const SYNC_URL = 'https://investment-h5.pages.dev/api/fund/sync/pending?mode=night&includeQdii=true&batchSize=3'
+const SNAPSHOT_URL = 'https://investment-h5.pages.dev/api/profit-snapshots/capture'
 const MAX_BATCHES = 12
 
 async function triggerSync(env) {
@@ -26,7 +27,23 @@ async function triggerSync(env) {
     if (remaining === 0 || advanced === 0) break
   }
 
-  return { synced: totalSynced, deferred: remaining || 0 }
+  const snapshotResponse = await fetch(SNAPSHOT_URL, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'X-Cron-Secret': env.CRON_SYNC_SECRET,
+    },
+  })
+  const snapshotBody = await snapshotResponse.text()
+  if (!snapshotResponse.ok) {
+    throw new Error(`Investment snapshot capture failed (${snapshotResponse.status}): ${snapshotBody.slice(0, 500)}`)
+  }
+  const snapshotResult = JSON.parse(snapshotBody)
+  return {
+    synced: totalSynced,
+    deferred: remaining || 0,
+    snapshot_date: snapshotResult?.data?.snapshot?.date || null,
+  }
 }
 
 export default {

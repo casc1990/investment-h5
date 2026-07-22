@@ -4,6 +4,7 @@
  */
 
 import { buildDividendTrade, rebuildPositionFromTrades, normalizeTradeType, toNumber, TRADE_TYPES } from '../shared/tradeEngine.js'
+import { buildServerProfitSnapshot } from '../shared/profitSnapshot.js'
 
 let runtimeSchemaInitPromise = null;
 let advisorySchemaInitPromise = null;
@@ -1129,7 +1130,7 @@ export async function onRequest(context) {
   const method = context.request.method;
   const env = context.env;
   const isCronAuthorized = method === 'POST'
-    && (path === '/api/fund/sync' || path === '/api/fund/sync/pending')
+    && (path === '/api/fund/sync' || path === '/api/fund/sync/pending' || path === '/api/profit-snapshots/capture')
     && isAuthorizedCronRequest(context.request, env);
 
   // CORS 预检
@@ -1321,6 +1322,56 @@ export async function onRequest(context) {
         sync_last_error: r.sync_last_error || null,
         trade_count: Number(r.trade_count || 0),
       };
+    }
+
+    async function captureCurrentProfitSnapshot() {
+      await ensureAdvisorySchemaOnce();
+      const { results: positionRows } = await env.DB.prepare(`
+        SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id,
+               m.name as member_name, m.emoji as member_emoji,
+               s.gsz as nav_gsz, s.gszzl as nav_gszzl, s.dwjz as nav_dwjz,
+               s.jzrq as nav_jzrq, s.updated_at as nav_updated_at, s.prev_nav,
+               fs.state as sync_state, fs.last_attempt_at as sync_last_attempt_at,
+               fs.consecutive_failures as sync_consecutive_failures, fs.last_error as sync_last_error
+        FROM positions p
+        LEFT JOIN accounts a ON p.account_id = a.id
+        LEFT JOIN members m ON a.member_id = m.id
+        LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+        LEFT JOIN fund_sync_status fs ON p.fund_code = fs.fund_code
+      `).all();
+      const positions = (positionRows || []).map(serializePositionRow);
+      const { results: advisoryProducts } = await env.DB.prepare(`
+        SELECT p.id, p.product_name, p.account_id,
+               COALESCE(p.member_id, a.member_id) as member_id,
+               a.name as account_name, m.name as member_name, m.emoji as member_emoji,
+               s.snapshot_date, s.total_amount, s.daily_profit, s.current_profit, s.profit_rate
+        FROM advisory_products p
+        LEFT JOIN accounts a ON p.account_id = a.id
+        LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
+        LEFT JOIN advisory_product_snapshots s ON s.id = (
+          SELECT s2.id FROM advisory_product_snapshots s2
+          WHERE s2.product_id = p.id
+          ORDER BY s2.snapshot_date DESC, s2.updated_at DESC, s2.created_at DESC
+          LIMIT 1
+        )
+      `).all();
+      const capturedAt = Date.now();
+      const snapshot = buildServerProfitSnapshot({
+        positions,
+        advisoryProducts: advisoryProducts || [],
+        capturedAt,
+        fallbackDate: getChinaDateString(new Date(capturedAt)),
+      });
+      await env.DB.prepare(`
+        INSERT INTO profit_snapshots (snapshot_date, snapshot_json, captured_at, created_at, updated_at)
+        VALUES (?, ?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(snapshot_date) DO UPDATE SET
+          snapshot_json = excluded.snapshot_json,
+          captured_at = excluded.captured_at,
+          updated_at = unixepoch()
+        WHERE excluded.captured_at > profit_snapshots.captured_at
+      `).bind(snapshot.date, JSON.stringify(snapshot), snapshot.captured_at).run();
+      return snapshot;
     }
 
     async function ensureColumn(tableName, columnName, definition) {
@@ -2055,6 +2106,15 @@ export async function onRequest(context) {
         try { return JSON.parse(row.snapshot_json); } catch { return null; }
       }).filter(Boolean);
       return jsonResponse({ code: 0, data: { snapshots } });
+    }
+
+    if (path === '/api/profit-snapshots/capture' && method === 'POST') {
+      try {
+        const snapshot = await captureCurrentProfitSnapshot();
+        return jsonResponse({ code: 0, message: '收益快照已生成', data: { snapshot } });
+      } catch (error) {
+        return jsonResponse({ code: 500, message: error.message || '收益快照生成失败' }, 500);
+      }
     }
 
     if (path.match(/^\/api\/profit-snapshots\/\d{4}-\d{2}-\d{2}$/) && method === 'PUT') {

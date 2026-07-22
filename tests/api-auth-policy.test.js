@@ -17,6 +17,7 @@ test('健康检查和认证入口保持公开', () => {
 test('业务数据读取和写入均要求认证', () => {
   assert.equal(requiresAuthentication('/api/members', 'GET'), true)
   assert.equal(requiresAuthentication('/api/stats/overview', 'GET'), true)
+  assert.equal(requiresAuthentication('/api/profit-snapshots/capture', 'POST'), true)
   assert.equal(requiresAuthentication('/api/fund/sync', 'GET'), true)
   assert.equal(requiresAuthentication('/api/accounts', 'POST'), true)
   assert.equal(requiresAuthentication('/api/auth/logout', 'POST'), true)
