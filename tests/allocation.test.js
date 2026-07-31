@@ -6,6 +6,7 @@ import {
   ALLOCATION_ASSET_TYPES,
   ALLOCATION_FUND_STATUSES,
   applyAllocationBucketSelection,
+  buildAllocationBucketProfitPeriods,
   buildAllocationProfitTrend,
   buildAllocationBucketDailyProfitTrend,
   buildPositionAllocationStatusMap,
@@ -573,6 +574,78 @@ test('策略详情可按类别生成每日收益多折线趋势图，有几类�
   assert.equal(series[2].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 90)
 })
 
+test('分类基金收益统计可按日周月年聚合，并保留每支基金的周期收益联动数据', () => {
+  const periodProfile = {
+    ...profile,
+    funds: [
+      { positionId: 'p1', assetType: ALLOCATION_ASSET_TYPES.PURE_BOND, status: ALLOCATION_FUND_STATUSES.KEEP },
+      { positionId: 'p6', assetType: ALLOCATION_ASSET_TYPES.PURE_BOND, status: ALLOCATION_FUND_STATUSES.WATCH },
+    ],
+  }
+  const snapshots = [
+    {
+      date: '2026-06-29',
+      positions: [
+        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 100, yesterday_profit: 10 },
+        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -50, yesterday_profit: -5 },
+      ],
+    },
+    {
+      date: '2026-06-30',
+      positions: [
+        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 120, yesterday_profit: 20 },
+        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -40, yesterday_profit: 10 },
+      ],
+    },
+    {
+      date: '2026-07-01',
+      positions: [
+        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 150, yesterday_profit: 30 },
+        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -60, yesterday_profit: -20 },
+        { id: 'outside', cost: 9000, current_profit: 999, yesterday_profit: 999 },
+      ],
+    },
+  ]
+
+  const days = buildAllocationBucketProfitPeriods({
+    profile: periodProfile,
+    snapshots,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    period: 'day',
+  })
+  assert.deepEqual(days.map(item => item.profit), [5, 30, 10])
+  assert.deepEqual(days[2].funds.map(item => [item.positionId, item.profit]), [['p1', 30], ['p6', -20]])
+
+  const weeks = buildAllocationBucketProfitPeriods({
+    profile: periodProfile,
+    snapshots,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    period: 'week',
+  })
+  assert.equal(weeks.length, 1)
+  assert.equal(weeks[0].key, '2026-06-29')
+  assert.equal(weeks[0].profit, 45)
+  assert.deepEqual(weeks[0].funds.map(item => [item.positionId, item.profit]), [['p1', 60], ['p6', -15]])
+
+  const months = buildAllocationBucketProfitPeriods({
+    profile: periodProfile,
+    snapshots,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    period: 'month',
+  })
+  assert.deepEqual(months.map(item => [item.key, item.profit]), [['2026-06', 35], ['2026-07', 10]])
+
+  const years = buildAllocationBucketProfitPeriods({
+    profile: periodProfile,
+    snapshots,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    period: 'year',
+  })
+  assert.equal(years[0].profit, 45)
+  assert.equal(years[0].funds.length, 2)
+  assert.equal(years[0].profitRate, 0.3)
+})
+
 test('批量保存分类选择时，会替换当前分类并保留已存在基金状态', () => {
   const nextProfile = applyAllocationBucketSelection({
     profile,
@@ -695,12 +768,15 @@ test('分类收益日历组件支持单序列展示并压缩大额数值，避�
   assert.match(file, /@media \(max-width: 390px\)/)
 })
 
-test('分类基金持仓页把当前类别趋势改成每日收益统计日历风格', () => {
+test('分类基金持仓页把占比分布前置，并将日周月年收益与基金明细合并联动', () => {
   const file = readFileSync(new URL('../src/views/AllocationBucketHoldings.vue', import.meta.url), 'utf8')
 
   assert.match(file, /AllocationBucketProfitCalendar/)
-  assert.match(file, /当前类别每日收益统计/)
-  assert.match(file, /assetTypes: \[assetType\.value\]/)
-  assert.match(file, /summary-label="每日收益统计"/)
+  assert.match(file, /收益统计/)
+  assert.match(file, /periodOptions/)
+  assert.match(file, /buildAllocationBucketProfitPeriods/)
+  assert.match(file, /@select="handleCalendarSelect"/)
+  assert.match(file, /selectedFundRows/)
+  assert.ok(file.indexOf('持仓金额占比分布') < file.indexOf('收益统计'))
   assert.doesNotMatch(file, /AllocationBucketDailyTrendChart/)
 })

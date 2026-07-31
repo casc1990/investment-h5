@@ -51,20 +51,6 @@
         </div>
       </div>
 
-      <div v-if="bucketTrendSeries.length" class="section-card">
-        <div class="pie-header">
-          <div>
-            <div class="pie-title">当前类别每日收益统计</div>
-            <div class="pie-subtitle">仅展示 {{ bucketLabel }} 的每日收益统计日历</div>
-          </div>
-        </div>
-        <AllocationBucketProfitCalendar
-          :series="bucketTrendSeries"
-          summary-label="每日收益统计"
-          :formatter="formatSignedAmount"
-        />
-      </div>
-
       <div v-if="!loading && distributionRows.length" class="section-card pie-section">
         <div class="pie-header">
           <div>
@@ -106,47 +92,67 @@
         <van-loading size="20px">基金数据加载中...</van-loading>
       </div>
 
-      <div v-else-if="rows.length" class="list-wrap">
-        <button
-          v-for="item in rows"
-          :key="item.positionId"
-          type="button"
-          class="fund-card"
-          @click="openPositionDetail(item.positionId)"
-        >
-          <div class="fund-topline">
-            <div>
-              <div class="fund-name">{{ item.position?.fund_name || '未知基金' }}</div>
+      <div v-else-if="rows.length" class="section-card profit-analysis-section">
+        <div class="analysis-header">
+          <div>
+            <div class="pie-title">收益统计</div>
+            <div class="pie-subtitle">选择周期后，下方基金明细同步展示该周期收益</div>
+          </div>
+          <div class="analysis-total" :class="profitClass(selectedPeriodRow?.profit)">
+            <span>{{ activePeriodLabel }}收益</span>
+            <strong>{{ selectedPeriodRow ? formatSignedAmount(selectedPeriodRow.profit) : '--' }}</strong>
+            <small>{{ selectedPeriodRow ? formatSignedPercent(selectedPeriodRow.profitRate) : '--' }}</small>
+          </div>
+        </div>
+
+        <div class="period-tabs" role="tablist" aria-label="收益统计周期">
+          <button v-for="option in periodOptions" :key="option.value" type="button" class="period-tab" :class="{ active: activePeriod === option.value }" @click="activePeriod = option.value">
+            {{ option.label }}
+          </button>
+        </div>
+
+        <AllocationBucketProfitCalendar
+          v-if="activePeriod === 'day' && calendarSeries.length"
+          :series="calendarSeries"
+          summary-label="当日收益"
+          :formatter="formatSignedAmount"
+          @select="handleCalendarSelect"
+        />
+
+        <div v-else-if="selectedPeriodRow" class="period-navigator">
+          <button type="button" :disabled="selectedPeriodIndex <= 0" @click="selectAdjacentPeriod(-1)">‹</button>
+          <div>
+            <strong>{{ selectedPeriodRow.label }}</strong>
+            <span>{{ selectedPeriodRow.startDate }} 至 {{ selectedPeriodRow.endDate }}</span>
+          </div>
+          <button type="button" :disabled="selectedPeriodIndex >= profitPeriodRows.length - 1" @click="selectAdjacentPeriod(1)">›</button>
+        </div>
+
+        <div class="fund-detail-header">
+          <div>
+            <strong>{{ activePeriodLabel }}收益明细</strong>
+            <span>{{ selectedPeriodRow?.label || '暂无周期数据' }}</span>
+          </div>
+          <span>共 {{ selectedFundRows.length }} 只</span>
+        </div>
+
+        <div class="period-fund-list">
+          <button v-for="item in selectedFundRows" :key="item.positionId" type="button" class="period-fund-row" @click="openPositionDetail(item.positionId)">
+            <div class="period-fund-main">
+              <div class="fund-name">{{ item.position?.fund_name || item.periodFund?.fundName || '未知基金' }}</div>
               <div class="fund-owner">{{ getPositionOwnerText(item.position) }}</div>
-              <div class="fund-meta">基金代码：{{ item.position?.fund_code || '--' }}</div>
+              <div class="fund-tags compact-tags">
+                <span class="tag bucket-tag">{{ bucketLabel }}</span>
+                <span class="tag status-tag">{{ item.status }}</span>
+              </div>
             </div>
-            <div class="fund-amount">¥{{ formatAmount(item.marketValue) }}</div>
-          </div>
-
-          <div class="fund-tags">
-            <span class="tag bucket-tag">{{ bucketLabel }}</span>
-            <span class="tag status-tag">{{ item.status }}</span>
-          </div>
-
-          <div class="metrics-grid">
-            <div class="metric-card">
-              <span class="metric-label">日收益</span>
-              <span class="metric-value" :class="profitClass(item.position?.daily_profit)">{{ formatSignedAmount(item.position?.daily_profit) }}</span>
+            <div class="period-fund-profit" :class="profitClass(item.periodFund?.profit)">
+              <strong>{{ item.periodFund ? formatSignedAmount(item.periodFund.profit) : '--' }}</strong>
+              <span>{{ item.periodFund ? formatSignedPercent(item.periodFund.profitRate) : '--' }}</span>
+              <small>市值 ¥{{ formatAmount(item.marketValue) }}</small>
             </div>
-            <div class="metric-card">
-              <span class="metric-label">日收益率</span>
-              <span class="metric-value" :class="profitClass(item.position?.daily_profit_rate)">{{ formatSignedPercent(item.position?.daily_profit_rate) }}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">周收益</span>
-              <span class="metric-value" :class="profitClass(item.weeklyReturnPct)">{{ formatSignedPercent(item.weeklyReturnPct) }}</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">月收益</span>
-              <span class="metric-value" :class="profitClass(item.monthlyReturnPct)">{{ formatSignedPercent(item.monthlyReturnPct) }}</span>
-            </div>
-          </div>
-        </button>
+          </button>
+        </div>
       </div>
 
       <div v-else class="section-card">
@@ -157,17 +163,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { fundApi, positionApi } from '../api'
+import { positionApi } from '../api'
 import {
   ALLOCATION_ASSET_TYPE_LABELS,
-  buildAllocationBucketDailyProfitTrend,
+  buildAllocationBucketProfitPeriods,
   buildAllocationProfileSummary,
   getAllocationPositionOwnerText,
 } from '../utils/allocation'
-import { buildFundPerformanceMap } from '../utils/fundPerformance'
 import { fetchAllocationProfiles, loadAllocationProfiles } from '../utils/allocationStorage'
 import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import { formatAmount, formatSignedAmount, formatPercent, profitClass } from '../utils/formatters'
@@ -179,8 +184,15 @@ const router = useRouter()
 const profiles = ref(loadAllocationProfiles())
 const positions = ref([])
 const loading = ref(false)
-const performanceMap = ref({})
 const profitSnapshots = ref(getProfitSnapshots())
+const activePeriod = ref('day')
+const selectedPeriodKey = ref('')
+const periodOptions = [
+  { label: '日', value: 'day' },
+  { label: '周', value: 'week' },
+  { label: '月', value: 'month' },
+  { label: '年', value: 'year' },
+]
 const PIE_COLORS = ['#4f46e5', '#0ea5e9', '#14b8a6', '#f97316', '#ef4444', '#a855f7', '#22c55e', '#f59e0b']
 
 const profileId = computed(() => String(route.params.profileId || ''))
@@ -192,11 +204,7 @@ const summary = computed(() => {
   return buildAllocationProfileSummary({ profile: currentProfile.value, positions: positions.value, allProfiles: profiles.value })
 })
 const bucketSummary = computed(() => summary.value?.bucketSummaries?.find(item => item.assetType === assetType.value) || null)
-const rows = computed(() => (bucketSummary.value?.funds || []).map(item => ({
-  ...item,
-  weeklyReturnPct: performanceMap.value[item.position?.fund_code]?.weeklyReturnPct ?? null,
-  monthlyReturnPct: performanceMap.value[item.position?.fund_code]?.monthlyReturnPct ?? null,
-})))
+const rows = computed(() => bucketSummary.value?.funds || [])
 const distributionRows = computed(() => (bucketSummary.value?.holdingDistribution || []).map((item, index) => ({
   ...item,
   color: PIE_COLORS[index % PIE_COLORS.length],
@@ -212,13 +220,28 @@ const pieGradient = computed(() => {
   })
   return `conic-gradient(${segments.join(', ')})`
 })
-const bucketTrendSeries = computed(() => {
+const profitPeriodRows = computed(() => {
   if (!currentProfile.value || !assetType.value) return []
-  return buildAllocationBucketDailyProfitTrend({
+  return buildAllocationBucketProfitPeriods({
     profile: currentProfile.value,
     snapshots: profitSnapshots.value,
-    assetTypes: [assetType.value],
+    assetType: assetType.value,
+    period: activePeriod.value,
   })
+})
+const selectedPeriodIndex = computed(() => profitPeriodRows.value.findIndex(item => item.key === selectedPeriodKey.value))
+const selectedPeriodRow = computed(() => profitPeriodRows.value.find(item => item.key === selectedPeriodKey.value) || profitPeriodRows.value.at(-1) || null)
+const activePeriodLabel = computed(() => periodOptions.find(item => item.value === activePeriod.value)?.label || '日')
+const calendarSeries = computed(() => profitPeriodRows.value.length ? [{
+  key: assetType.value,
+  assetType: assetType.value,
+  label: bucketLabel.value,
+  points: profitPeriodRows.value.map(row => ({ key: row.key, date: row.key, value: row.profit, raw: row })),
+}] : [])
+const selectedFundRows = computed(() => {
+  const periodFundMap = new Map((selectedPeriodRow.value?.funds || []).map(fund => [fund.positionId, fund]))
+  return rows.value.map(item => ({ ...item, periodFund: periodFundMap.get(item.positionId) || null }))
+    .sort((a, b) => Math.abs(b.periodFund?.profit || 0) - Math.abs(a.periodFund?.profit || 0))
 })
 
 function formatSignedPercent(value) {
@@ -250,20 +273,27 @@ async function fetchPositions() {
   }
 }
 
-async function fetchPerformance() {
-  const codes = [...new Set((bucketSummary.value?.funds || []).map(item => item.position?.fund_code).filter(Boolean))]
-  performanceMap.value = await buildFundPerformanceMap(codes, fundApi.detail)
-}
-
 function openPositionDetail(positionId) {
   router.push(`/positions/${positionId}`)
 }
+
+function handleCalendarSelect(row) {
+  if (row?.key) selectedPeriodKey.value = row.key
+}
+
+function selectAdjacentPeriod(offset) {
+  const next = profitPeriodRows.value[selectedPeriodIndex.value + offset]
+  if (next) selectedPeriodKey.value = next.key
+}
+
+watch([activePeriod, profitPeriodRows], ([, periods]) => {
+  if (!periods.some(item => item.key === selectedPeriodKey.value)) selectedPeriodKey.value = periods.at(-1)?.key || ''
+}, { immediate: true })
 
 onMounted(async () => {
   try { profitSnapshots.value = await fetchProfitSnapshots() } catch (error) { showToast(`历史收益同步失败：${error.message || '网络错误'}`) }
   try { profiles.value = await fetchAllocationProfiles() } catch (error) { showToast(`策略同步失败：${error.message || '网络错误'}`) }
   await fetchPositions()
-  await fetchPerformance()
 })
 </script>
 
@@ -275,8 +305,7 @@ onMounted(async () => {
 }
 
 .header-card,
-.section-card,
-.fund-card {
+.section-card {
   background: #fff;
   border-radius: 18px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
@@ -306,9 +335,7 @@ onMounted(async () => {
 
 .page-subtitle,
 .summary-label,
-.metric-label,
-.fund-owner,
-.fund-meta {
+.fund-owner {
   color: #6b7280;
   font-size: 12px;
 }
@@ -317,8 +344,7 @@ onMounted(async () => {
   margin-top: 8px;
 }
 
-.summary-top,
-.fund-topline {
+.summary-top {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -345,8 +371,7 @@ onMounted(async () => {
   color: #4338ca;
 }
 
-.summary-grid,
-.metrics-grid {
+.summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -354,38 +379,13 @@ onMounted(async () => {
 }
 
 .summary-amount,
-.metric-value,
-.fund-name,
-.fund-amount {
+.fund-name {
   font-size: 15px;
   font-weight: 700;
   color: #111827;
 }
 
-.fund-amount {
-  color: #4f46e5;
-  white-space: nowrap;
-}
-
-.list-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.fund-card {
-  border: none;
-  display: block;
-  width: 100%;
-  padding: 14px;
-  text-align: left;
-}
-
 .fund-owner {
-  margin-top: 6px;
-}
-
-.fund-meta {
   margin-top: 4px;
 }
 
@@ -406,17 +406,6 @@ onMounted(async () => {
   color: #155e75;
 }
 
-.metric-card {
-  padding: 12px;
-  border-radius: 14px;
-  background: #f8fafc;
-}
-
-.metric-value {
-  display: block;
-  margin-top: 6px;
-}
-
 .loading-block {
   display: flex;
   justify-content: center;
@@ -424,6 +413,7 @@ onMounted(async () => {
 
 .pie-section {
   overflow: hidden;
+  padding: 12px;
 }
 
 .pie-header,
@@ -436,12 +426,11 @@ onMounted(async () => {
 }
 .pie-title,
 .summary-amount,
-.fund-amount,
 .legend-pct,
 .legend-name,
 .pie-total,
 .pie-hole-value {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: #111827;
 }
@@ -455,7 +444,7 @@ onMounted(async () => {
 .pie-subtitle,
 .pie-hole-label,
 .legend-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: #6b7280;
 }
 
@@ -466,8 +455,8 @@ onMounted(async () => {
 .pie-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .pie-chart-wrap {
@@ -476,8 +465,8 @@ onMounted(async () => {
 }
 
 .pie-chart {
-  width: 190px;
-  height: 190px;
+  width: 132px;
+  height: 132px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -486,8 +475,8 @@ onMounted(async () => {
 }
 
 .pie-hole {
-  width: 96px;
-  height: 96px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
   background: #fff;
   display: flex;
@@ -500,23 +489,23 @@ onMounted(async () => {
 .pie-legend {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .legend-item {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 7px 9px;
+  border-radius: 10px;
   background: #f8fafc;
 }
 
 .legend-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  margin-top: 6px;
+  margin-top: 5px;
   flex-shrink: 0;
 }
 
@@ -533,7 +522,175 @@ onMounted(async () => {
 }
 
 .legend-meta {
+  margin-top: 3px;
+}
+
+.profit-analysis-section {
+  padding: 14px;
+}
+
+.analysis-header,
+.fund-detail-header,
+.period-fund-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-header {
+  align-items: flex-start;
+}
+
+.analysis-total {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.analysis-total span,
+.analysis-total small,
+.fund-detail-header span,
+.period-navigator span,
+.period-fund-profit small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.analysis-total strong {
+  font-size: 18px;
+}
+
+.period-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  margin: 14px 0 12px;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+
+.period-tab {
+  height: 34px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.period-tab.active {
+  color: #2563eb;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.period-navigator {
+  min-height: 92px;
+  display: grid;
+  grid-template-columns: 38px 1fr 38px;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.period-navigator button {
+  height: 38px;
+  border: none;
+  border-radius: 10px;
+  background: #fff;
+  color: #475569;
+  font-size: 22px;
+}
+
+.period-navigator button:disabled {
+  opacity: 0.35;
+}
+
+.period-navigator div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  text-align: center;
+}
+
+.fund-detail-header {
+  align-items: center;
+  margin-top: 16px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.fund-detail-header div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.period-fund-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.period-fund-row {
+  width: 100%;
+  align-items: center;
+  padding: 13px 2px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  background: transparent;
+  text-align: left;
+}
+
+.period-fund-row:last-child {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.period-fund-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.period-fund-main .fund-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+}
+
+.compact-tags {
   margin-top: 6px;
+  gap: 5px;
+}
+
+.compact-tags .tag {
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.period-fund-profit {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.period-fund-profit strong {
+  font-size: 16px;
+}
+
+.period-fund-profit span {
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .positive {

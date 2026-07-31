@@ -82,6 +82,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 
+const emit = defineEmits(['select'])
+
 const props = defineProps({
   series: {
     type: Array,
@@ -231,6 +233,10 @@ function selectCell(cell) {
   if (!cell || cell.kind !== 'day') return
   selectedDateKey.value = cell.date
 }
+
+watch(selectedPoint, point => {
+  emit('select', point?.raw || point || null)
+}, { immediate: true })
 
 function goPrevMonth() {
   if (!canPrevMonth.value) return

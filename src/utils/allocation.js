@@ -443,6 +443,84 @@ export const buildAllocationBucketDailyProfitTrend = ({ profile: rawProfile, sna
   })).filter(series => series.points.some(point => point.value !== 0))
 }
 
+const getAllocationPeriodKey = (date = '', period = 'day') => {
+  const dateKey = String(date || '').slice(0, 10)
+  if (period === 'year') return dateKey.slice(0, 4)
+  if (period === 'month') return dateKey.slice(0, 7)
+  if (period === 'week') {
+    const parsed = new Date(`${dateKey}T00:00:00`)
+    if (Number.isNaN(parsed.getTime())) return dateKey
+    const weekday = parsed.getDay() || 7
+    parsed.setDate(parsed.getDate() - weekday + 1)
+    return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`
+  }
+  return dateKey
+}
+
+const getAllocationPeriodLabel = (key = '', period = 'day', endDate = '') => {
+  if (period === 'year') return `${key}年`
+  if (period === 'month') {
+    const [year, month] = key.split('-')
+    return `${year}年${Number(month)}月`
+  }
+  if (period === 'week') return `${String(key).slice(5).replace('-', '.')} - ${String(endDate).slice(5).replace('-', '.')}`
+  return key
+}
+
+export const buildAllocationBucketProfitPeriods = ({ profile: rawProfile, snapshots = [], assetType = '', period = 'day' }) => {
+  const profile = normalizeAllocationProfile(rawProfile)
+  const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item.assetType === assetType)
+  if (!trackedFunds.length || !Array.isArray(snapshots) || !snapshots.length) return []
+  const trackedIds = new Set(trackedFunds.map(item => item.positionId))
+  const groups = new Map()
+
+  for (const snapshot of [...snapshots].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    const date = String(snapshot?.date || '').slice(0, 10)
+    if (!date) continue
+    const key = getAllocationPeriodKey(date, period)
+    const group = groups.get(key) || { key, startDate: date, endDate: date, funds: new Map() }
+    group.startDate = group.startDate < date ? group.startDate : date
+    group.endDate = group.endDate > date ? group.endDate : date
+
+    for (const position of snapshot?.positions || []) {
+      if (!trackedIds.has(position.id)) continue
+      const fund = group.funds.get(position.id) || {
+        positionId: position.id,
+        fundCode: position.fund_code || '',
+        fundName: position.fund_name || '未知基金',
+        profit: 0,
+        latestMarketValue: 0,
+      }
+      fund.profit = round2(fund.profit + getPositionYesterdayProfit(position))
+      fund.latestMarketValue = round2(safeNumber(position.cost) + safeNumber(position.current_profit))
+      group.funds.set(position.id, fund)
+    }
+    groups.set(key, group)
+  }
+
+  return [...groups.values()].map(group => {
+    const funds = [...group.funds.values()].map(fund => {
+      const baseMarketValue = round2(fund.latestMarketValue - fund.profit)
+      return {
+        ...fund,
+        profitRate: baseMarketValue > 0 ? round2(fund.profit / baseMarketValue * 100) : 0,
+      }
+    }).sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit))
+    const profit = round2(funds.reduce((sum, fund) => sum + fund.profit, 0))
+    const latestMarketValue = round2(funds.reduce((sum, fund) => sum + fund.latestMarketValue, 0))
+    const baseMarketValue = round2(latestMarketValue - profit)
+    return {
+      key: group.key,
+      startDate: group.startDate,
+      endDate: group.endDate,
+      label: getAllocationPeriodLabel(group.key, period, group.endDate),
+      profit,
+      profitRate: baseMarketValue > 0 ? round2(profit / baseMarketValue * 100) : 0,
+      funds,
+    }
+  }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
+}
+
 export const buildAllocationDailyProfitTrend = ({ profile: rawProfile, snapshots = [] }) => {
   const profile = normalizeAllocationProfile(rawProfile)
   const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item?.assetType)
