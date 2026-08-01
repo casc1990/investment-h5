@@ -232,11 +232,17 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
   })
 
   const rows = [...entriesByDate.entries()].map(([profitDate, entries]) => {
-    const contextSnapshot = entries.reduce((latest, entry) => (
+    const latestContributingSnapshot = entries.reduce((latest, entry) => (
       !latest || String(entry.snapshot?.date || '').localeCompare(String(latest.date || '')) >= 0
         ? entry.snapshot
         : latest
     ), null)
+    // Delayed NAV updates (notably QDII funds) may contribute a day's profit in a
+    // later snapshot. Keep those finalized daily-profit entries, but use the
+    // snapshot captured on the selected calendar date for cumulative metrics.
+    // Otherwise two adjacent dates can incorrectly display the same latest total.
+    const contextSnapshot = sortedSnapshots.find(snapshot => String(snapshot?.date || '').slice(0, 10) === profitDate)
+      || latestContributingSnapshot
     const contextPositions = filterSnapshotPositions(contextSnapshot, { memberId, accountId, fundType, fundQuery })
     const dailyProfit = Number(entries.reduce((sum, entry) => sum + safeNumber(entry.position?.yesterday_profit), 0).toFixed(2))
     const shouldUseSummary = memberId === 'all'

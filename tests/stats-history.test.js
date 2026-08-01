@@ -324,6 +324,48 @@ test('周末补更不重复累计未变的基金收益，并按各自净值日�
   assert.equal(buildPeriodHistoryRows(weekendSnapshots, { period: 'month' })[0].period_profit, 100)
 })
 
+test('延迟补齐日收益时累计指标仍取所选日期快照', () => {
+  const delayedSnapshots = [
+    {
+      date: '2026-07-30',
+      summary: { totalMarketValue: 578506.37, totalHoldingProfit: 20628.13, totalProfitRate: 3.7 },
+      positions: [
+        { id: 'normal', fund_code: 'A', account_id: 'one', cost: 500000, current_profit: 20000, yesterday_profit: 155.52, nav_jzrq: '2026-07-30' },
+        { id: 'qdii', fund_code: 'B', account_id: 'one', cost: 57878.24, current_profit: 628.13, yesterday_profit: -269.1, nav_jzrq: '2026-07-29' },
+      ],
+    },
+    {
+      date: '2026-07-31',
+      summary: { totalMarketValue: 580160.95, totalHoldingProfit: 21282.72, totalProfitRate: 3.81 },
+      positions: [
+        { id: 'normal', fund_code: 'A', account_id: 'one', cost: 500000, current_profit: 20214.75, yesterday_profit: 214.75, nav_jzrq: '2026-07-31' },
+        { id: 'qdii', fund_code: 'B', account_id: 'one', cost: 58878.23, current_profit: 1067.97, yesterday_profit: 447.78, nav_jzrq: '2026-07-30' },
+      ],
+    },
+    {
+      date: '2026-08-01',
+      summary: { totalMarketValue: 580160.95, totalHoldingProfit: 21282.72, totalProfitRate: 3.81 },
+      positions: [
+        { id: 'normal', fund_code: 'A', account_id: 'one', cost: 500000, current_profit: 20214.75, yesterday_profit: 214.75, nav_jzrq: '2026-07-31' },
+        { id: 'qdii', fund_code: 'B', account_id: 'one', cost: 58878.23, current_profit: 1067.97, yesterday_profit: 447.78, nav_jzrq: '2026-07-30' },
+      ],
+    },
+  ]
+
+  const rows = buildDailyHistoryRows(delayedSnapshots)
+  const july30 = rows.find(row => row.date === '2026-07-30')
+  const july31 = rows.find(row => row.date === '2026-07-31')
+
+  assert.equal(july30.daily_profit, 603.3)
+  assert.equal(july30.total_market_value, 578506.37)
+  assert.equal(july30.total_profit, 20628.13)
+  assert.equal(july30.total_profit_rate, 3.7)
+  assert.equal(july31.daily_profit, 214.75)
+  assert.equal(july31.total_market_value, 580160.95)
+  assert.equal(july31.total_profit, 21282.72)
+  assert.equal(july31.total_profit_rate, 3.81)
+})
+
 test('按天历史行可按单账户过滤并重算收益率', () => {
   const rows = buildDailyHistoryRows(snapshots, { memberId: 'all', accountId: 'jd' })
 
