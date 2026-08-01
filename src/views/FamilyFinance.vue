@@ -2,7 +2,7 @@
   <div class="family-page">
     <header class="hero">
       <div class="hero-head">
-        <div><small>FAMILY BALANCE SHEET</small><h1>家庭财务</h1></div>
+        <div><small>家庭资产负债</small><h1>家庭财务</h1></div>
         <button :disabled="loading" @click="loadData"><van-icon name="replay" /> {{ loading ? '更新中' : '刷新' }}</button>
       </div>
       <div class="net-label">家庭净资产 <span>基金自动汇总，其他资产手工记账</span></div>
@@ -225,5 +225,259 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.family-page{min-height:100vh;padding:12px 12px 24px;background:linear-gradient(180deg,#eaf0ff 0,#f5f7fa 360px);color:#172033}.hero{padding:20px;border-radius:24px;background:linear-gradient(145deg,#18275b,#3549a8 58%,#6657d9);color:#fff;box-shadow:0 18px 40px rgba(40,56,132,.25)}.hero-head{display:flex;justify-content:space-between;align-items:flex-start}.hero-head small{font-size:9px;letter-spacing:1.6px;color:#b9c7ff}.hero h1{margin:3px 0 0;font-size:23px}.hero-head button{border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.12);color:#fff}.net-label{margin-top:26px;font-size:12px;color:#ced6ff}.net-label span{margin-left:5px;font-size:9px;opacity:.7}.net-value{margin-top:6px;font-size:34px;font-weight:800;letter-spacing:-1px}.hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:19px}.hero-grid div{padding:9px;border-radius:12px;background:rgba(255,255,255,.1)}.hero-grid span,.hero-grid strong{display:block}.hero-grid span{font-size:9px;color:#ced6ff}.hero-grid strong{margin-top:4px;font-size:12px}.source-card{display:flex;align-items:center;gap:10px;margin:12px 0;padding:13px;border:1px solid #e1e7f3;border-radius:17px;background:#fff}.source-icon{display:grid;width:38px;height:38px;place-items:center;border-radius:12px;background:#eef2ff;color:#5366d9;font-size:20px}.source-card div:nth-child(2){display:flex;flex:1;flex-direction:column}.source-card strong{font-size:14px}.source-card span{margin-top:2px;color:#8c97aa;font-size:10px}.source-card b{font-size:15px}.section-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:4px;border-radius:15px;background:#e6eaf2}.section-tabs button{height:40px;border:0;border-radius:11px;background:transparent;color:#717d91;font-weight:700}.section-tabs button span{margin-left:4px;padding:1px 5px;border-radius:999px;background:#d4dae5;font-size:10px}.section-tabs button.active{background:#fff;color:#4f5fc5;box-shadow:0 3px 10px rgba(32,48,86,.09)}.section-tabs button.active span{background:#596bd5;color:#fff}.content-card,.snapshot-card{margin-top:10px;padding:16px;border:1px solid #e4e8ef;border-radius:20px;background:#fff}.section-head{display:flex;align-items:center;justify-content:space-between}.section-head h2,.snapshot-card h2{font-size:18px}.section-head p,.snapshot-card p{margin-top:3px;color:#929daf;font-size:10px}.add-button,.snapshot-card>button{border:0;border-radius:11px;padding:9px 12px;background:#5365d3;color:#fff;font-weight:700}.asset-group{margin-top:16px}.group-head{display:flex;justify-content:space-between;padding:0 2px 7px;color:#778398;font-size:11px}.group-head strong{color:#3c4658}.finance-row{display:flex;width:100%;align-items:center;gap:10px;padding:11px 0;border:0;border-top:1px solid #edf0f4;background:#fff;text-align:left}.row-icon{display:grid;width:38px;height:38px;flex:none;place-items:center;border-radius:12px;background:#f1f4f9;font-size:19px}.row-main{display:flex;min-width:0;flex:1;flex-direction:column}.row-main strong{overflow:hidden;font-size:14px;text-overflow:ellipsis;white-space:nowrap}.row-main small,.row-value small{margin-top:3px;color:#929daf;font-size:9px}.row-value{display:flex;flex-direction:column;text-align:right}.row-value b{font-size:14px}.plain-list{display:grid;gap:10px;margin-top:14px}.debt-row{padding:14px;border:1px solid #e8edf5;border-radius:15px;background:#fbfcff}.debt-top{display:flex;justify-content:space-between;gap:10px}.debt-top div{display:flex;min-width:0;flex-direction:column}.debt-top strong{font-size:14px}.debt-top span{margin-top:3px;color:#8994a7;font-size:10px}.debt-top>b{color:#d06742;font-size:16px}.liability .debt-top>b{color:#b34e5c}.debt-meta{display:flex;justify-content:space-between;margin-top:10px;color:#7d899d;font-size:10px}.row-actions{display:flex;gap:8px;margin-top:11px}.row-actions button{flex:1;border:0;border-radius:9px;padding:7px;background:#eef1ff;color:#4e5fc2;font-weight:700}.row-actions .ghost{background:#f3f4f6;color:#747f91}.empty-state{display:flex;align-items:center;flex-direction:column;padding:42px 0 30px;color:#929cad}.empty-state span{font-size:34px}.empty-state strong{margin-top:8px;color:#667185;font-size:13px}.empty-state small{margin-top:4px;font-size:10px}.snapshot-card{position:relative}.snapshot-card>button{position:absolute;top:16px;right:16px}.snapshot-list{margin-top:14px}.snapshot-list div{display:flex;justify-content:space-between;padding:9px 0;border-top:1px solid #edf0f4;font-size:11px}.finance-popup{max-height:90vh;overflow-y:auto}.form-sheet{padding:20px 18px 26px}.form-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:17px}.form-head small{color:#6878d8;font-size:9px;font-weight:800;letter-spacing:1px}.form-head h2{margin-top:3px;font-size:21px}.form-head button{width:32px;height:32px;border:0;border-radius:50%;background:#f0f2f6;color:#596477;font-size:22px}.form-sheet label{display:flex;flex-direction:column;gap:6px;margin-top:12px}.form-sheet label>span{color:#687487;font-size:11px;font-weight:700}.form-sheet input:not([type=checkbox]),.form-sheet select{width:100%;height:44px;padding:0 12px;border:1px solid #dfe4ec;border-radius:11px;background:#f9fafc;color:#1b2433;font-size:14px}.switch-row{flex-direction:row!important;align-items:center;justify-content:space-between;padding:10px 0}.switch-row span{display:flex;flex-direction:column}.switch-row small{margin-top:3px;color:#96a0b1;font-weight:400}.switch-row input{width:22px;height:22px}.form-actions{display:flex;gap:9px;margin-top:20px}.form-actions button{height:46px;border:0;border-radius:12px;font-weight:800}.form-actions .primary{flex:1;background:#5365d3;color:#fff}.form-actions .danger{width:82px;background:#fff0f1;color:#c94e5c}.payment-balance{display:flex;justify-content:space-between;padding:15px;border-radius:13px;background:#f0f3ff}.payment-balance span{color:#6f7b90;font-size:12px}.payment-balance strong{color:#4659c4;font-size:17px}@media(max-width:380px){.hero{padding:17px}.net-value{font-size:30px}.hero-grid div{padding:7px 5px}.hero-grid strong{font-size:11px}.net-label span{display:none}}
+.family-page {
+  min-height: 100vh;
+  padding: 12px 12px var(--app-floating-page-space);
+  background: #f5f5f5;
+  color: #1f2937;
+}
+
+.hero {
+  padding: 18px 20px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1e80ff 0%, #0066cc 100%);
+  color: #fff;
+}
+
+.hero-head,
+.section-head,
+.group-head,
+.debt-top,
+.debt-meta,
+.snapshot-list div,
+.form-head,
+.payment-balance {
+  display: flex;
+  justify-content: space-between;
+}
+
+.hero-head { align-items: flex-start; }
+.hero-head small { font-size: 12px; font-weight: 500; opacity: .82; }
+.hero h1 { margin-top: 3px; font-size: 18px; font-weight: 700; }
+.hero-head button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font-size: 11px;
+}
+
+.net-label { margin-top: 17px; font-size: 13px; opacity: .86; }
+.net-label span { margin-left: 6px; font-size: 11px; opacity: .82; }
+.net-value {
+  margin-top: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 14px;
+  padding: 10px 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .12);
+}
+.hero-grid div { padding: 0 8px; text-align: center; }
+.hero-grid div + div { border-left: 1px solid rgba(255, 255, 255, .24); }
+.hero-grid span,
+.hero-grid strong { display: block; }
+.hero-grid span { font-size: 11px; opacity: .8; }
+.hero-grid strong { margin-top: 4px; font-family: 'Courier New', monospace; font-size: 13px; }
+
+.source-card,
+.content-card,
+.snapshot-card {
+  background: #fff;
+  border-radius: 12px;
+}
+.source-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+}
+.source-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: #e8f3ff;
+  color: #1e80ff;
+  font-size: 20px;
+}
+.source-card div:nth-child(2) { display: flex; flex: 1; flex-direction: column; }
+.source-card strong { font-size: 15px; }
+.source-card span { margin-top: 3px; color: #94a3b8; font-size: 12px; }
+.source-card b { font-family: 'Courier New', monospace; font-size: 15px; }
+
+.section-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+.section-tabs button {
+  height: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #64748b;
+  font-size: 14px;
+}
+.section-tabs button span {
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 10px;
+}
+.section-tabs button.active {
+  background: #fff;
+  color: #1e80ff;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(37, 59, 91, .08);
+}
+.section-tabs button.active span { background: #1e80ff; color: #fff; }
+
+.content-card,
+.snapshot-card { margin-top: 12px; padding: 16px; }
+.section-head { align-items: center; }
+.section-head h2,
+.snapshot-card h2 { color: #222; font-size: 16px; font-weight: 700; }
+.section-head p,
+.snapshot-card p { margin-top: 5px; color: #94a3b8; font-size: 12px; }
+.add-button,
+.snapshot-card > button {
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 12px;
+  background: #1e80ff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.asset-group { margin-top: 16px; }
+.group-head { padding: 0 2px 8px; color: #64748b; font-size: 12px; }
+.group-head strong { color: #334155; font-family: 'Courier New', monospace; }
+.finance-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+  text-align: left;
+}
+.row-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  border-radius: 10px;
+  background: #f8fbff;
+  font-size: 19px;
+}
+.row-main { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.row-main strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.row-main small,
+.row-value small { margin-top: 4px; color: #94a3b8; font-size: 11px; }
+.row-value { display: flex; flex-direction: column; text-align: right; }
+.row-value b { font-family: 'Courier New', monospace; font-size: 14px; }
+
+.plain-list { display: grid; gap: 10px; margin-top: 14px; }
+.debt-row { padding: 14px; border: 1px solid #e8edf3; border-radius: 12px; background: #fff; }
+.debt-top { gap: 10px; }
+.debt-top div { display: flex; min-width: 0; flex-direction: column; }
+.debt-top strong { font-size: 14px; }
+.debt-top span { margin-top: 4px; color: #64748b; font-size: 12px; }
+.debt-top > b { color: #ea580c; font-family: 'Courier New', monospace; font-size: 16px; }
+.liability .debt-top > b { color: #dc2626; }
+.debt-meta { margin-top: 10px; color: #94a3b8; font-size: 11px; }
+.row-actions { display: flex; gap: 8px; margin-top: 12px; }
+.row-actions button {
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px;
+  background: #e8f3ff;
+  color: #1e80ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.row-actions .ghost { background: #f3f4f6; color: #64748b; }
+
+.empty-state { display: flex; align-items: center; flex-direction: column; padding: 42px 0 30px; color: #94a3b8; }
+.empty-state span { font-size: 34px; }
+.empty-state strong { margin-top: 8px; color: #64748b; font-size: 14px; }
+.empty-state small { margin-top: 5px; font-size: 12px; }
+
+.snapshot-card { position: relative; }
+.snapshot-card > button { position: absolute; top: 16px; right: 16px; }
+.snapshot-list { margin-top: 14px; }
+.snapshot-list div { padding: 10px 0; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 12px; }
+.snapshot-list strong { color: #1f2937; font-family: 'Courier New', monospace; }
+
+.finance-popup { max-height: 90vh; overflow-y: auto; }
+.form-sheet { padding: 20px 18px 26px; }
+.form-head { align-items: flex-start; margin-bottom: 17px; }
+.form-head small { color: #1e80ff; font-size: 11px; font-weight: 600; }
+.form-head h2 { margin-top: 3px; font-size: 20px; }
+.form-head button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #64748b;
+  font-size: 22px;
+}
+.form-sheet label { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.form-sheet label > span { color: #64748b; font-size: 12px; font-weight: 600; }
+.form-sheet input:not([type=checkbox]),
+.form-sheet select {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 14px;
+}
+.form-sheet input:focus,
+.form-sheet select:focus { border-color: #1e80ff; outline: none; box-shadow: 0 0 0 3px rgba(30, 128, 255, .1); }
+.switch-row { flex-direction: row !important; align-items: center; justify-content: space-between; padding: 10px 0; }
+.switch-row span { display: flex; flex-direction: column; }
+.switch-row small { margin-top: 3px; color: #94a3b8; font-weight: 400; }
+.switch-row input { width: 22px; height: 22px; accent-color: #1e80ff; }
+.form-actions { display: flex; gap: 9px; margin-top: 20px; }
+.form-actions button { height: 46px; border: 0; border-radius: 10px; font-size: 14px; font-weight: 700; }
+.form-actions .primary { flex: 1; background: #1e80ff; color: #fff; }
+.form-actions .danger { width: 82px; background: #fef2f2; color: #dc2626; }
+.payment-balance { padding: 14px; border-radius: 10px; background: #f8fbff; }
+.payment-balance span { color: #64748b; font-size: 12px; }
+.payment-balance strong { color: #1e80ff; font-family: 'Courier New', monospace; font-size: 16px; }
+
+@media (max-width: 380px) {
+  .family-page { padding-right: 10px; padding-left: 10px; }
+  .hero { padding: 16px; }
+  .net-value { font-size: 28px; }
+  .hero-grid div { padding: 0 4px; }
+  .hero-grid strong { font-size: 12px; }
+  .net-label span { display: none; }
+}
 </style>
