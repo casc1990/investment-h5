@@ -78,3 +78,9 @@ test('统计页按天使用收益日历，按周期使用零轴柱状图', () =>
   assert.match(source, /<PeriodProfitBarChart[\s\S]*v-else/)
   assert.doesNotMatch(source, /v-model="dailyRange"/)
 })
+
+test('统计页所选日期指标区使用紧凑单行卡片', () => {
+  const source = fs.readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
+  assert.match(source, /\.trend-metrics-grid \.metric-card \{[\s\S]*min-height: 38px;[\s\S]*padding: 8px 10px;[\s\S]*display: flex;/)
+  assert.match(source, /\.trend-metrics-grid \.metric-value \{[\s\S]*margin-top: 0;[\s\S]*font-size: 13px;/)
+})

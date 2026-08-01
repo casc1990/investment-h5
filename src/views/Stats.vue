@@ -834,7 +834,36 @@ onActivated(() => {
 }
 
 .trend-metrics-grid {
-  margin-top: 12px;
+  margin-top: 8px;
+  gap: 6px;
+}
+
+.trend-metrics-grid .metric-card {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 10px;
+}
+
+.trend-metrics-grid .metric-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.trend-metrics-grid .metric-value {
+  min-width: 0;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric-card,
