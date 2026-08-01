@@ -294,22 +294,25 @@ import {
 } from '../utils/allocationStorage'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
-import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
+import { readPageCache, writePageCache } from '../utils/pageCache'
 
 const route = useRoute()
 const router = useRouter()
+const cachedAllocation = readPageCache('allocation-detail') || readPageCache('positions')
 const profiles = ref(loadAllocationProfiles())
 const selectedProfileId = ref(String(route.params.profileId || loadSelectedAllocationProfileId() || profiles.value[0]?.id || ''))
-const positions = ref([])
+const positions = ref(cachedAllocation?.positions || [])
 const loading = ref(false)
-const lastLoadedAt = ref(0)
-const hasLoadedOnce = ref(false)
+const lastLoadedAt = ref(cachedAllocation?.savedAt || 0)
+const hasLoadedOnce = ref(Boolean(cachedAllocation?.positions?.length))
 const showProfilePopup = ref(false)
 const savingProfile = ref(false)
 const profileDraft = ref(createProfileDraft())
 const selectedAllocationTrendRow = ref(null)
 const activeTrendTab = ref('profit_rate')
 const profitSnapshots = ref(getProfitSnapshots())
+let positionsRequest = null
+let skipInitialActivationRefresh = true
 
 const assetTypeOptions = ALLOCATION_ASSET_TYPE_ORDER.map(value => ({ value, label: ALLOCATION_ASSET_TYPE_LABELS[value] }))
 const fundStatusOptions = Object.values(ALLOCATION_FUND_STATUSES)
@@ -522,32 +525,60 @@ async function updateCurrentProfile(mutator) {
 }
 
 async function fetchPositions() {
-  loading.value = true
-  try {
-    const data = await positionApi.list()
-    if (Array.isArray(data)) {
-      positions.value = data
-    } else if (Array.isArray(data?.positions)) {
-      positions.value = data.positions
-    } else {
-      positions.value = []
+  if (positionsRequest) return positionsRequest
+  positionsRequest = (async () => {
+    loading.value = !positions.value.length
+    try {
+      const data = await positionApi.list()
+      if (Array.isArray(data)) {
+        positions.value = data
+      } else if (Array.isArray(data?.positions)) {
+        positions.value = data.positions
+      } else {
+        positions.value = []
+      }
+      writePageCache('allocation-detail', { positions: positions.value })
+      lastLoadedAt.value = Date.now()
+      hasLoadedOnce.value = true
+    } catch (error) {
+      if (!positions.value.length) showToast(`持仓加载失败：${error.message || '网络错误'}`)
+      else console.warn('allocation positions refresh failed, keeping cache:', error)
+    } finally {
+      loading.value = false
+      positionsRequest = null
     }
-    lastLoadedAt.value = Date.now()
-    hasLoadedOnce.value = true
-
-    captureProfitSnapshotFromApis().catch((error) => {
-      console.warn('capture snapshot from allocation failed:', error)
-    })
-  } catch (error) {
-    showToast(`持仓加载失败：${error.message || '网络错误'}`)
-  } finally {
-    loading.value = false
-  }
+  })()
+  return positionsRequest
 }
 
 async function ensureFreshData({ force = false } = {}) {
   if (!shouldRefreshPageData({ hasData: hasLoadedOnce.value, lastLoadedAt: lastLoadedAt.value, force })) return
   await fetchPositions()
+}
+
+async function refreshPageData({ forcePositions = false, quiet = false } = {}) {
+  const results = await Promise.allSettled([
+    fetchProfitSnapshots(),
+    fetchAllocationProfiles(),
+    ensureFreshData({ force: forcePositions }),
+  ])
+
+  if (results[0].status === 'fulfilled') profitSnapshots.value = results[0].value
+  else profitSnapshots.value = getProfitSnapshots()
+
+  if (results[1].status === 'fulfilled') {
+    profiles.value = results[1].value
+    syncProfilesFromStorage()
+  } else {
+    syncProfilesFromStorage()
+  }
+
+  if (!quiet && results[0].status === 'rejected' && !profitSnapshots.value.length) {
+    showToast(`历史收益同步失败：${results[0].reason?.message || '网络错误'}`)
+  }
+  if (!quiet && results[1].status === 'rejected' && !profiles.value.length) {
+    showToast(`策略同步失败：${results[1].reason?.message || '网络错误'}`)
+  }
 }
 
 function handleSelectProfile(profileId) {
@@ -770,28 +801,19 @@ watch(allocationProfitTrendPoints, (points) => {
   selectedAllocationTrendRow.value = existing || points.at(-1)?.raw || null
 }, { immediate: true })
 
-onMounted(async () => {
-  try { profitSnapshots.value = await fetchProfitSnapshots() } catch (error) { showToast(`历史收益同步失败：${error.message || '网络错误'}`) }
-  try {
-    profiles.value = await fetchAllocationProfiles()
-    syncProfilesFromStorage()
-  } catch (error) {
-    showToast(`策略同步失败：${error.message || '网络错误'}`)
-  }
-  ensureFreshData({ force: true })
+onMounted(() => {
+  refreshPageData({ forcePositions: !positions.value.length })
   if (typeof window !== 'undefined') {
     window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleProfilesUpdated)
   }
 })
 
-onActivated(async () => {
-  try { profitSnapshots.value = await fetchProfitSnapshots() } catch { profitSnapshots.value = getProfitSnapshots() }
-  try {
-    profiles.value = await fetchAllocationProfiles()
-  } catch {
-    syncProfilesFromStorage()
+onActivated(() => {
+  if (skipInitialActivationRefresh) {
+    skipInitialActivationRefresh = false
+    return
   }
-  ensureFreshData()
+  refreshPageData({ quiet: true })
 })
 
 onBeforeUnmount(() => {

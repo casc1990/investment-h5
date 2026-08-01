@@ -5,6 +5,7 @@ import fs from 'node:fs'
 const apiSource = fs.readFileSync(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 const homeSource = fs.readFileSync(new URL('../src/views/Home.vue', import.meta.url), 'utf8')
 const statsSource = fs.readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
+const allocationSource = fs.readFileSync(new URL('../src/views/Allocation.vue', import.meta.url), 'utf8')
 const snapshotSource = fs.readFileSync(new URL('../src/utils/profitSnapshotService.js', import.meta.url), 'utf8')
 const apiClientSource = fs.readFileSync(new URL('../src/api/index.js', import.meta.url), 'utf8')
 
@@ -21,6 +22,15 @@ test('主要页面优先恢复缓存，统计快照保存不阻塞首屏', () =>
   assert.match(statsSource, /readPageCache\('stats'\)/)
   assert.match(snapshotSource, /persistProfitSnapshot\(snapshotResult\.snapshot\)\.catch/)
   assert.doesNotMatch(snapshotSource, /await persistProfitSnapshot/)
+})
+
+test('策略详情优先恢复持仓缓存，并行刷新且首次激活不重复请求', () => {
+  assert.match(allocationSource, /readPageCache\('allocation-detail'\) \|\| readPageCache\('positions'\)/)
+  assert.match(allocationSource, /writePageCache\('allocation-detail'/)
+  assert.match(allocationSource, /Promise\.allSettled\(\[/)
+  assert.match(allocationSource, /if \(positionsRequest\) return positionsRequest/)
+  assert.match(allocationSource, /skipInitialActivationRefresh/)
+  assert.doesNotMatch(allocationSource, /captureProfitSnapshotFromApis/)
 })
 
 test('运行时结构迁移使用全局版本标记避免每个冷实例重复执行', () => {
