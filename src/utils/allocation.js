@@ -472,18 +472,33 @@ export const buildAllocationBucketProfitPeriods = ({ profile: rawProfile, snapsh
   const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item.assetType === assetType)
   if (!trackedFunds.length || !Array.isArray(snapshots) || !snapshots.length) return []
   const trackedIds = new Set(trackedFunds.map(item => item.positionId))
+  const entriesByFundAndProfitDate = new Map()
   const groups = new Map()
 
   for (const snapshot of [...snapshots].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
-    const date = String(snapshot?.date || '').slice(0, 10)
-    if (!date) continue
-    const key = getAllocationPeriodKey(date, period)
-    const group = groups.get(key) || { key, startDate: date, endDate: date, funds: new Map() }
-    group.startDate = group.startDate < date ? group.startDate : date
-    group.endDate = group.endDate > date ? group.endDate : date
-
     for (const position of snapshot?.positions || []) {
       if (!trackedIds.has(position.id)) continue
+      const profitDate = String(
+        position.nav_jzrq
+        || snapshot?.summary?.dailyProfitDate
+        || snapshot?.date
+        || ''
+      ).slice(0, 10)
+      if (!profitDate) continue
+      entriesByFundAndProfitDate.set(`${position.id}::${profitDate}`, {
+        position,
+        profitDate,
+      })
+    }
+  }
+
+  for (const { position, profitDate } of [...entriesByFundAndProfitDate.values()]
+    .sort((a, b) => String(a.profitDate).localeCompare(String(b.profitDate)))) {
+    const key = getAllocationPeriodKey(profitDate, period)
+    const group = groups.get(key) || { key, startDate: profitDate, endDate: profitDate, funds: new Map() }
+    group.startDate = group.startDate < profitDate ? group.startDate : profitDate
+    group.endDate = group.endDate > profitDate ? group.endDate : profitDate
+
       const fund = group.funds.get(position.id) || {
         positionId: position.id,
         fundCode: position.fund_code || '',
@@ -494,7 +509,6 @@ export const buildAllocationBucketProfitPeriods = ({ profile: rawProfile, snapsh
       fund.profit = round2(fund.profit + getPositionYesterdayProfit(position))
       fund.latestMarketValue = round2(safeNumber(position.cost) + safeNumber(position.current_profit))
       group.funds.set(position.id, fund)
-    }
     groups.set(key, group)
   }
 

@@ -600,9 +600,16 @@ test('分类基金收益统计可按日周月年聚合，并保留每支基金�
     {
       date: '2026-07-01',
       positions: [
-        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 150, yesterday_profit: 30 },
-        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -60, yesterday_profit: -20 },
+        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 150, yesterday_profit: 30, nav_jzrq: '2026-07-01' },
+        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -60, yesterday_profit: -20, nav_jzrq: '2026-07-01' },
         { id: 'outside', cost: 9000, current_profit: 999, yesterday_profit: 999 },
+      ],
+    },
+    {
+      date: '2026-07-02',
+      positions: [
+        { id: 'p1', fund_code: '110020', fund_name: '易方达纯债债券A', cost: 10000, current_profit: 150, yesterday_profit: 30, nav_jzrq: '2026-07-01' },
+        { id: 'p6', fund_code: '009999', fund_name: '主题成长混合A', cost: 5000, current_profit: -60, yesterday_profit: -20, nav_jzrq: '2026-07-01' },
       ],
     },
   ]
@@ -644,6 +651,34 @@ test('分类基金收益统计可按日周月年聚合，并保留每支基金�
   assert.equal(years[0].profit, 45)
   assert.equal(years[0].funds.length, 2)
   assert.equal(years[0].profitRate, 0.3)
+})
+
+test('分类收益按基金净值日期归属，并去重非交易日生成的重复快照', () => {
+  const weekendSnapshots = [
+    {
+      date: '2026-07-31',
+      summary: { dailyProfitDate: '2026-07-31' },
+      positions: [
+        { id: 'p1', cost: 10000, current_profit: 200, yesterday_profit: 112.18, nav_jzrq: '2026-07-31' },
+      ],
+    },
+    {
+      date: '2026-08-01',
+      positions: [
+        { id: 'p1', cost: 10000, current_profit: 200, yesterday_profit: 112.18, nav_jzrq: '2026-07-31' },
+      ],
+    },
+  ]
+
+  const rows = buildAllocationBucketProfitPeriods({
+    profile,
+    snapshots: weekendSnapshots,
+    assetType: ALLOCATION_ASSET_TYPES.PURE_BOND,
+    period: 'day',
+  })
+
+  assert.deepEqual(rows.map(item => item.key), ['2026-07-31'])
+  assert.equal(rows[0].profit, 112.18)
 })
 
 test('批量保存分类选择时，会替换当前分类并保留已存在基金状态', () => {
