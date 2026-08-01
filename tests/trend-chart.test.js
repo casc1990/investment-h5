@@ -84,3 +84,12 @@ test('统计页所选日期指标区使用紧凑单行卡片', () => {
   assert.match(source, /\.trend-metrics-grid \.metric-card \{[\s\S]*min-height: 38px;[\s\S]*padding: 8px 10px;[\s\S]*display: flex;/)
   assert.match(source, /\.trend-metrics-grid \.metric-value \{[\s\S]*margin-top: 0;[\s\S]*font-size: 13px;/)
 })
+
+test('统计页区分日快照累计值和净值归属日收益', () => {
+  const source = fs.readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
+  assert.match(source, /cumulativeMetricPrefix.*总金额/)
+  assert.match(source, /cumulativeMetricPrefix.*总收益/)
+  assert.match(source, /cumulativeMetricPrefix.*收益率/)
+  assert.match(source, /快照累计值可能包含当日确认的延迟净值补记/)
+  assert.match(source, /trendMode\.value === 'daily' \? '快照' : '期末'/)
+})

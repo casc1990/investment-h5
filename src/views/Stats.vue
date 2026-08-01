@@ -101,18 +101,21 @@
           <span class="metric-value" :class="profitClass(selectedTrendRow.daily_profit_rate)">{{ formatSignedPercent(selectedTrendRow.daily_profit_rate) }}</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">总金额</span>
+          <span class="metric-label">{{ cumulativeMetricPrefix }}总金额</span>
           <span class="metric-value neutral">{{ formatCurrencyValue(selectedTrendRow.total_market_value) }}</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">总收益</span>
+          <span class="metric-label">{{ cumulativeMetricPrefix }}总收益</span>
           <span class="metric-value" :class="profitClass(selectedTrendRow.total_profit)">{{ formatSignedAmount(selectedTrendRow.total_profit) }}</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">总收益率</span>
+          <span class="metric-label">{{ cumulativeMetricPrefix }}收益率</span>
           <span class="metric-value" :class="profitClass(selectedTrendRow.total_profit_rate)">{{ formatSignedPercent(selectedTrendRow.total_profit_rate) }}</span>
         </div>
       </div>
+      <p v-if="selectedTrendRow && trendMode === 'daily'" class="snapshot-metric-note">
+        快照累计值可能包含当日确认的延迟净值补记，不一定等于前一日快照加当日日收益。
+      </p>
     </div>
 
     <div class="section">
@@ -434,6 +437,7 @@ const selectedTrendDateLabel = computed(() => {
     ? selectedTrendRow.value.date || '-'
     : `${selectedTrendRow.value.start_date || '-'} ~ ${selectedTrendRow.value.end_date || '-'}`
 })
+const cumulativeMetricPrefix = computed(() => (trendMode.value === 'daily' ? '快照' : '期末'))
 
 const formatSignedPercent = (value) => {
   const num = Number(value) || 0
@@ -864,6 +868,13 @@ onActivated(() => {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.snapshot-metric-note {
+  margin: 6px 2px 0;
+  color: #98a2b3;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .metric-card,
