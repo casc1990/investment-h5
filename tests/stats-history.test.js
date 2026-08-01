@@ -294,6 +294,36 @@ test('仅估算净值变化但日收益未更新时，不应把当天快照计�
   assert.deepEqual(rows.map(item => item.date), ['2026-06-08'])
 })
 
+test('周末补更不重复累计未变的基金收益，并按各自净值日期归属', () => {
+  const weekendSnapshots = [
+    {
+      date: '2026-07-03',
+      summary: { totalMarketValue: 2000, totalHoldingProfit: 200, totalProfitRate: 11.11 },
+      positions: [
+        { id: 'normal', fund_code: 'A', account_id: 'one', cost: 900, current_profit: 100, yesterday_profit: 100, nav_jzrq: '2026-07-03' },
+        { id: 'qdii', fund_code: 'B', account_id: 'one', cost: 900, current_profit: 100, yesterday_profit: -20, nav_jzrq: '2026-07-02' },
+      ],
+    },
+    {
+      date: '2026-07-04',
+      summary: { totalMarketValue: 2020, totalHoldingProfit: 220, totalProfitRate: 12.22 },
+      positions: [
+        { id: 'normal', fund_code: 'A', account_id: 'one', cost: 900, current_profit: 100, yesterday_profit: 100, nav_jzrq: '2026-07-03' },
+        { id: 'qdii', fund_code: 'B', account_id: 'one', cost: 900, current_profit: 120, yesterday_profit: 20, nav_jzrq: '2026-07-03' },
+      ],
+    },
+  ]
+
+  const rows = buildDailyHistoryRows(weekendSnapshots)
+
+  assert.deepEqual(rows.map(row => [row.date, row.daily_profit]), [
+    ['2026-07-03', 120],
+    ['2026-07-02', -20],
+  ])
+  assert.equal(buildPeriodHistoryRows(weekendSnapshots, { period: 'week' })[0].period_profit, 100)
+  assert.equal(buildPeriodHistoryRows(weekendSnapshots, { period: 'month' })[0].period_profit, 100)
+})
+
 test('按天历史行可按单账户过滤并重算收益率', () => {
   const rows = buildDailyHistoryRows(snapshots, { memberId: 'all', accountId: 'jd' })
 
@@ -345,6 +375,26 @@ test('周期历史行可按月聚合并计算当期收益', () => {
   assert.equal(rows[1].period_profit, 110)
   assert.equal(rows[1].period_profit_rate, 2.69)
   assert.equal(rows[1].period_max_drawdown, 0)
+})
+
+test('跨月自然周明确标记整周口径', () => {
+  const crossMonthSnapshots = [
+    {
+      date: '2026-06-30',
+      summary: { totalMarketValue: 1000, totalHoldingProfit: 100, totalProfitRate: 11.11 },
+      positions: [{ id: 'p1', fund_code: 'A', account_id: 'one', yesterday_profit: 10, nav_jzrq: '2026-06-30' }],
+    },
+    {
+      date: '2026-07-01',
+      summary: { totalMarketValue: 1010, totalHoldingProfit: 110, totalProfitRate: 12.22 },
+      positions: [{ id: 'p1', fund_code: 'A', account_id: 'one', yesterday_profit: 20, nav_jzrq: '2026-07-01' }],
+    },
+  ]
+  const rows = buildPeriodHistoryRows(crossMonthSnapshots, { period: 'week' })
+
+  assert.equal(rows[0].period_key, '2026-06-29')
+  assert.equal(rows[0].is_cross_month, true)
+  assert.equal(rows[0].period_scope_note, '跨月整周')
 })
 
 test('周期历史行可计算当期最大亏损', () => {

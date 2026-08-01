@@ -131,7 +131,7 @@
         <div v-for="row in visiblePeriodRows" :key="row.period_key" class="period-card">
           <div class="period-top">
             <div>
-              <div class="period-title">{{ row.period_label }}</div>
+              <div class="period-title">{{ row.period_label }} <span v-if="row.period_scope_note" class="period-scope-note">{{ row.period_scope_note }}</span></div>
               <div class="period-date">{{ row.start_date }} ~ {{ row.end_date }}</div>
             </div>
             <div class="period-amount">¥{{ formatAmount(row.total_market_value) }}</div>
@@ -1047,6 +1047,18 @@ onActivated(() => {
   font-size: 14px;
   font-weight: 600;
   color: #222;
+}
+
+.period-scope-note {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #fff3db;
+  color: #b26a00;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
 }
 
 .table-date,

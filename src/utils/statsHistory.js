@@ -173,19 +173,6 @@ const getChinaDateString = (date = new Date()) => {
   return `${year}-${month}-${day}`
 }
 
-const calcPositionDailyProfit = (summary = {}, positions = []) => {
-  const summaryValue = summary.totalPositionYesterdayProfit
-  if (summaryValue !== undefined && summaryValue !== null && Number.isFinite(Number(summaryValue))) {
-    return Number(safeNumber(summaryValue).toFixed(2))
-  }
-
-  const fallback = positions
-    .filter(item => !isAdvisoryPosition(item))
-    .reduce((sum, item) => sum + safeNumber(item.yesterday_profit), 0)
-
-  return Number(fallback.toFixed(2))
-}
-
 const aggregatePositions = (positions = [], { memberId = 'all', accountId = 'all' } = {}) => {
   const memberName = positions[0]?.member_name || ''
   const accountName = positions[0]?.account_name || ''
@@ -218,64 +205,48 @@ const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 
     })
 }
 
-const resolveSnapshotEffectiveDate = (snapshot = {}, positions = []) => {
-  const fundDates = positions
-    .filter(item => !isAdvisoryPosition(item))
-    .map(item => String(item.nav_jzrq || '').trim())
-    .filter(Boolean)
-
-  if (!fundDates.length) return snapshot.date
-
-  return [...fundDates].sort().at(-1) || snapshot.date
-}
-
-const buildDailyProfitSignatureMap = (positions = []) => new Map(
-  positions.map((item) => {
-    const key = item.id || `${item.account_id || ''}::${item.fund_code || ''}`
-    const signature = [
-      String(item.nav_jzrq || ''),
-      safeNumber(item.yesterday_profit).toFixed(4),
-      safeNumber(item.nav_dwjz).toFixed(4),
-    ].join('|')
-    return [key, signature]
-  }),
-)
-
-const hasDailyProfitUpdateForSnapshot = (positions = [], previousPositions = []) => {
-  if (!positions.length) return false
-
-  const currentMap = buildDailyProfitSignatureMap(positions)
-  const previousMap = buildDailyProfitSignatureMap(previousPositions)
-
-  if (!previousPositions.length) {
-    return positions.some(item => String(item.nav_jzrq || '').length > 0 || safeNumber(item.yesterday_profit) !== 0)
-  }
-
-  return positions.some((item) => {
-    const key = item.id || `${item.account_id || ''}::${item.fund_code || ''}`
-    return currentMap.get(key) !== previousMap.get(key)
-  })
-}
-
 export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '' } = {}) => {
   const sortedSnapshots = sortSnapshotsAsc(snapshots)
-  const rows = sortedSnapshots.map((snapshot, index) => {
-    const filteredPositions = filterSnapshotPositions(snapshot, { memberId, accountId, fundType, fundQuery })
-    const previousFilteredPositions = index > 0
-      ? filterSnapshotPositions(sortedSnapshots[index - 1], { memberId, accountId, fundType, fundQuery })
-      : []
-    if (!hasDailyProfitUpdateForSnapshot(filteredPositions, previousFilteredPositions)) return null
+  const latestEntryByPositionAndDate = new Map()
 
-    const effectiveDate = resolveSnapshotEffectiveDate(snapshot, filteredPositions)
+  sortedSnapshots.forEach((snapshot) => {
+    const filteredPositions = filterSnapshotPositions(snapshot, { memberId, accountId, fundType, fundQuery })
+    filteredPositions
+      .filter(item => !isAdvisoryPosition(item))
+      .forEach((position) => {
+        const profitDate = String(position.nav_jzrq || snapshot?.summary?.dailyProfitDate || snapshot.date || '').slice(0, 10)
+        if (!profitDate) return
+        const positionKey = position.id || `${position.account_id || ''}::${position.fund_code || ''}`
+        latestEntryByPositionAndDate.set(`${positionKey}::${profitDate}`, {
+          profitDate,
+          position,
+          snapshot,
+        })
+      })
+  })
+
+  const entriesByDate = new Map()
+  latestEntryByPositionAndDate.forEach((entry) => {
+    if (!entriesByDate.has(entry.profitDate)) entriesByDate.set(entry.profitDate, [])
+    entriesByDate.get(entry.profitDate).push(entry)
+  })
+
+  const rows = [...entriesByDate.entries()].map(([profitDate, entries]) => {
+    const contextSnapshot = entries.reduce((latest, entry) => (
+      !latest || String(entry.snapshot?.date || '').localeCompare(String(latest.date || '')) >= 0
+        ? entry.snapshot
+        : latest
+    ), null)
+    const contextPositions = filterSnapshotPositions(contextSnapshot, { memberId, accountId, fundType, fundQuery })
+    const dailyProfit = Number(entries.reduce((sum, entry) => sum + safeNumber(entry.position?.yesterday_profit), 0).toFixed(2))
     const shouldUseSummary = memberId === 'all'
       && accountId === 'all'
       && !hasFundScopedFilters({ fundType, fundQuery })
 
     if (shouldUseSummary) {
-      const summary = snapshot.summary || {}
-      const positionDailyProfit = calcPositionDailyProfit(summary, filteredPositions)
+      const summary = contextSnapshot?.summary || {}
       return {
-        date: effectiveDate,
+        date: profitDate,
         member_id: 'all',
         member_name: '全部成员',
         account_id: 'all',
@@ -283,17 +254,21 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
         total_market_value: Number(safeNumber(summary.totalMarketValue).toFixed(2)),
         total_profit: Number(safeNumber(summary.totalHoldingProfit).toFixed(2)),
         total_profit_rate: Number(safeNumber(summary.totalProfitRate).toFixed(2)),
-        daily_profit: positionDailyProfit,
-        daily_profit_rate: calcDailyProfitRate(positionDailyProfit, summary.totalMarketValue),
+        daily_profit: dailyProfit,
+        daily_profit_rate: calcDailyProfitRate(dailyProfit, summary.totalMarketValue),
       }
     }
 
-    if (!filteredPositions.length) return null
+    if (!contextPositions.length) return null
+
+    const aggregated = aggregatePositions(contextPositions, { memberId, accountId })
 
     return {
-      date: effectiveDate,
+      date: profitDate,
       account_id: accountId,
-      ...aggregatePositions(filteredPositions, { memberId, accountId }),
+      ...aggregated,
+      daily_profit: dailyProfit,
+      daily_profit_rate: calcDailyProfitRate(dailyProfit, aggregated.total_market_value),
     }
   }).filter(Boolean)
 
@@ -312,6 +287,8 @@ export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accou
 
   const periodRows = Array.from(groups.entries()).map(([periodKey, rows]) => {
     const latest = rows[rows.length - 1]
+    const coveredMonths = new Set(rows.map(item => String(item.date || '').slice(0, 7)).filter(Boolean))
+    const isCrossMonth = period === 'week' && coveredMonths.size > 1
     const periodProfit = rows.reduce((sum, item) => sum + safeNumber(item.daily_profit), 0)
     const baseMarketValue = rows[0]?.total_market_value || 0
     const periodMaxDrawdown = rows.reduce((minValue, item) => {
@@ -324,6 +301,8 @@ export const buildPeriodHistoryRows = (snapshots = [], { memberId = 'all', accou
       period_label: formatPeriodLabel(period, periodKey),
       start_date: getPeriodStartDate(period, periodKey),
       end_date: latest?.date || '',
+      is_cross_month: isCrossMonth,
+      period_scope_note: isCrossMonth ? '跨月整周' : '',
       member_id: latest?.member_id || memberId,
       member_name: latest?.member_name || '全部成员',
       account_id: latest?.account_id || accountId,
