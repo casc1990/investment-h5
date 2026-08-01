@@ -26,9 +26,9 @@ export default defineConfig({
         'maskable-icon-512x512.png',
       ],
       manifest: {
-        name: '投资管理',
-        short_name: '投资管理',
-        description: '多账户基金与顾投持仓管理工具',
+        name: '家庭投资与财务管理',
+        short_name: '家庭财务',
+        description: '家庭资产负债记账与基金投资管理工具',
         theme_color: '#6366f1',
         background_color: '#f5f5f5',
         display: 'standalone',

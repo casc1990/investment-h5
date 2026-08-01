@@ -181,4 +181,21 @@ export const profitSnapshotApi = {
   save: (snapshot) => apiClient.put(`/profit-snapshots/${snapshot.date}`, { snapshot }),
 }
 
+// ============ 家庭财务 API ============
+
+export const familyFinanceApi = {
+  overview: () => dedupedGet('/family-finance/overview'),
+  createAsset: data => apiClient.post('/family-finance/assets', data),
+  updateAsset: (id, data) => apiClient.put(`/family-finance/assets/${id}`, data),
+  deleteAsset: id => apiClient.delete(`/family-finance/assets/${id}`),
+  assetRecords: id => apiClient.get(`/family-finance/assets/${id}/records`),
+  createReceivable: data => apiClient.post('/family-finance/receivables', data),
+  receivePayment: (id, data) => apiClient.post(`/family-finance/receivables/${id}/payments`, data),
+  settleReceivable: id => apiClient.delete(`/family-finance/receivables/${id}`),
+  createLiability: data => apiClient.post('/family-finance/liabilities', data),
+  repayLiability: (id, data) => apiClient.post(`/family-finance/liabilities/${id}/payments`, data),
+  settleLiability: id => apiClient.delete(`/family-finance/liabilities/${id}`),
+  captureSnapshot: data => apiClient.post('/family-finance/snapshots', data),
+}
+
 export default apiClient

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 
 export const KEEP_ALIVE_ROUTE_NAMES = [
   'Home',
+  'FamilyFinance',
   'Accounts',
   'Positions',
   'Trades',

@@ -20,6 +20,8 @@ test('业务数据读取和写入均要求认证', () => {
   assert.equal(requiresAuthentication('/api/profit-snapshots/capture', 'POST'), true)
   assert.equal(requiresAuthentication('/api/fund/sync', 'GET'), true)
   assert.equal(requiresAuthentication('/api/accounts', 'POST'), true)
+  assert.equal(requiresAuthentication('/api/family-finance/overview', 'GET'), true)
+  assert.equal(requiresAuthentication('/api/family-finance/assets', 'POST'), true)
   assert.equal(requiresAuthentication('/api/auth/logout', 'POST'), true)
 })
 

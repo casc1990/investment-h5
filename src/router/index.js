@@ -27,6 +27,11 @@ const routes = [
     component: () => import('../views/Positions.vue'),
   },
   {
+    path: '/family-finance',
+    name: 'FamilyFinance',
+    component: () => import('../views/FamilyFinance.vue'),
+  },
+  {
     path: '/positions/:id',
     name: 'PositionDetail',
     component: () => import('../views/PositionDetail.vue'),

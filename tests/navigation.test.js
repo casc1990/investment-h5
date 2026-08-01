@@ -15,6 +15,15 @@ test('底部主导航包含独立配置入口，且位于持仓后面', () => {
   assert.equal(allocationIndex, positionsIndex + 1)
 })
 
+test('家庭财务是独立入口并保留现有基金导航', () => {
+  assert.equal(MAIN_TABS.find(tab => tab.to === '/family-finance')?.label, '家庭财务')
+  assert.ok(MAIN_TABS.some(tab => tab.to === '/positions'))
+  assert.ok(MAIN_TABS.some(tab => tab.to === '/trades'))
+  assert.ok(MAIN_TABS.some(tab => tab.to === '/stats'))
+  assert.ok(KEEP_ALIVE_ROUTE_NAMES.includes('FamilyFinance'))
+  assert.equal(resolveMainTabIndex('/family-finance'), MAIN_TAB_INDEX_MAP['/family-finance'])
+})
+
 test('底部主导航暂时隐藏顾投入口', () => {
   assert.equal(MAIN_TABS.some(tab => tab.to === '/advisory'), false)
 })

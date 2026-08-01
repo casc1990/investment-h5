@@ -6,6 +6,7 @@ import { KEEP_ALIVE_ROUTE_NAMES, shouldLogApi } from '../src/utils/appShell.js'
 test('keep-alive 路由白名单覆盖底部 tab 页面', () => {
   assert.deepEqual(KEEP_ALIVE_ROUTE_NAMES, [
     'Home',
+    'FamilyFinance',
     'Accounts',
     'Positions',
     'Trades',

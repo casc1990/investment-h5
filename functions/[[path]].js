@@ -5,6 +5,13 @@
 
 import { buildDividendTrade, rebuildPositionFromTrades, normalizeTradeType, toNumber, TRADE_TYPES } from '../shared/tradeEngine.js'
 import { buildServerProfitSnapshot } from '../shared/profitSnapshot.js'
+import {
+  FAMILY_ASSET_CATEGORY_MAP,
+  FAMILY_LIABILITY_CATEGORIES,
+  FAMILY_RECEIVABLE_CATEGORIES,
+  buildFamilySummary,
+  validateFamilyAsset,
+} from '../shared/familyFinance.js'
 
 let runtimeSchemaInitPromise = null;
 let advisorySchemaInitPromise = null;
@@ -1415,10 +1422,157 @@ export async function onRequest(context) {
       `).run();
     }
 
+    async function ensureFamilyFinanceSchemas() {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_assets (
+          id TEXT PRIMARY KEY,
+          member_id TEXT,
+          name TEXT NOT NULL,
+          category_code TEXT NOT NULL,
+          institution TEXT DEFAULT '',
+          current_value REAL NOT NULL DEFAULT 0,
+          valuation_date TEXT NOT NULL,
+          include_in_net_worth INTEGER NOT NULL DEFAULT 1,
+          include_in_investable_assets INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'active',
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_family_assets_member ON family_assets(member_id, status)').run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_asset_records (
+          id TEXT PRIMARY KEY,
+          asset_id TEXT NOT NULL,
+          previous_value REAL NOT NULL DEFAULT 0,
+          current_value REAL NOT NULL DEFAULT 0,
+          change_value REAL NOT NULL DEFAULT 0,
+          record_date TEXT NOT NULL,
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_family_asset_records_asset ON family_asset_records(asset_id, record_date DESC)').run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_receivables (
+          id TEXT PRIMARY KEY,
+          member_id TEXT,
+          category_code TEXT NOT NULL,
+          name TEXT NOT NULL,
+          debtor_name TEXT DEFAULT '',
+          original_amount REAL NOT NULL DEFAULT 0,
+          outstanding_amount REAL NOT NULL DEFAULT 0,
+          lent_date TEXT,
+          due_date TEXT,
+          status TEXT NOT NULL DEFAULT 'normal',
+          risk_level TEXT NOT NULL DEFAULT 'normal',
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_receivable_payments (
+          id TEXT PRIMARY KEY,
+          receivable_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          payment_date TEXT NOT NULL,
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_liabilities (
+          id TEXT PRIMARY KEY,
+          member_id TEXT,
+          category_code TEXT NOT NULL,
+          name TEXT NOT NULL,
+          creditor_name TEXT DEFAULT '',
+          original_amount REAL NOT NULL DEFAULT 0,
+          outstanding_principal REAL NOT NULL DEFAULT 0,
+          interest_rate REAL NOT NULL DEFAULT 0,
+          monthly_payment REAL NOT NULL DEFAULT 0,
+          due_date TEXT,
+          status TEXT NOT NULL DEFAULT 'normal',
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_liability_payments (
+          id TEXT PRIMARY KEY,
+          liability_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          payment_date TEXT NOT NULL,
+          remark TEXT DEFAULT '',
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS family_snapshots (
+          snapshot_date TEXT PRIMARY KEY,
+          summary_json TEXT NOT NULL,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+    }
+
+    const familyReceivableCategoryCodes = new Set(FAMILY_RECEIVABLE_CATEGORIES.map(item => item.code));
+    const familyLiabilityCategoryCodes = new Set(FAMILY_LIABILITY_CATEGORIES.map(item => item.code));
+    const normalizeFamilyMemberId = value => String(value || '').trim() || null;
+    const normalizeFamilyDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : getChinaDateString(new Date());
+    const normalizeFamilyMoney = value => Number(Number(value || 0).toFixed(2));
+
+    async function getFamilyFinanceData() {
+      const [assetQuery, receivableQuery, liabilityQuery, fundQuery] = await Promise.all([
+        env.DB.prepare(`
+          SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
+          WHERE a.status != 'archived'
+          ORDER BY a.updated_at DESC, a.created_at DESC
+        `).all(),
+        env.DB.prepare(`
+          SELECT r.*, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_receivables r LEFT JOIN members m ON r.member_id = m.id
+          WHERE r.status != 'settled'
+          ORDER BY CASE WHEN r.due_date IS NULL OR r.due_date = '' THEN 1 ELSE 0 END, r.due_date, r.updated_at DESC
+        `).all(),
+        env.DB.prepare(`
+          SELECT l.*, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_liabilities l LEFT JOIN members m ON l.member_id = m.id
+          WHERE l.status != 'settled'
+          ORDER BY l.updated_at DESC, l.created_at DESC
+        `).all(),
+        env.DB.prepare(`
+          SELECT COALESCE(SUM(
+            CASE
+              WHEN COALESCE(s.dwjz, s.gsz, 0) > 0 THEN COALESCE(p.quantity, 0) * COALESCE(s.dwjz, s.gsz, 0)
+              ELSE COALESCE(p.cost, p.amount, 0)
+            END
+          ), 0) AS fund_value
+          FROM positions p LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+          WHERE COALESCE(p.quantity, 0) > 0
+        `).all(),
+      ]);
+      const assets = assetQuery.results || [];
+      const receivables = receivableQuery.results || [];
+      const liabilities = liabilityQuery.results || [];
+      const summary = buildFamilySummary({
+        fundValue: Number(fundQuery.results?.[0]?.fund_value || 0),
+        assets,
+        receivables,
+        liabilities,
+      });
+      return { assets, receivables, liabilities, summary };
+    }
+
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-07-15-v1';
+          const runtimeSchemaVersion = '2026-08-02-family-finance-v1';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1454,6 +1608,7 @@ export async function onRequest(context) {
 
           await ensureMembersSchema();
           await ensureLedgerSchemas();
+          await ensureFamilyFinanceSchemas();
           await env.DB.prepare(`
             CREATE TABLE IF NOT EXISTS fund_sync_status (
               fund_code TEXT PRIMARY KEY,
@@ -2013,6 +2168,202 @@ export async function onRequest(context) {
       }
     }
 
+    // ========== 家庭财务记账 API ==========
+    // 与基金 positions/trades 完全隔离，只在总览中读取基金市值。
+    if (path === '/api/family-finance/overview' && method === 'GET') {
+      const data = await getFamilyFinanceData();
+      const { results: snapshots } = await env.DB.prepare(
+        'SELECT snapshot_date, summary_json FROM family_snapshots ORDER BY snapshot_date DESC LIMIT 24'
+      ).all();
+      return jsonResponse({
+        code: 0,
+        data: {
+          ...data,
+          categories: {
+            assets: Object.values(FAMILY_ASSET_CATEGORY_MAP),
+            receivables: FAMILY_RECEIVABLE_CATEGORIES,
+            liabilities: FAMILY_LIABILITY_CATEGORIES,
+          },
+          snapshots: (snapshots || []).map(row => ({ date: row.snapshot_date, ...JSON.parse(row.summary_json) })).reverse(),
+        },
+      });
+    }
+
+    if (path === '/api/family-finance/assets' && method === 'POST') {
+      const body = await context.request.json();
+      const category = FAMILY_ASSET_CATEGORY_MAP[body.category_code];
+      const payload = {
+        name: String(body.name || '').trim(),
+        category_code: String(body.category_code || ''),
+        current_value: normalizeFamilyMoney(body.current_value),
+      };
+      const errors = validateFamilyAsset(payload);
+      if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
+      const id = generateId();
+      const valuationDate = normalizeFamilyDate(body.valuation_date);
+      const investable = body.include_in_investable_assets === undefined
+        ? Number(Boolean(category?.investable))
+        : Number(Boolean(body.include_in_investable_assets));
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO family_assets (
+            id, member_id, name, category_code, institution, current_value, valuation_date,
+            include_in_net_worth, include_in_investable_assets, remark
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(id, normalizeFamilyMemberId(body.member_id), payload.name, payload.category_code,
+          String(body.institution || '').trim(), payload.current_value, valuationDate,
+          Number(body.include_in_net_worth !== false), investable, String(body.remark || '').trim()),
+        env.DB.prepare(`
+          INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
+          VALUES (?, ?, 0, ?, ?, ?, ?)
+        `).bind(generateId(), id, payload.current_value, payload.current_value, valuationDate, '初始录入'),
+      ]);
+      return jsonResponse({ code: 0, data: { id } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'PUT') {
+      const id = path.split('/').pop();
+      const body = await context.request.json();
+      const { results } = await env.DB.prepare('SELECT * FROM family_assets WHERE id = ? AND status != ?').bind(id, 'archived').all();
+      if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
+      const current = results[0];
+      const payload = {
+        name: String(body.name ?? current.name).trim(),
+        category_code: String(body.category_code ?? current.category_code),
+        current_value: normalizeFamilyMoney(body.current_value ?? current.current_value),
+      };
+      const errors = validateFamilyAsset(payload);
+      if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
+      const valuationDate = normalizeFamilyDate(body.valuation_date || current.valuation_date);
+      const previousValue = normalizeFamilyMoney(current.current_value);
+      const changed = payload.current_value !== previousValue;
+      const statements = [env.DB.prepare(`
+        UPDATE family_assets SET member_id = ?, name = ?, category_code = ?, institution = ?, current_value = ?,
+          valuation_date = ?, include_in_net_worth = ?, include_in_investable_assets = ?, remark = ?, updated_at = unixepoch()
+        WHERE id = ?
+      `).bind(normalizeFamilyMemberId(body.member_id ?? current.member_id), payload.name, payload.category_code,
+        String(body.institution ?? current.institution ?? '').trim(), payload.current_value, valuationDate,
+        Number(body.include_in_net_worth ?? current.include_in_net_worth ?? 1),
+        Number(body.include_in_investable_assets ?? current.include_in_investable_assets ?? 0),
+        String(body.remark ?? current.remark ?? '').trim(), id)];
+      if (changed) statements.push(env.DB.prepare(`
+        INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(generateId(), id, previousValue, payload.current_value, normalizeFamilyMoney(payload.current_value - previousValue),
+        valuationDate, String(body.update_remark || body.remark || '更新余额').trim()));
+      await env.DB.batch(statements);
+      return jsonResponse({ code: 0, data: { id, value_changed: changed } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'DELETE') {
+      const id = path.split('/').pop();
+      await env.DB.prepare("UPDATE family_assets SET status = 'archived', updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      return jsonResponse({ code: 0, message: '资产已删除' });
+    }
+
+    if (path.match(/^\/api\/family-finance\/assets\/[\w-]+\/records$/) && method === 'GET') {
+      const id = path.split('/').slice(-2)[0];
+      const { results } = await env.DB.prepare(
+        'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
+      ).bind(id).all();
+      return jsonResponse({ code: 0, data: { records: results || [] } });
+    }
+
+    if (path === '/api/family-finance/receivables' && method === 'POST') {
+      const body = await context.request.json();
+      const name = String(body.name || '').trim();
+      const amount = normalizeFamilyMoney(body.original_amount ?? body.outstanding_amount);
+      const outstanding = normalizeFamilyMoney(body.outstanding_amount ?? amount);
+      if (!name) return jsonResponse({ code: 400, message: '应收款名称不能为空' }, 400);
+      if (!familyReceivableCategoryCodes.has(body.category_code)) return jsonResponse({ code: 400, message: '应收款类别无效' }, 400);
+      if (!Number.isFinite(amount) || !Number.isFinite(outstanding) || amount < 0 || outstanding < 0 || outstanding > amount) return jsonResponse({ code: 400, message: '应收金额无效' }, 400);
+      const id = generateId();
+      await env.DB.prepare(`
+        INSERT INTO family_receivables (id, member_id, category_code, name, debtor_name, original_amount,
+          outstanding_amount, lent_date, due_date, status, risk_level, remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.debtor_name || '').trim(),
+        amount, outstanding, body.lent_date || null, body.due_date || null, outstanding === 0 ? 'settled' : 'normal',
+        String(body.risk_level || 'normal'), String(body.remark || '').trim()).run();
+      return jsonResponse({ code: 0, data: { id } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+\/payments$/) && method === 'POST') {
+      const id = path.split('/').slice(-2)[0];
+      const body = await context.request.json();
+      const amount = normalizeFamilyMoney(body.amount);
+      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ?').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > Number(results[0].outstanding_amount || 0)) return jsonResponse({ code: 400, message: '回款金额无效' }, 400);
+      const remaining = normalizeFamilyMoney(Number(results[0].outstanding_amount) - amount);
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO family_receivable_payments (id, receivable_id, amount, payment_date, remark) VALUES (?, ?, ?, ?, ?)')
+          .bind(generateId(), id, amount, normalizeFamilyDate(body.payment_date), String(body.remark || '').trim()),
+        env.DB.prepare("UPDATE family_receivables SET outstanding_amount = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
+          .bind(remaining, remaining === 0 ? 'settled' : 'partially_paid', id),
+      ]);
+      return jsonResponse({ code: 0, data: { id, outstanding_amount: remaining } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'DELETE') {
+      const id = path.split('/').pop();
+      await env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      return jsonResponse({ code: 0, message: '应收款已结清' });
+    }
+
+    if (path === '/api/family-finance/liabilities' && method === 'POST') {
+      const body = await context.request.json();
+      const name = String(body.name || '').trim();
+      const amount = normalizeFamilyMoney(body.original_amount ?? body.outstanding_principal);
+      const outstanding = normalizeFamilyMoney(body.outstanding_principal ?? amount);
+      if (!name) return jsonResponse({ code: 400, message: '负债名称不能为空' }, 400);
+      if (!familyLiabilityCategoryCodes.has(body.category_code)) return jsonResponse({ code: 400, message: '负债类别无效' }, 400);
+      if (!Number.isFinite(amount) || !Number.isFinite(outstanding) || amount < 0 || outstanding < 0 || outstanding > amount) return jsonResponse({ code: 400, message: '负债金额无效' }, 400);
+      const id = generateId();
+      await env.DB.prepare(`
+        INSERT INTO family_liabilities (id, member_id, category_code, name, creditor_name, original_amount,
+          outstanding_principal, interest_rate, monthly_payment, due_date, status, remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.creditor_name || '').trim(),
+        amount, outstanding, Number(body.interest_rate || 0), normalizeFamilyMoney(body.monthly_payment),
+        body.due_date || null, outstanding === 0 ? 'settled' : 'normal', String(body.remark || '').trim()).run();
+      return jsonResponse({ code: 0, data: { id } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/liabilities\/[\w-]+\/payments$/) && method === 'POST') {
+      const id = path.split('/').slice(-2)[0];
+      const body = await context.request.json();
+      const amount = normalizeFamilyMoney(body.amount);
+      const { results } = await env.DB.prepare('SELECT * FROM family_liabilities WHERE id = ?').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '负债不存在' }, 404);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > Number(results[0].outstanding_principal || 0)) return jsonResponse({ code: 400, message: '还款金额无效' }, 400);
+      const remaining = normalizeFamilyMoney(Number(results[0].outstanding_principal) - amount);
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO family_liability_payments (id, liability_id, amount, payment_date, remark) VALUES (?, ?, ?, ?, ?)')
+          .bind(generateId(), id, amount, normalizeFamilyDate(body.payment_date), String(body.remark || '').trim()),
+        env.DB.prepare("UPDATE family_liabilities SET outstanding_principal = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
+          .bind(remaining, remaining === 0 ? 'settled' : 'normal', id),
+      ]);
+      return jsonResponse({ code: 0, data: { id, outstanding_principal: remaining } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/liabilities\/[\w-]+$/) && method === 'DELETE') {
+      const id = path.split('/').pop();
+      await env.DB.prepare("UPDATE family_liabilities SET status = 'settled', outstanding_principal = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      return jsonResponse({ code: 0, message: '负债已结清' });
+    }
+
+    if (path === '/api/family-finance/snapshots' && method === 'POST') {
+      const data = await getFamilyFinanceData();
+      const snapshotDate = normalizeFamilyDate((await context.request.json().catch(() => ({}))).snapshot_date);
+      await env.DB.prepare(`
+        INSERT INTO family_snapshots (snapshot_date, summary_json, created_at, updated_at)
+        VALUES (?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(snapshot_date) DO UPDATE SET summary_json = excluded.summary_json, updated_at = unixepoch()
+      `).bind(snapshotDate, JSON.stringify(data.summary)).run();
+      return jsonResponse({ code: 0, data: { snapshot_date: snapshotDate, summary: data.summary } });
+    }
+
     // ========== 事件中心 API ==========
     // ========== 家庭共享配置策略 API ==========
     if (path === '/api/allocation-profiles' && method === 'GET') {
@@ -2279,6 +2630,15 @@ export async function onRequest(context) {
     // 删除成员
     if (path.match(/^\/api\/members\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
+      const { results: familyRows } = await env.DB.prepare(`
+        SELECT
+          (SELECT COUNT(1) FROM family_assets WHERE member_id = ? AND status != 'archived') +
+          (SELECT COUNT(1) FROM family_receivables WHERE member_id = ? AND status != 'settled') +
+          (SELECT COUNT(1) FROM family_liabilities WHERE member_id = ? AND status != 'settled') AS total
+      `).bind(id, id, id).all();
+      if (Number(familyRows?.[0]?.total || 0) > 0) {
+        return jsonResponse({ code: 409, message: '该成员仍有家庭资产、应收款或负债，请先处理归属' }, 409);
+      }
       // 先解除账户绑定
       await env.DB.prepare('UPDATE accounts SET member_id = NULL WHERE member_id = ?').bind(id).run();
       // 删除成员

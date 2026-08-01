@@ -1,5 +1,6 @@
 export const MAIN_TABS = [
   { to: '/', label: '首页', icon: 'wap-home-o' },
+  { to: '/family-finance', label: '家庭财务', icon: 'gold-coin-o' },
   { to: '/positions', label: '持仓', icon: 'bag-o' },
   { to: '/allocation', label: '配置', icon: 'setting-o' },
   { to: '/trades', label: '交易', icon: 'balance-o' },
