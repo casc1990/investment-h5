@@ -157,7 +157,27 @@
               :series="allocationBucketDailyTrendSeries"
               summary-label="每日收益统计"
               :formatter="formatSignedAmount"
+              @select="handleAllocationDailySelect"
             />
+            <div v-if="selectedAllocationDailyRow" class="daily-bucket-breakdown">
+              <div class="daily-bucket-breakdown-header">
+                <div>
+                  <strong>分类收益明细</strong>
+                  <span>{{ selectedAllocationDailyRow.date }}</span>
+                </div>
+                <span>共 {{ selectedAllocationDailyBreakdown.length }} 类</span>
+              </div>
+              <div class="daily-bucket-breakdown-list">
+                <div v-for="item in selectedAllocationDailyBreakdown" :key="item.assetType" class="daily-bucket-breakdown-row">
+                  <div>
+                    <span class="daily-bucket-dot" :style="{ backgroundColor: item.color }"></span>
+                    <strong>{{ item.label }}</strong>
+                    <small>{{ item.fundCount }} 只基金</small>
+                  </div>
+                  <b :class="profitClass(item.profit)">{{ formatSignedAmount(item.profit) }}</b>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -271,6 +291,7 @@ import {
   ALLOCATION_ASSET_TYPES,
   ALLOCATION_ASSET_TYPE_LABELS,
   ALLOCATION_ASSET_TYPE_ORDER,
+  ALLOCATION_BUCKET_TREND_COLORS,
   ALLOCATION_FUND_STATUSES,
   buildAllocationDailyProfitTrend,
   buildAllocationOccupancyMap,
@@ -309,6 +330,7 @@ const showProfilePopup = ref(false)
 const savingProfile = ref(false)
 const profileDraft = ref(createProfileDraft())
 const selectedAllocationTrendRow = ref(null)
+const selectedAllocationDailyRow = ref(null)
 const activeTrendTab = ref('profit_rate')
 const profitSnapshots = ref(getProfitSnapshots())
 let positionsRequest = null
@@ -344,6 +366,17 @@ const allocationBucketDailyTrendSeries = computed(() => {
     profile: currentProfile.value,
     snapshots: profitSnapshots.value,
   })
+})
+const selectedAllocationDailyBreakdown = computed(() => {
+  const values = selectedAllocationDailyRow.value?.valuesByAssetType || {}
+  const funds = currentProfile.value?.funds || []
+  return configuredBucketRows.value.map(bucket => ({
+    assetType: bucket.assetType,
+    label: ALLOCATION_ASSET_TYPE_LABELS[bucket.assetType] || bucket.label || '其他基金',
+    color: ALLOCATION_BUCKET_TREND_COLORS[bucket.assetType] || '#64748b',
+    fundCount: funds.filter(fund => fund.assetType === bucket.assetType).length,
+    profit: round2(values[bucket.assetType]),
+  }))
 })
 const allocationTrendReferenceLines = computed(() => {
   if (!currentProfile.value) return []
@@ -448,6 +481,10 @@ function getBucketStatusLabel(status) {
 
 function handleAllocationTrendSelect(row) {
   selectedAllocationTrendRow.value = row || null
+}
+
+function handleAllocationDailySelect(row) {
+  selectedAllocationDailyRow.value = row || null
 }
 
 function createProfileId() {
@@ -1489,6 +1526,78 @@ onBeforeUnmount(() => {
   font-size: 11px;
   line-height: 1.15;
   word-break: break-all;
+}
+
+.daily-bucket-breakdown {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #e7edf5;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.daily-bucket-breakdown-header,
+.daily-bucket-breakdown-row,
+.daily-bucket-breakdown-header div,
+.daily-bucket-breakdown-row div {
+  display: flex;
+  align-items: center;
+}
+
+.daily-bucket-breakdown-header,
+.daily-bucket-breakdown-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-bucket-breakdown-header {
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.daily-bucket-breakdown-header div {
+  gap: 8px;
+}
+
+.daily-bucket-breakdown-header span,
+.daily-bucket-breakdown-row small {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.daily-bucket-breakdown-list {
+  padding: 0 12px;
+}
+
+.daily-bucket-breakdown-row {
+  min-height: 44px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.daily-bucket-breakdown-row:last-child {
+  border-bottom: none;
+}
+
+.daily-bucket-breakdown-row div {
+  min-width: 0;
+  gap: 7px;
+}
+
+.daily-bucket-breakdown-row strong {
+  color: #334155;
+  font-size: 13px;
+}
+
+.daily-bucket-breakdown-row b {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.daily-bucket-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
 }
 
 .bucket-card-actions {

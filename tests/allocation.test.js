@@ -815,6 +815,9 @@ test('策略详情趋势区使用顶部双 Tab 切换，并把分类趋势改成
   assert.match(file, /每日收益统计/)
   assert.match(file, /buildAllocationDailyProfitTrend/)
   assert.match(file, /AllocationBucketProfitCalendar/)
+  assert.match(file, /@select="handleAllocationDailySelect"/)
+  assert.match(file, /分类收益明细/)
+  assert.match(file, /selectedAllocationDailyBreakdown/)
   assert.doesNotMatch(file, /分类每日收益统计/)
 })
 
