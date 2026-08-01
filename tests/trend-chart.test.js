@@ -72,7 +72,9 @@ test('趋势图参照线可输出纵轴标签配置，便于标记目标收益�
   assert.equal(fallbackLine.axisLabel, '8%')
 })
 
-test('统计页收益走势趋势图显式开启 0 刻度红线', () => {
+test('统计页按天使用收益日历，按周期使用零轴柱状图', () => {
   const source = fs.readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
-  assert.match(source, /<TrendChart[\s\S]*:show-zero-baseline="true"/)
+  assert.match(source, /<AllocationBucketProfitCalendar[\s\S]*v-if="trendMode === 'daily'"/)
+  assert.match(source, /<PeriodProfitBarChart[\s\S]*v-else/)
+  assert.doesNotMatch(source, /v-model="dailyRange"/)
 })

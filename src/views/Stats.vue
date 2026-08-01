@@ -66,18 +66,24 @@
         </div>
       </div>
 
-      <div class="trend-control-grid">
+      <div class="trend-control-grid" :class="{ 'two-columns': trendMode === 'daily' }">
         <label>走势<select v-model="trendMode"><option v-for="item in trendModeOptions" :key="item.value" :value="item.value">{{ item.text }}</option></select></label>
-        <label>区间<select v-if="trendMode === 'daily'" v-model="dailyRange"><option v-for="item in dailyRangeOptions" :key="item.value" :value="item.value">{{ item.text }}</option></select><select v-else v-model="periodMode"><option v-for="item in periodOptions" :key="item.value" :value="item.value">{{ item.text }}</option></select></label>
+        <label v-if="trendMode === 'period'">区间<select v-model="periodMode"><option v-for="item in periodOptions" :key="item.value" :value="item.value">{{ item.text }}</option></select></label>
         <label>指标<select v-model="trendMetric"><option value="amount">收益金额</option><option value="rate">收益率</option></select></label>
       </div>
 
-      <TrendChart
-        :points="trendSeries"
+      <AllocationBucketProfitCalendar
+        v-if="trendMode === 'daily'"
+        :series="dailyCalendarSeries"
         :summary-label="trendSummaryLabel"
         :formatter="trendMetric === 'rate' ? formatSignedPercent : formatCurrencyValue"
-        :y-axis-formatter="trendMetric === 'rate' ? formatAxisPercent : formatCompactAmount"
-        :show-zero-baseline="true"
+        @select="handleTrendSelect"
+      />
+      <PeriodProfitBarChart
+        v-else
+        :points="periodTrendSeries"
+        :summary-label="trendSummaryLabel"
+        :formatter="trendMetric === 'rate' ? formatSignedPercent : formatCurrencyValue"
         @select="handleTrendSelect"
       />
 
@@ -248,7 +254,8 @@
 <script setup>
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { showToast } from 'vant'
-import TrendChart from '../components/TrendChart.vue'
+import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
+import PeriodProfitBarChart from '../components/PeriodProfitBarChart.vue'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
@@ -258,7 +265,6 @@ import {
   buildAccountFilterOptions,
   buildPeriodProfitContributionRows,
   buildDailyHistoryRows,
-  buildDisplayTrendSeries,
   buildFundTypeFilterOptions,
   buildMemberFilterOptions,
   buildPeriodHistoryRows,
@@ -280,7 +286,6 @@ const selectedTrendRow = ref(null)
 const showScopeFilters = ref(false)
 const trendMode = ref('daily')
 const trendMetric = ref('amount')
-const dailyRange = ref(30)
 const periodMode = ref('week')
 const periodVisibleCountMap = ref({
   week: 2,
@@ -295,14 +300,6 @@ const contributionRange = ref(30)
 const trendModeOptions = [
   { text: '按天', value: 'daily' },
   { text: '按周期', value: 'period' },
-]
-
-const dailyRangeOptions = [
-  { text: '7天', value: 7 },
-  { text: '30天', value: 30 },
-  { text: '90天', value: 90 },
-  { text: '180天', value: 180 },
-  { text: '365天', value: 365 },
 ]
 
 const contributionRangeOptions = [
@@ -395,7 +392,6 @@ const allDailyHistoryRows = computed(() => buildDailyHistoryRows(allSnapshots.va
 }))
 const dailyHistoryRows = computed(() => allDailyHistoryRows.value)
 const visibleDailyHistoryRows = computed(() => dailyHistoryRows.value.slice(0, dailyHistoryVisibleCount.value))
-const trendDailyRows = computed(() => allDailyHistoryRows.value.slice(0, dailyRange.value))
 const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   memberId: selectedMember.value,
   accountId: selectedAccount.value,
@@ -413,17 +409,25 @@ const contributionRows = computed(() => buildPeriodProfitContributionRows(allSna
   days: contributionRange.value,
   limit: 3,
 }))
-const trendRows = computed(() => (trendMode.value === 'daily' ? trendDailyRows.value : periodRows.value))
+const trendRows = computed(() => (trendMode.value === 'daily' ? allDailyHistoryRows.value : periodRows.value))
 const trendSummaryLabel = computed(() => {
   const suffix = trendMetric.value === 'rate' ? '收益率' : '收益'
   return trendMode.value === 'daily' ? `所选日期${suffix}` : `所选周期阶段${suffix}`
 })
-const trendSeries = computed(() => {
-  if (trendMode.value === 'daily') {
-    return buildDisplayTrendSeries(trendDailyRows.value, { metric: trendMetric.value === 'rate' ? 'daily_profit_rate' : 'daily_profit', mode: 'daily' })
-  }
-  return buildTrendSeries(periodRows.value, { metric: trendMetric.value === 'rate' ? 'period_profit_rate' : 'period_profit', mode: 'period' })
-})
+const dailyCalendarSeries = computed(() => [{
+  key: 'daily-profit',
+  assetType: 'daily-profit',
+  label: activeScopeName.value,
+  points: allDailyHistoryRows.value.map(row => ({
+    date: row.date,
+    value: Number(row[trendMetric.value === 'rate' ? 'daily_profit_rate' : 'daily_profit']) || 0,
+    raw: row,
+  })),
+}])
+const periodTrendSeries = computed(() => buildTrendSeries(periodRows.value, {
+  metric: trendMetric.value === 'rate' ? 'period_profit_rate' : 'period_profit',
+  mode: 'period',
+}))
 const selectedTrendDateLabel = computed(() => {
   if (!selectedTrendRow.value) return '-'
   return trendMode.value === 'daily'
@@ -438,14 +442,6 @@ const formatSignedPercent = (value) => {
 }
 
 const formatCurrencyValue = (value) => `¥${formatAmount(value)}`
-const formatAxisPercent = (value) => `${Number(value || 0).toFixed(2)}%`
-
-const formatCompactAmount = (value) => {
-  const num = Number(value) || 0
-  if (Math.abs(num) >= 10000) return `¥${(num / 10000).toFixed(1)}万`
-  return `¥${formatAmount(num)}`
-}
-
 const handleTrendSelect = (row) => {
   selectedTrendRow.value = row
 }
@@ -773,6 +769,10 @@ onActivated(() => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.trend-control-grid.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .compact-range-select {
