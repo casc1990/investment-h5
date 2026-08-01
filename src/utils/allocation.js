@@ -394,35 +394,45 @@ export const buildAllocationBucketDailyProfitTrend = ({ profile: rawProfile, sna
   const includedAssetTypes = allowedAssetTypes.filter(assetType => trackedFunds.some(item => item.assetType === assetType))
   if (!includedAssetTypes.length) return []
 
-  const rows = [...snapshots]
-    .map(snapshot => {
-      const matchedPositions = (snapshot?.positions || []).filter(position => trackedIds.has(position.id))
-      if (!matchedPositions.length) return null
+  const latestEntryByFundAndProfitDate = new Map()
+  for (const snapshot of [...snapshots].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    for (const position of snapshot?.positions || []) {
+      if (!trackedIds.has(position.id)) continue
+      const assetType = assetTypeByPositionId.get(position.id)
+      if (!assetType || !includedAssetTypes.includes(assetType)) continue
+      const profitDate = String(
+        position.nav_jzrq
+        || snapshot?.summary?.dailyProfitDate
+        || snapshot?.date
+        || ''
+      ).slice(0, 10)
+      if (!profitDate) continue
+      latestEntryByFundAndProfitDate.set(`${position.id}::${profitDate}`, {
+        assetType,
+        profitDate,
+        value: getPositionYesterdayProfit(position),
+      })
+    }
+  }
 
-      const valuesByAssetType = includedAssetTypes.reduce((acc, assetType) => {
+  const rowsByDate = new Map()
+  for (const entry of latestEntryByFundAndProfitDate.values()) {
+    const row = rowsByDate.get(entry.profitDate) || {
+      key: entry.profitDate,
+      date: entry.profitDate,
+      label: entry.profitDate.slice(5),
+      valuesByAssetType: includedAssetTypes.reduce((acc, assetType) => {
         acc[assetType] = 0
         return acc
-      }, {})
+      }, {}),
+      totalValue: 0,
+    }
+    row.valuesByAssetType[entry.assetType] = round2(row.valuesByAssetType[entry.assetType] + entry.value)
+    row.totalValue = round2(Object.values(row.valuesByAssetType).reduce((sum, value) => sum + safeNumber(value), 0))
+    rowsByDate.set(entry.profitDate, row)
+  }
 
-      for (const position of matchedPositions) {
-        const assetType = assetTypeByPositionId.get(position.id)
-        if (!assetType || !includedAssetTypes.includes(assetType)) continue
-        valuesByAssetType[assetType] = round2(valuesByAssetType[assetType] + getPositionYesterdayProfit(position))
-      }
-
-      const totalValue = round2(Object.values(valuesByAssetType).reduce((sum, value) => sum + safeNumber(value), 0))
-      const row = {
-        key: snapshot.date,
-        date: snapshot.date,
-        label: String(snapshot.date || '').slice(5),
-        valuesByAssetType,
-        totalValue,
-      }
-
-      return row
-    })
-    .filter(Boolean)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  const rows = [...rowsByDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
 
   return includedAssetTypes.map(assetType => ({
     key: assetType,

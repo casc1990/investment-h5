@@ -574,6 +574,39 @@ test('策略详情可按类别生成每日收益多折线趋势图，有几类�
   assert.equal(series[2].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 90)
 })
 
+test('策略详情每日收益按各基金实际净值日期归属，并忽略周末重复快照', () => {
+  const weekendSnapshots = [
+    {
+      date: '2026-07-31',
+      summary: { dailyProfitDate: '2026-07-31' },
+      positions: [
+        { id: 'p1', yesterday_profit: 112.18, nav_jzrq: '2026-07-31' },
+        { id: 'p4', yesterday_profit: 106.06, nav_jzrq: '2026-07-31' },
+      ],
+    },
+    {
+      date: '2026-08-01',
+      positions: [
+        { id: 'p1', yesterday_profit: 112.18, nav_jzrq: '2026-07-31' },
+        { id: 'p4', yesterday_profit: 106.06, nav_jzrq: '2026-07-31' },
+      ],
+    },
+  ]
+  const dailyProfile = {
+    ...profile,
+    funds: [
+      { positionId: 'p1', assetType: ALLOCATION_ASSET_TYPES.PURE_BOND, status: ALLOCATION_FUND_STATUSES.KEEP },
+      { positionId: 'p4', assetType: ALLOCATION_ASSET_TYPES.INDEX, status: ALLOCATION_FUND_STATUSES.KEEP },
+    ],
+  }
+
+  const bucketSeries = buildAllocationBucketDailyProfitTrend({ profile: dailyProfile, snapshots: weekendSnapshots })
+  assert.deepEqual(bucketSeries.flatMap(item => item.points.map(point => point.date)), ['2026-07-31', '2026-07-31'])
+
+  const totalSeries = buildAllocationDailyProfitTrend({ profile: dailyProfile, snapshots: weekendSnapshots })
+  assert.deepEqual(totalSeries[0].points.map(point => [point.date, point.value]), [['2026-07-31', 218.24]])
+})
+
 test('分类基金收益统计可按日周月年聚合，并保留每支基金的周期收益联动数据', () => {
   const periodProfile = {
     ...profile,
