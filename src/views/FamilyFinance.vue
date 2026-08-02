@@ -70,8 +70,7 @@
     </main>
 
     <section class="snapshot-card">
-      <div><h2>净资产档案</h2><p>建议每月余额更新后保存一次</p></div>
-      <button :disabled="saving" @click="captureSnapshot">保存今日快照</button>
+      <div><h2>净资产档案</h2><p>家庭资产、应收和负债发生变化后自动记录</p></div>
       <div v-if="snapshots.length" class="snapshot-list">
         <div v-for="item in snapshots.slice(-6).reverse()" :key="item.date"><span>{{ item.date }}</span><strong>{{ money(item.net_worth) }}</strong></div>
       </div>
@@ -88,7 +87,7 @@
           <label><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
           <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
           <label v-if="isEditingAsset"><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：7月份公积金缴存后余额" /></label>
-          <label><span>所属成员</span><select v-model="form.member_id"><option value="">家庭共有</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
+          <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
           <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
         </template>
 
@@ -262,8 +261,6 @@ const removeAsset = async () => {
 const settle = async (type, item) => {
   try { await showConfirmDialog({ title: '确认结清', message: `确认将“${item.name}”的剩余金额设为0？` }); type === 'receivable' ? await familyFinanceApi.settleReceivable(item.id) : await familyFinanceApi.settleLiability(item.id); await loadData(); showSuccessToast('已结清') } catch (error) { if (error !== 'cancel') showFailToast(error.message || '操作失败') }
 }
-const captureSnapshot = async () => { saving.value = true; try { await familyFinanceApi.captureSnapshot({ snapshot_date: today() }); await loadData(); showSuccessToast('今日快照已保存') } catch (error) { showFailToast(error.message || '保存失败') } finally { saving.value = false } }
-
 onMounted(loadData)
 </script>
 

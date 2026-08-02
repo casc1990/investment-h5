@@ -1569,6 +1569,23 @@ export async function onRequest(context) {
       return { assets, receivables, liabilities, summary };
     }
 
+    async function resolveFamilyMemberId(value) {
+      const memberId = normalizeFamilyMemberId(value);
+      if (!memberId) return null;
+      const { results } = await env.DB.prepare('SELECT id FROM members WHERE id = ? LIMIT 1').bind(memberId).all();
+      return results.length ? memberId : null;
+    }
+
+    async function captureFamilySnapshot(snapshotDate = getChinaDateString(new Date())) {
+      const data = await getFamilyFinanceData();
+      await env.DB.prepare(`
+        INSERT INTO family_snapshots (snapshot_date, summary_json, created_at, updated_at)
+        VALUES (?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(snapshot_date) DO UPDATE SET summary_json = excluded.summary_json, updated_at = unixepoch()
+      `).bind(normalizeFamilyDate(snapshotDate), JSON.stringify(data.summary)).run();
+      return data.summary;
+    }
+
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
@@ -2199,6 +2216,8 @@ export async function onRequest(context) {
       };
       const errors = validateFamilyAsset(payload);
       if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
+      const memberId = await resolveFamilyMemberId(body.member_id);
+      if (!memberId) return jsonResponse({ code: 400, message: '请选择有效的家庭成员' }, 400);
       const id = generateId();
       const valuationDate = normalizeFamilyDate(body.valuation_date);
       const investable = body.include_in_investable_assets === undefined
@@ -2210,7 +2229,7 @@ export async function onRequest(context) {
             id, member_id, name, category_code, institution, current_value, valuation_date,
             include_in_net_worth, include_in_investable_assets, remark
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(id, normalizeFamilyMemberId(body.member_id), payload.name, payload.category_code,
+        `).bind(id, memberId, payload.name, payload.category_code,
           String(body.institution || '').trim(), payload.current_value, valuationDate,
           Number(body.include_in_net_worth !== false), investable, String(body.remark || '').trim()),
         env.DB.prepare(`
@@ -2218,6 +2237,7 @@ export async function onRequest(context) {
           VALUES (?, ?, 0, ?, ?, ?, ?)
         `).bind(generateId(), id, payload.current_value, payload.current_value, valuationDate, '初始录入'),
       ]);
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2234,6 +2254,8 @@ export async function onRequest(context) {
       };
       const errors = validateFamilyAsset(payload);
       if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
+      const memberId = await resolveFamilyMemberId(body.member_id ?? current.member_id);
+      if (!memberId) return jsonResponse({ code: 400, message: '请选择有效的家庭成员' }, 400);
       const valuationDate = normalizeFamilyDate(body.valuation_date || current.valuation_date);
       const previousValue = normalizeFamilyMoney(current.current_value);
       const changed = payload.current_value !== previousValue;
@@ -2241,7 +2263,7 @@ export async function onRequest(context) {
         UPDATE family_assets SET member_id = ?, name = ?, category_code = ?, institution = ?, current_value = ?,
           valuation_date = ?, include_in_net_worth = ?, include_in_investable_assets = ?, remark = ?, updated_at = unixepoch()
         WHERE id = ?
-      `).bind(normalizeFamilyMemberId(body.member_id ?? current.member_id), payload.name, payload.category_code,
+      `).bind(memberId, payload.name, payload.category_code,
         String(body.institution ?? current.institution ?? '').trim(), payload.current_value, valuationDate,
         Number(body.include_in_net_worth ?? current.include_in_net_worth ?? 1),
         Number(body.include_in_investable_assets ?? current.include_in_investable_assets ?? 0),
@@ -2252,12 +2274,14 @@ export async function onRequest(context) {
       `).bind(generateId(), id, previousValue, payload.current_value, normalizeFamilyMoney(payload.current_value - previousValue),
         valuationDate, String(body.update_remark || body.remark || '更新余额').trim()));
       await env.DB.batch(statements);
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, value_changed: changed } });
     }
 
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_assets SET status = 'archived', updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, message: '资产已删除' });
     }
 
@@ -2285,6 +2309,7 @@ export async function onRequest(context) {
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.debtor_name || '').trim(),
         amount, outstanding, body.lent_date || null, body.due_date || null, outstanding === 0 ? 'settled' : 'normal',
         String(body.risk_level || 'normal'), String(body.remark || '').trim()).run();
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2302,12 +2327,14 @@ export async function onRequest(context) {
         env.DB.prepare("UPDATE family_receivables SET outstanding_amount = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
           .bind(remaining, remaining === 0 ? 'settled' : 'partially_paid', id),
       ]);
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, outstanding_amount: remaining } });
     }
 
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, message: '应收款已结清' });
     }
 
@@ -2327,6 +2354,7 @@ export async function onRequest(context) {
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.creditor_name || '').trim(),
         amount, outstanding, Number(body.interest_rate || 0), normalizeFamilyMoney(body.monthly_payment),
         body.due_date || null, outstanding === 0 ? 'settled' : 'normal', String(body.remark || '').trim()).run();
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2344,24 +2372,21 @@ export async function onRequest(context) {
         env.DB.prepare("UPDATE family_liabilities SET outstanding_principal = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
           .bind(remaining, remaining === 0 ? 'settled' : 'normal', id),
       ]);
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, outstanding_principal: remaining } });
     }
 
     if (path.match(/^\/api\/family-finance\/liabilities\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_liabilities SET status = 'settled', outstanding_principal = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      await captureFamilySnapshot();
       return jsonResponse({ code: 0, message: '负债已结清' });
     }
 
     if (path === '/api/family-finance/snapshots' && method === 'POST') {
-      const data = await getFamilyFinanceData();
       const snapshotDate = normalizeFamilyDate((await context.request.json().catch(() => ({}))).snapshot_date);
-      await env.DB.prepare(`
-        INSERT INTO family_snapshots (snapshot_date, summary_json, created_at, updated_at)
-        VALUES (?, ?, unixepoch(), unixepoch())
-        ON CONFLICT(snapshot_date) DO UPDATE SET summary_json = excluded.summary_json, updated_at = unixepoch()
-      `).bind(snapshotDate, JSON.stringify(data.summary)).run();
-      return jsonResponse({ code: 0, data: { snapshot_date: snapshotDate, summary: data.summary } });
+      const summary = await captureFamilySnapshot(snapshotDate);
+      return jsonResponse({ code: 0, data: { snapshot_date: snapshotDate, summary } });
     }
 
     // ========== 事件中心 API ==========

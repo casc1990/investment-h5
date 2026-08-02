@@ -9,8 +9,23 @@ test('家庭财务页覆盖资产、应收、负债和快照场景', () => {
   assert.match(viewSource, /label: '资产'/)
   assert.match(viewSource, /label: '应收'/)
   assert.match(viewSource, /label: '负债'/)
-  assert.match(viewSource, /保存今日快照/)
+  assert.match(viewSource, /净资产档案/)
   assert.match(viewSource, /基金自动汇总，其他资产手工记账/)
+})
+
+test('净资产快照改为家庭财务变更后自动记录', () => {
+  assert.doesNotMatch(viewSource, /保存今日快照|captureSnapshot/)
+  assert.match(viewSource, /家庭资产、应收和负债发生变化后自动记录/)
+  assert.match(functionSource, /async function captureFamilySnapshot/)
+  assert.ok((functionSource.match(/await captureFamilySnapshot\(\)/g) || []).length >= 9)
+})
+
+test('手工资产必须关联家庭成员', () => {
+  assert.match(viewSource, /<span>所属成员<\/span><select v-model="form\.member_id" required>/)
+  assert.match(viewSource, /请选择家庭成员/)
+  assert.match(functionSource, /INSERT INTO family_assets \([\s\S]*?id, member_id/)
+  assert.match(functionSource, /LEFT JOIN members m ON a\.member_id = m\.id/)
+  assert.match(functionSource, /请选择有效的家庭成员/)
 })
 
 test('家庭财务页复用现有系统的页面底色、主色和卡片层级', () => {
