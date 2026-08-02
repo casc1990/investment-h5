@@ -34,7 +34,7 @@
     </template>
     <van-loading v-else-if="loading" class="page-loading" type="spinner" />
 
-    <van-popup v-model:show="editVisible" position="bottom" round safe-area-inset-bottom teleport="body" :z-index="12000" class="asset-popup">
+    <van-popup v-model:show="editVisible" position="bottom" round safe-area-inset-bottom teleport="body" class="asset-popup">
       <form class="edit-sheet" @submit.prevent="saveAsset">
         <div class="form-head"><div><small>家庭财务记账</small><h2>更新资产</h2></div><button type="button" @click="editVisible = false">×</button></div>
         <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>

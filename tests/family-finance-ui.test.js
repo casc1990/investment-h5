@@ -66,6 +66,13 @@ test('资产列表提供查看和更新入口，详情页展示总览、记录�
   assert.match(functionSource, /data: \{ asset: results\[0\], records: records \|\| \[\], category/)
 })
 
+test('资产删除确认框使用 Vant 自动层级，不再被编辑弹层遮挡', () => {
+  assert.doesNotMatch(viewSource, /:z-index="12000" class="finance-popup"/)
+  assert.doesNotMatch(detailSource, /:z-index="12000" class="asset-popup"/)
+  assert.match(detailSource, /type="button" class="danger" @click="removeAsset"/)
+  assert.match(detailSource, /await showConfirmDialog\(\{ title: '删除资产'/)
+})
+
 test('每次资产更新都会追加记录，包括金额不变的信息更新', () => {
   const updateStart = functionSource.indexOf("const current = results[0];", functionSource.indexOf('/api/family-finance/assets'))
   const updateBlock = functionSource.slice(updateStart, functionSource.indexOf("method === 'GET'", updateStart))

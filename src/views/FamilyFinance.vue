@@ -77,7 +77,7 @@
       </div>
     </section>
 
-    <van-popup v-model:show="formVisible" position="bottom" round safe-area-inset-bottom teleport="body" :z-index="12000" class="finance-popup">
+    <van-popup v-model:show="formVisible" position="bottom" round safe-area-inset-bottom teleport="body" class="finance-popup">
       <form class="form-sheet" @submit.prevent="submitForm">
         <div class="form-head"><div><small>{{ formEyebrow }}</small><h2>{{ formTitle }}</h2></div><button type="button" @click="formVisible = false">×</button></div>
 
