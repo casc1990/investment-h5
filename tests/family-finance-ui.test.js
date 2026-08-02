@@ -31,6 +31,15 @@ test('资产表单使用大类和二级分类联动并精简低价值字段', ()
   assert.doesNotMatch(viewSource, /<span>估值日期<\/span>/)
 })
 
+test('家庭财务刷新优先加载总览，成员失败时保留缓存且不拖死页面', () => {
+  assert.match(viewSource, /readPageCache\('family-finance'\)/)
+  assert.match(viewSource, /writePageCache\('family-finance'/)
+  assert.match(viewSource, /if \(loading\.value\) return/)
+  assert.match(viewSource, /const memberRefresh = memberApi\.list\(\)/)
+  assert.match(viewSource, /家庭成员刷新失败，保留现有数据/)
+  assert.doesNotMatch(viewSource, /Promise\.all\(\[familyFinanceApi\.overview\(\), memberApi\.list\(\)\]\)/)
+})
+
 test('家庭财务后端使用独立表且基金仅通过读查询汇总', () => {
   for (const table of ['family_assets', 'family_asset_records', 'family_receivables', 'family_liabilities', 'family_snapshots']) {
     assert.match(functionSource, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`))

@@ -130,6 +130,7 @@
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
+import { readPageCache, writePageCache } from '../utils/pageCache'
 
 const EmptyState = defineComponent({ props: { text: String }, setup: props => () => h('div', { class: 'empty-state' }, [h('span', '🏡'), h('strong', props.text), h('small', '点击右上角新增开始记账')]) })
 const MemberSelect = defineComponent({
@@ -144,6 +145,29 @@ const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = 
 const summary = reactive({ fund_value: 0, total_assets: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
 const categories = reactive({ assets: [], receivables: [], liabilities: [] })
 const form = reactive({})
+
+const applyOverviewData = data => {
+  Object.assign(summary, data.summary || {})
+  assets.value = data.assets || []
+  receivables.value = data.receivables || []
+  liabilities.value = data.liabilities || []
+  snapshots.value = data.snapshots || []
+  Object.assign(categories, data.categories || {})
+}
+const cacheFamilyFinance = () => writePageCache('family-finance', {
+  overview: {
+    summary: { ...summary },
+    assets: assets.value,
+    receivables: receivables.value,
+    liabilities: liabilities.value,
+    snapshots: snapshots.value,
+    categories: { ...categories },
+  },
+  members: members.value,
+})
+const cachedFamilyFinance = readPageCache('family-finance')
+if (cachedFamilyFinance?.overview) applyOverviewData(cachedFamilyFinance.overview)
+if (cachedFamilyFinance?.members) members.value = cachedFamilyFinance.members
 
 const tabs = computed(() => [
   { key: 'assets', label: '资产', count: assets.value.length },
@@ -181,15 +205,21 @@ const groupedAssets = computed(() => {
 })
 
 const loadData = async () => {
+  if (loading.value) return
   loading.value = true
+  const memberRefresh = memberApi.list()
+    .then(memberData => {
+      members.value = memberData.members || []
+      cacheFamilyFinance()
+    })
+    .catch(error => console.warn('家庭成员刷新失败，保留现有数据:', error.message || error))
   try {
-    const [data, memberData] = await Promise.all([familyFinanceApi.overview(), memberApi.list()])
-    Object.assign(summary, data.summary || {})
-    assets.value = data.assets || []; receivables.value = data.receivables || []; liabilities.value = data.liabilities || []
-    snapshots.value = data.snapshots || []; Object.assign(categories, data.categories || {})
-    members.value = memberData.members || []
+    const data = await familyFinanceApi.overview()
+    applyOverviewData(data)
+    cacheFamilyFinance()
   } catch (error) { showFailToast(error.response?.data?.message || error.message || '加载失败') }
   finally { loading.value = false }
+  await memberRefresh
 }
 
 const resetForm = values => { Object.keys(form).forEach(key => delete form[key]); Object.assign(form, values) }
