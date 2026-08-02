@@ -21,6 +21,16 @@ test('家庭财务页复用现有系统的页面底色、主色和卡片层级',
   assert.doesNotMatch(viewSource, /#18275b|#3549a8/)
 })
 
+test('资产表单使用大类和二级分类联动并精简低价值字段', () => {
+  assert.match(viewSource, /<span>资产大类<\/span>/)
+  assert.match(viewSource, /<span>二级分类<\/span>/)
+  assert.match(viewSource, /filteredAssetCategories/)
+  assert.match(viewSource, /handleAssetGroupChange/)
+  assert.match(viewSource, /<span>记录日期<\/span>/)
+  assert.doesNotMatch(viewSource, /金融机构 \/ 存放位置/)
+  assert.doesNotMatch(viewSource, /<span>估值日期<\/span>/)
+})
+
 test('家庭财务后端使用独立表且基金仅通过读查询汇总', () => {
   for (const table of ['family_assets', 'family_asset_records', 'family_receivables', 'family_liabilities', 'family_snapshots']) {
     assert.match(functionSource, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`))
