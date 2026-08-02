@@ -22,6 +22,7 @@ test('家庭财务是独立入口并保留现有基金导航', () => {
   assert.ok(MAIN_TABS.some(tab => tab.to === '/stats'))
   assert.ok(KEEP_ALIVE_ROUTE_NAMES.includes('FamilyFinance'))
   assert.equal(resolveMainTabIndex('/family-finance'), MAIN_TAB_INDEX_MAP['/family-finance'])
+  assert.equal(resolveMainTabIndex('/family-finance/assets/demo'), MAIN_TAB_INDEX_MAP['/family-finance'])
 })
 
 test('底部主导航暂时隐藏顾投入口', () => {

@@ -2268,14 +2268,30 @@ export async function onRequest(context) {
         Number(body.include_in_net_worth ?? current.include_in_net_worth ?? 1),
         Number(body.include_in_investable_assets ?? current.include_in_investable_assets ?? 0),
         String(body.remark ?? current.remark ?? '').trim(), id)];
-      if (changed) statements.push(env.DB.prepare(`
+      statements.push(env.DB.prepare(`
         INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).bind(generateId(), id, previousValue, payload.current_value, normalizeFamilyMoney(payload.current_value - previousValue),
-        valuationDate, String(body.update_remark || body.remark || '更新余额').trim()));
+        valuationDate, String(body.update_remark || '更新资产信息').trim()));
       await env.DB.batch(statements);
       await captureFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, value_changed: changed } });
+    }
+
+    if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'GET') {
+      const id = path.split('/').pop();
+      const { results } = await env.DB.prepare(`
+        SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
+        FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
+        WHERE a.id = ? AND a.status != 'archived'
+        LIMIT 1
+      `).bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
+      const { results: records } = await env.DB.prepare(
+        'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
+      ).bind(id).all();
+      const category = FAMILY_ASSET_CATEGORY_MAP[results[0].category_code] || null;
+      return jsonResponse({ code: 0, data: { asset: results[0], records: records || [], category, categories: Object.values(FAMILY_ASSET_CATEGORY_MAP) } });
     }
 
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'DELETE') {

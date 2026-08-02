@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const viewSource = readFileSync(new URL('../src/views/FamilyFinance.vue', import.meta.url), 'utf8')
+const detailSource = readFileSync(new URL('../src/views/FamilyAssetDetail.vue', import.meta.url), 'utf8')
 const functionSource = readFileSync(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 
 test('家庭财务页覆盖资产、应收、负债和快照场景', () => {
@@ -44,6 +45,33 @@ test('资产表单使用大类和二级分类联动并精简低价值字段', ()
   assert.match(viewSource, /<span>记录日期<\/span>/)
   assert.doesNotMatch(viewSource, /金融机构 \/ 存放位置/)
   assert.doesNotMatch(viewSource, /<span>估值日期<\/span>/)
+})
+
+test('资产备注支持填写金融机构和存放位置等附加信息', () => {
+  assert.match(viewSource, /<span>备注<\/span>/)
+  assert.match(viewSource, /可填写金融机构、存放位置等附加信息/)
+  assert.match(functionSource, /String\(body\.remark \?\? current\.remark \?\? ''\)\.trim\(\)/)
+})
+
+test('资产列表提供查看和更新入口，详情页展示总览、记录及管理操作', () => {
+  assert.match(viewSource, />查看<\/button>/)
+  assert.match(viewSource, />更新<\/button>/)
+  assert.match(viewSource, /router\.push\(`\/family-finance\/assets\/\$\{id\}`\)/)
+  assert.match(viewSource, /onActivated\(loadData\)/)
+  assert.match(detailSource, /资产总览/)
+  assert.match(detailSource, /资产记录/)
+  assert.match(detailSource, /更新资产/)
+  assert.match(detailSource, /删除资产/)
+  assert.match(detailSource, /familyFinanceApi\.assetDetail/)
+  assert.match(functionSource, /data: \{ asset: results\[0\], records: records \|\| \[\], category/)
+})
+
+test('每次资产更新都会追加记录，包括金额不变的信息更新', () => {
+  const updateStart = functionSource.indexOf("const current = results[0];", functionSource.indexOf('/api/family-finance/assets'))
+  const updateBlock = functionSource.slice(updateStart, functionSource.indexOf("method === 'GET'", updateStart))
+  assert.match(updateBlock, /INSERT INTO family_asset_records/)
+  assert.doesNotMatch(updateBlock, /if \(changed\) statements\.push/)
+  assert.match(updateBlock, /更新资产信息/)
 })
 
 test('家庭财务刷新优先加载总览，成员失败时保留缓存且不拖死页面', () => {

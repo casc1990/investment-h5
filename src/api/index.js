@@ -186,6 +186,7 @@ export const profitSnapshotApi = {
 export const familyFinanceApi = {
   overview: () => dedupedGet('/family-finance/overview'),
   createAsset: data => apiClient.post('/family-finance/assets', data),
+  assetDetail: id => apiClient.get(`/family-finance/assets/${id}`),
   updateAsset: (id, data) => apiClient.put(`/family-finance/assets/${id}`, data),
   deleteAsset: id => apiClient.delete(`/family-finance/assets/${id}`),
   assetRecords: id => apiClient.get(`/family-finance/assets/${id}/records`),

@@ -36,11 +36,12 @@
         <div v-if="groupedAssets.length" class="group-list">
           <section v-for="group in groupedAssets" :key="group.key" class="asset-group">
             <div class="group-head"><span>{{ group.name }}</span><strong>{{ money(group.total) }}</strong></div>
-            <button v-for="item in group.items" :key="item.id" class="finance-row" @click="openAssetEdit(item)">
+            <article v-for="item in group.items" :key="item.id" class="finance-row">
               <span class="row-icon">{{ assetIcon(item.category_code) }}</span>
               <span class="row-main"><strong>{{ item.name }}</strong><small>{{ categoryName('assets', item.category_code) }} · {{ ownerName(item) }} · {{ item.valuation_date }}</small></span>
-              <span class="row-value"><b>{{ money(item.current_value) }}</b><small>点击更新</small></span>
-            </button>
+              <span class="row-value"><b>{{ money(item.current_value) }}</b><small>{{ item.remark || '暂无备注' }}</small></span>
+              <span class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">更新</button></span>
+            </article>
           </section>
         </div>
         <EmptyState v-else text="还没有手工记录的资产" />
@@ -86,6 +87,7 @@
           <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" placeholder="例如：招商银行工资卡" /></label>
           <label><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
           <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
+          <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
           <label v-if="isEditingAsset"><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：7月份公积金缴存后余额" /></label>
           <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
           <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
@@ -126,7 +128,8 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
 import { readPageCache, writePageCache } from '../utils/pageCache'
@@ -138,6 +141,7 @@ const MemberSelect = defineComponent({
 })
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
+const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
 const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), snapshots = ref([])
@@ -240,6 +244,7 @@ const openAssetEdit = item => {
   resetForm({ ...item, asset_group: category?.group || '', current_value: Number(item.current_value), member_id: item.member_id || '', include_in_investable_assets: Boolean(item.include_in_investable_assets), update_remark: '' })
   formVisible.value = true
 }
+const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
 const openPayment = (type, item) => { formMode.value = 'payment'; paymentType.value = type; paymentItem.value = item; resetForm({ amount: '', payment_date: today(), remark: '' }); formVisible.value = true }
 
 const submitForm = async () => {
@@ -262,6 +267,7 @@ const settle = async (type, item) => {
   try { await showConfirmDialog({ title: '确认结清', message: `确认将“${item.name}”的剩余金额设为0？` }); type === 'receivable' ? await familyFinanceApi.settleReceivable(item.id) : await familyFinanceApi.settleLiability(item.id); await loadData(); showSuccessToast('已结清') } catch (error) { if (error !== 'cancel') showFailToast(error.message || '操作失败') }
 }
 onMounted(loadData)
+onActivated(loadData)
 </script>
 
 <style scoped>
@@ -396,8 +402,7 @@ onMounted(loadData)
 .snapshot-card h2 { color: #222; font-size: 16px; font-weight: 700; }
 .section-head p,
 .snapshot-card p { margin-top: 5px; color: #94a3b8; font-size: 12px; }
-.add-button,
-.snapshot-card > button {
+.add-button {
   border: 0;
   border-radius: 9px;
   padding: 9px 12px;
@@ -412,14 +417,13 @@ onMounted(loadData)
 .group-head strong { color: #334155; font-family: 'Courier New', monospace; }
 .finance-row {
   display: flex;
+  flex-wrap: wrap;
   width: 100%;
   align-items: center;
   gap: 10px;
   padding: 12px 0;
-  border: 0;
   border-top: 1px solid #f1f5f9;
   background: #fff;
-  text-align: left;
 }
 .row-icon {
   display: grid;
@@ -437,6 +441,10 @@ onMounted(loadData)
 .row-value small { margin-top: 4px; color: #94a3b8; font-size: 11px; }
 .row-value { display: flex; flex-direction: column; text-align: right; }
 .row-value b { font-family: 'Courier New', monospace; font-size: 14px; }
+.row-value small { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-row-actions { display: flex; flex: 0 0 100%; justify-content: flex-end; gap: 6px; padding-left: 48px; }
+.asset-row-actions button { border: 0; border-radius: 7px; padding: 6px 8px; background: #1e80ff; color: #fff; font-size: 11px; }
+.asset-row-actions .secondary { background: #e8f3ff; color: #1e80ff; }
 
 .plain-list { display: grid; gap: 10px; margin-top: 14px; }
 .debt-row { padding: 14px; border: 1px solid #e8edf3; border-radius: 12px; background: #fff; }
@@ -466,7 +474,6 @@ onMounted(loadData)
 .empty-state small { margin-top: 5px; font-size: 12px; }
 
 .snapshot-card { position: relative; }
-.snapshot-card > button { position: absolute; top: 16px; right: 16px; }
 .snapshot-list { margin-top: 14px; }
 .snapshot-list div { padding: 10px 0; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 12px; }
 .snapshot-list strong { color: #1f2937; font-family: 'Courier New', monospace; }

@@ -15,6 +15,7 @@ MAIN_TAB_INDEX_MAP['/members'] = MAIN_TAB_INDEX_MAP['/accounts']
 export const resolveMainTabIndex = (path = '') => {
   if (path === '/ledger') return MAIN_TAB_INDEX_MAP['/stats']
   if (path === '/members') return MAIN_TAB_INDEX_MAP['/accounts']
+  if (path === '/family-finance' || path.startsWith('/family-finance/')) return MAIN_TAB_INDEX_MAP['/family-finance']
   if (path === '/allocation' || path.startsWith('/allocation/')) return MAIN_TAB_INDEX_MAP['/allocation']
   return MAIN_TAB_INDEX_MAP[path] ?? 0
 }
