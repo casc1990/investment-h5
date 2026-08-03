@@ -2280,16 +2280,20 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'GET') {
       const id = path.split('/').pop();
-      const { results } = await env.DB.prepare(`
-        SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
-        FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
-        WHERE a.id = ? AND a.status != 'archived'
-        LIMIT 1
-      `).bind(id).all();
+      const [assetQuery, recordQuery] = await Promise.all([
+        env.DB.prepare(`
+          SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
+          WHERE a.id = ? AND a.status != 'archived'
+          LIMIT 1
+        `).bind(id).all(),
+        env.DB.prepare(
+          'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
+        ).bind(id).all(),
+      ]);
+      const results = assetQuery.results || [];
       if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
-      const { results: records } = await env.DB.prepare(
-        'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
-      ).bind(id).all();
+      const records = recordQuery.results || [];
       const category = FAMILY_ASSET_CATEGORY_MAP[results[0].category_code] || null;
       return jsonResponse({ code: 0, data: { asset: results[0], records: records || [], category, categories: Object.values(FAMILY_ASSET_CATEGORY_MAP) } });
     }

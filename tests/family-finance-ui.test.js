@@ -66,6 +66,14 @@ test('资产列表提供查看和更新入口，详情页展示总览、记录�
   assert.match(functionSource, /data: \{ asset: results\[0\], records: records \|\| \[\], category/)
 })
 
+test('资产详情优先展示列表或详情缓存，后台刷新失败不再阻塞整页', () => {
+  assert.match(detailSource, /readPageCache\(detailCacheKey\)/)
+  assert.match(detailSource, /readPageCache\('family-finance'\)/)
+  assert.match(detailSource, /writePageCache\(detailCacheKey/)
+  assert.match(detailSource, /loading\.value = !asset\.value/)
+  assert.match(detailSource, /详情刷新失败，已显示最近数据/)
+})
+
 test('资产删除确认框使用 Vant 自动层级，不再被编辑弹层遮挡', () => {
   assert.doesNotMatch(viewSource, /:z-index="12000" class="finance-popup"/)
   assert.doesNotMatch(detailSource, /:z-index="12000" class="asset-popup"/)

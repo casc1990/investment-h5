@@ -71,7 +71,7 @@ apiClient.interceptors.response.use(
     const config = error.config
     const retryableStatus = [502, 503, 504].includes(Number(error.response?.status || 0))
     const retryableNetworkError = !error.response || error.code === 'ECONNABORTED'
-    if (config?.method === 'get' && !config.__retried && (retryableStatus || retryableNetworkError)) {
+    if (config?.method === 'get' && !config.skipRetry && !config.__retried && (retryableStatus || retryableNetworkError)) {
       config.__retried = true
       return apiClient.request(config)
     }
@@ -186,7 +186,7 @@ export const profitSnapshotApi = {
 export const familyFinanceApi = {
   overview: () => dedupedGet('/family-finance/overview'),
   createAsset: data => apiClient.post('/family-finance/assets', data),
-  assetDetail: id => apiClient.get(`/family-finance/assets/${id}`),
+  assetDetail: id => apiClient.get(`/family-finance/assets/${id}`, { timeout: 8000, skipRetry: true }),
   updateAsset: (id, data) => apiClient.put(`/family-finance/assets/${id}`, data),
   deleteAsset: id => apiClient.delete(`/family-finance/assets/${id}`),
   assetRecords: id => apiClient.get(`/family-finance/assets/${id}/records`),

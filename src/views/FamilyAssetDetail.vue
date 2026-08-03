@@ -57,6 +57,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
+import { readPageCache, writePageCache } from '../utils/pageCache'
 
 const route = useRoute()
 const router = useRouter()
@@ -69,6 +70,23 @@ const records = ref([])
 const categories = ref([])
 const members = ref([])
 const form = reactive({})
+const detailCacheKey = `family-asset-${route.params.id}`
+
+const applyDetail = detail => {
+  asset.value = detail.asset || asset.value
+  category.value = detail.category || category.value
+  records.value = detail.records || []
+  categories.value = detail.categories || categories.value
+}
+const cachedDetail = readPageCache(detailCacheKey)
+const cachedFamilyFinance = readPageCache('family-finance')
+if (cachedDetail?.detail) applyDetail(cachedDetail.detail)
+else if (cachedFamilyFinance?.overview) {
+  const cachedAsset = (cachedFamilyFinance.overview.assets || []).find(item => item.id === route.params.id)
+  const cachedCategories = cachedFamilyFinance.overview.categories?.assets || []
+  if (cachedAsset) applyDetail({ asset: cachedAsset, category: cachedCategories.find(item => item.code === cachedAsset.category_code), categories: cachedCategories, records: [] })
+}
+if (cachedFamilyFinance?.members) members.value = cachedFamilyFinance.members
 
 const money = value => `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const signedMoney = value => `${Number(value || 0) > 0 ? '+' : ''}${money(value)}`
@@ -82,17 +100,15 @@ const assetGroups = computed(() => {
 const filteredCategories = computed(() => categories.value.filter(item => item.group === form.asset_group))
 
 const loadDetail = async () => {
-  loading.value = true
+  loading.value = !asset.value
+  memberApi.list()
+    .then(memberData => { members.value = memberData.members || [] })
+    .catch(error => console.warn('家庭成员刷新失败:', error.message || error))
   try {
     const detail = await familyFinanceApi.assetDetail(route.params.id)
-    asset.value = detail.asset
-    category.value = detail.category
-    records.value = detail.records || []
-    categories.value = detail.categories || []
-    memberApi.list()
-      .then(memberData => { members.value = memberData.members || [] })
-      .catch(error => console.warn('家庭成员刷新失败:', error.message || error))
-  } catch (error) { showFailToast(error.response?.data?.message || error.message || '资产详情加载失败') }
+    applyDetail(detail)
+    writePageCache(detailCacheKey, { detail })
+  } catch (error) { showFailToast(asset.value ? '详情刷新失败，已显示最近数据' : (error.response?.data?.message || error.message || '资产详情加载失败')) }
   finally { loading.value = false }
 }
 const openEdit = () => {
@@ -106,6 +122,8 @@ const saveAsset = async () => {
   saving.value = true
   try {
     await familyFinanceApi.updateAsset(route.params.id, form)
+    asset.value = { ...asset.value, ...form }
+    category.value = categories.value.find(item => item.code === form.category_code) || category.value
     editVisible.value = false
     await loadDetail()
     showSuccessToast('资产已更新')
