@@ -48,6 +48,12 @@
       </template>
 
       <template v-else-if="activeTab === 'receivables'">
+        <div class="receivable-summary-grid">
+          <div><span>应收总额</span><strong>{{ money(receivableSummary.total_amount) }}</strong></div>
+          <div><span>应收笔数</span><strong>{{ receivableSummary.total_count }} 笔</strong></div>
+          <div><span>已逾期金额</span><strong :class="{ warning: receivableSummary.overdue_amount > 0 }">{{ money(receivableSummary.overdue_amount) }}</strong></div>
+          <div><span>已逾期笔数</span><strong :class="{ warning: receivableSummary.overdue_count > 0 }">{{ receivableSummary.overdue_count }} 笔</strong></div>
+        </div>
         <div v-if="receivables.length" class="plain-list">
           <article v-for="item in receivables" :key="item.id" class="debt-row">
             <div class="debt-top"><div><strong>{{ item.name }}</strong><span>{{ categoryName('receivables', item.category_code) }} · {{ item.debtor_name || '未填债务人' }}</span></div><b>{{ money(item.outstanding_amount) }}</b></div>
@@ -70,7 +76,7 @@
       </template>
     </main>
 
-    <section class="trend-section">
+    <section v-if="activeTab === 'assets'" class="trend-section">
       <div class="trend-head"><h2>资产增长趋势</h2><p>每次手工资产录入或更新都会生成坐标点</p></div>
       <TrendChart
         :points="assetTrendPoints"
@@ -84,6 +90,25 @@
         <article v-for="item in selectedAssetOperations" :key="item.id" class="trend-operation-row">
           <span class="operation-icon">{{ assetIcon(item.category_code) }}</span>
           <span class="operation-main"><strong>{{ item.asset_name }}</strong><small>{{ item.remark || '资产更新' }} · {{ item.member_emoji || '👤' }} {{ item.member_name || '未关联成员' }}</small></span>
+          <b :class="changeClass(item.change_value)">{{ signedMoney(item.change_value) }}</b>
+        </article>
+      </div>
+    </section>
+
+    <section v-else-if="activeTab === 'receivables'" class="trend-section">
+      <div class="trend-head"><h2>应收账款趋势</h2><p>新增应收和每次回款都会生成坐标点</p></div>
+      <TrendChart
+        :points="receivableTrendPoints"
+        summary-label="所选节点应收余额"
+        :formatter="money"
+        :y-axis-formatter="compactMoney"
+        @select="selectedReceivableTrend = $event"
+      />
+      <div v-if="selectedReceivableOperations.length" class="trend-operation-list">
+        <div class="operation-title"><span>{{ selectedReceivableTrend?.date }} 应收操作</span><b>{{ selectedReceivableOperations.length }} 条</b></div>
+        <article v-for="item in selectedReceivableOperations" :key="item.key" class="trend-operation-row">
+          <span class="operation-icon">{{ item.type === 'create' ? '🤝' : '💰' }}</span>
+          <span class="operation-main"><strong>{{ item.receivable_name }}</strong><small>{{ item.remark }} · {{ item.member_emoji || '👤' }} {{ item.member_name || '家庭共有' }}</small></span>
           <b :class="changeClass(item.change_value)">{{ signedMoney(item.change_value) }}</b>
         </article>
       </div>
@@ -164,9 +189,11 @@ const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
 const assetAction = ref('create')
-const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([])
+const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([]), receivableTrend = ref([])
 const selectedAssetTrend = ref(null)
+const selectedReceivableTrend = ref(null)
 const summary = reactive({ fund_value: 0, total_assets: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
+const receivableSummary = reactive({ total_amount: 0, total_count: 0, overdue_amount: 0, overdue_count: 0 })
 const categories = reactive({ assets: [], receivables: [], liabilities: [] })
 const form = reactive({})
 
@@ -176,6 +203,8 @@ const applyOverviewData = data => {
   receivables.value = data.receivables || []
   liabilities.value = data.liabilities || []
   assetTrend.value = data.asset_trend || []
+  receivableTrend.value = data.receivable_trend || []
+  Object.assign(receivableSummary, data.receivable_summary || {})
   Object.assign(categories, data.categories || {})
 }
 const cacheFamilyFinance = () => writePageCache('family-finance', {
@@ -185,6 +214,8 @@ const cacheFamilyFinance = () => writePageCache('family-finance', {
     receivables: receivables.value,
     liabilities: liabilities.value,
     asset_trend: assetTrend.value,
+    receivable_trend: receivableTrend.value,
+    receivable_summary: { ...receivableSummary },
     categories: { ...categories },
   },
   members: members.value,
@@ -244,6 +275,13 @@ const assetTrendPoints = computed(() => assetTrend.value.map(item => ({
   raw: item,
 })))
 const selectedAssetOperations = computed(() => selectedAssetTrend.value?.operations || [])
+const receivableTrendPoints = computed(() => receivableTrend.value.map(item => ({
+  key: item.key,
+  date: item.date,
+  value: Number(item.total_value || 0),
+  raw: item,
+})))
+const selectedReceivableOperations = computed(() => selectedReceivableTrend.value?.operations || [])
 
 const loadData = async () => {
   if (loading.value) return
@@ -491,6 +529,12 @@ onActivated(loadData)
 .asset-row-actions .secondary { background: #e8f3ff; color: #1e80ff; }
 
 .plain-list { display: grid; gap: 10px; margin-top: 14px; }
+.receivable-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 14px; }
+.receivable-summary-grid div { padding: 11px; border-radius: 10px; background: #f8fafc; }
+.receivable-summary-grid span,.receivable-summary-grid strong { display: block; }
+.receivable-summary-grid span { color: #94a3b8; font-size: 11px; }
+.receivable-summary-grid strong { margin-top: 5px; color: #334155; font-family: 'Courier New', monospace; font-size: 13px; }
+.receivable-summary-grid strong.warning { color: #ea580c; }
 .debt-row { padding: 14px; border: 1px solid #e8edf3; border-radius: 12px; background: #fff; }
 .debt-top { gap: 10px; }
 .debt-top div { display: flex; min-width: 0; flex-direction: column; }

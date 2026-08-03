@@ -32,6 +32,29 @@ test('资产增长趋势按每次手工资产操作生成坐标点并联动记�
   assert.match(functionSource, /asset_trend: assetTrend/)
 })
 
+test('应收页展示汇总字段和独立应收趋势，不再显示资产趋势', () => {
+  assert.match(viewSource, /应收总额/)
+  assert.match(viewSource, /应收笔数/)
+  assert.match(viewSource, /已逾期金额/)
+  assert.match(viewSource, /已逾期笔数/)
+  assert.match(viewSource, /v-if="activeTab === 'assets'" class="trend-section"/)
+  assert.match(viewSource, /v-else-if="activeTab === 'receivables'" class="trend-section"/)
+  assert.match(viewSource, /应收账款趋势/)
+  assert.match(viewSource, /selectedReceivableOperations/)
+  assert.match(functionSource, /receivable_trend: receivableTrend/)
+  assert.match(functionSource, /receivable_summary: receivableSummary/)
+})
+
+test('新增应收、记录回款和直接结清都能形成趋势操作', () => {
+  assert.match(functionSource, /const receivableEvents = receivableRows\.map/)
+  assert.match(functionSource, /receivablePaymentQuery\.results/)
+  assert.match(functionSource, /receivableBalances\.set/)
+  const settleStart = functionSource.indexOf("method === 'DELETE'", functionSource.indexOf('/api/family-finance/receivables'))
+  const settleBlock = functionSource.slice(settleStart, functionSource.indexOf('/api/family-finance/liabilities', settleStart))
+  assert.match(settleBlock, /INSERT INTO family_receivable_payments/)
+  assert.match(settleBlock, /直接结清/)
+})
+
 test('手工资产必须关联家庭成员', () => {
   assert.match(viewSource, /<span>所属成员<\/span><select v-model="form\.member_id" required>/)
   assert.match(viewSource, /请选择家庭成员/)

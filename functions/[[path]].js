@@ -2214,7 +2214,7 @@ export async function onRequest(context) {
     // 与基金 positions/trades 完全隔离，只在总览中读取基金市值。
     if (path === '/api/family-finance/overview' && method === 'GET') {
       const data = await getFamilyFinanceData();
-      const [snapshotQuery, assetRecordQuery] = await Promise.all([
+      const [snapshotQuery, assetRecordQuery, receivableHistoryQuery, receivablePaymentQuery] = await Promise.all([
         env.DB.prepare('SELECT snapshot_date, summary_json FROM family_snapshots ORDER BY snapshot_date DESC LIMIT 24').all(),
         env.DB.prepare(`
           SELECT r.*, a.name AS asset_name, a.category_code, m.name AS member_name, m.emoji AS member_emoji
@@ -2224,6 +2224,19 @@ export async function onRequest(context) {
           WHERE a.status != 'archived'
           ORDER BY r.record_date ASC, r.created_at ASC, r.id ASC
           LIMIT 120
+        `).all(),
+        env.DB.prepare(`
+          SELECT r.*, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_receivables r LEFT JOIN members m ON r.member_id = m.id
+          ORDER BY r.created_at ASC, r.id ASC
+        `).all(),
+        env.DB.prepare(`
+          SELECT p.*, r.name AS receivable_name, r.category_code, r.member_id,
+                 m.name AS member_name, m.emoji AS member_emoji
+          FROM family_receivable_payments p
+          JOIN family_receivables r ON p.receivable_id = r.id
+          LEFT JOIN members m ON r.member_id = m.id
+          ORDER BY p.payment_date ASC, p.created_at ASC, p.id ASC
         `).all(),
       ]);
       const assetBalances = new Map();
@@ -2247,6 +2260,56 @@ export async function onRequest(context) {
           }],
         };
       });
+      const receivableRows = receivableHistoryQuery.results || [];
+      const receivableEvents = receivableRows.map(row => ({
+        key: `create-${row.id}`,
+        type: 'create',
+        receivable_id: row.id,
+        date: row.lent_date || getChinaDateString(new Date(Number(row.created_at || 0) * 1000)),
+        created_at: row.created_at,
+        amount: normalizeFamilyMoney(row.original_amount),
+        receivable_name: row.name,
+        category_code: row.category_code,
+        member_name: row.member_name,
+        member_emoji: row.member_emoji,
+        remark: row.remark || '新增应收款',
+      }));
+      (receivablePaymentQuery.results || []).forEach(row => receivableEvents.push({
+        key: `payment-${row.id}`,
+        type: 'payment',
+        receivable_id: row.receivable_id,
+        date: row.payment_date,
+        created_at: row.created_at,
+        amount: normalizeFamilyMoney(row.amount),
+        receivable_name: row.receivable_name,
+        category_code: row.category_code,
+        member_name: row.member_name,
+        member_emoji: row.member_emoji,
+        remark: row.remark || '记录回款',
+      }));
+      receivableEvents.sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(a.created_at || 0) - Number(b.created_at || 0) || a.key.localeCompare(b.key));
+      const receivableBalances = new Map();
+      const receivableTrend = receivableEvents.map(event => {
+        const previous = Number(receivableBalances.get(event.receivable_id) || 0);
+        const changeValue = event.type === 'create' ? event.amount : -event.amount;
+        receivableBalances.set(event.receivable_id, normalizeFamilyMoney(previous + changeValue));
+        const totalValue = normalizeFamilyMoney([...receivableBalances.values()].reduce((sum, value) => sum + value, 0));
+        return {
+          key: event.key,
+          date: event.date,
+          total_value: totalValue,
+          operations: [{ ...event, change_value: changeValue }],
+        };
+      });
+      const todayDate = getChinaDateString(new Date());
+      const activeReceivables = data.receivables || [];
+      const overdueReceivables = activeReceivables.filter(item => item.due_date && item.due_date < todayDate);
+      const receivableSummary = {
+        total_amount: normalizeFamilyMoney(activeReceivables.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0)),
+        total_count: activeReceivables.length,
+        overdue_amount: normalizeFamilyMoney(overdueReceivables.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0)),
+        overdue_count: overdueReceivables.length,
+      };
       const snapshots = snapshotQuery.results || [];
       return jsonResponse({
         code: 0,
@@ -2259,6 +2322,8 @@ export async function onRequest(context) {
           },
           snapshots: (snapshots || []).map(row => ({ date: row.snapshot_date, ...JSON.parse(row.summary_json) })).reverse(),
           asset_trend: assetTrend,
+          receivable_trend: receivableTrend,
+          receivable_summary: receivableSummary,
         },
       });
     }
@@ -2415,7 +2480,14 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
-      await env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      const { results } = await env.DB.prepare('SELECT outstanding_amount FROM family_receivables WHERE id = ?').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
+      const outstanding = normalizeFamilyMoney(results[0].outstanding_amount);
+      const statements = [env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id)];
+      if (outstanding > 0) statements.unshift(env.DB.prepare(
+        'INSERT INTO family_receivable_payments (id, receivable_id, amount, payment_date, remark) VALUES (?, ?, ?, ?, ?)'
+      ).bind(generateId(), id, outstanding, normalizeFamilyDate(), '直接结清'));
+      await env.DB.batch(statements);
       queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '应收款已结清' });
     }
