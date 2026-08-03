@@ -25,7 +25,7 @@
       <section class="section">
         <div class="section-header"><div><div class="section-title">🏠 家庭资产结构</div><div class="section-subtitle">基金自动汇总，其他项目来自家庭财务记账</div></div></div>
         <div class="family-structure-list">
-          <div v-for="item in familyStructureRows" :key="item.key"><span><i :class="item.key"></i>{{ item.label }}</span><b>{{ familyMoney(item.value) }}</b></div>
+          <div v-for="item in familyStructureRows" :key="item.key"><span><i :style="{ background: item.color }"></i>{{ item.label }}</span><b>{{ familyMoney(item.value) }}</b></div>
         </div>
         <button class="family-detail-button" @click="router.push('/family-finance')">查看家庭财务明细</button>
       </section>
@@ -348,17 +348,25 @@ const compactFamilyMoney = value => {
 const familyNetWorthPoints = computed(() => (familyOverview.value?.snapshots || []).map(item => ({
   key: item.date,
   date: item.date,
-  total_value: Number(item.net_worth || 0),
+  value: Number(item.net_worth || 0),
 })))
 const familyStructureRows = computed(() => {
   const summary = familyOverview.value?.summary || {}
-  return [
-    { key: 'fund', label: '基金资产', value: summary.fund_value },
-    { key: 'advisory', label: '顾投资产', value: summary.advisory_value },
-    { key: 'manual', label: '其他资产', value: summary.manual_asset_value },
-    { key: 'receivable', label: '应收款', value: summary.receivable_value },
-    { key: 'liability', label: '家庭负债', value: summary.total_liabilities },
-  ]
+  const palette = ['#1e80ff', '#06b6d4', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b', '#eab308']
+  const categoryMap = new Map((familyOverview.value?.categories?.assets || []).map(item => [item.code, item.name]))
+  const manualRows = new Map()
+  for (const asset of familyOverview.value?.assets || []) {
+    const key = asset.category_code || 'other_asset'
+    manualRows.set(key, Number(manualRows.get(key) || 0) + Number(asset.current_value || 0))
+  }
+  const rows = [
+    { key: 'fund', label: '基金资产', value: Number(summary.fund_value || 0) },
+    { key: 'advisory', label: '顾投', value: Number(summary.advisory_value || 0) },
+    ...[...manualRows.entries()].map(([key, value]) => ({ key: `asset-${key}`, label: categoryMap.get(key) || '其他资产', value })),
+    { key: 'receivable', label: '应收款', value: Number(summary.receivable_value || 0) },
+    { key: 'liability', label: '家庭负债', value: Number(summary.total_liabilities || 0) },
+  ].filter(item => item.value !== 0)
+  return rows.map((item, index) => ({ ...item, color: palette[index % palette.length] }))
 })
 
 const trendModeOptions = [
@@ -643,11 +651,7 @@ onActivated(() => {
 .family-trend-section { overflow: hidden; }
 .family-structure-list > div { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px; border-bottom: 1px solid #eef2f7; }
 .family-structure-list span { display: flex; align-items: center; gap: 9px; color: #536074; font-size: 13px; }
-.family-structure-list i { width: 9px; height: 9px; border-radius: 50%; background: #1e80ff; }
-.family-structure-list i.manual { background: #8b5cf6; }
-.family-structure-list i.advisory { background: #06b6d4; }
-.family-structure-list i.receivable { background: #f59e0b; }
-.family-structure-list i.liability { background: #22c55e; }
+.family-structure-list i { width: 9px; height: 9px; border-radius: 50%; }
 .family-structure-list b { color: #172033; font-size: 14px; }
 .family-detail-button { width: 100%; height: 40px; margin-top: 13px; border: 0; border-radius: 10px; color: #1e80ff; background: #eaf3ff; font-size: 13px; font-weight: 600; }
 

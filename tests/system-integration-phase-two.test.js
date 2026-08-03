@@ -28,6 +28,14 @@ test('统计页整合家庭资产和基金收益且保留原基金统计', () =>
   assert.match(statsSource, /收益贡献与拖累/)
 })
 
+test('家庭净资产趋势读取快照净资产且资产结构按二级分类拆分', () => {
+  assert.match(statsSource, /value: Number\(item\.net_worth \|\| 0\)/)
+  assert.doesNotMatch(statsSource, /total_value: Number\(item\.net_worth/)
+  assert.match(statsSource, /familyOverview\.value\?\.categories\?\.assets/)
+  assert.match(statsSource, /asset\.category_code/)
+  assert.doesNotMatch(statsSource, /label: '其他资产', value: summary\.manual_asset_value/)
+})
+
 test('家庭统计加载失败不会阻断现有基金统计', () => {
   assert.match(statsSource, /Promise\.allSettled\(\[captureProfitSnapshotFromApis\(\), familyFinanceApi\.overview\(\)\]\)/)
   assert.match(statsSource, /if \(fundResult\.status === 'rejected'\) throw fundResult\.reason/)
