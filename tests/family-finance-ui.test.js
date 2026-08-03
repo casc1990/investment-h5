@@ -15,6 +15,14 @@ test('家庭财务页覆盖资产、应收、负债和资产增长场景', () =>
   assert.match(viewSource, /基金自动汇总，其他资产手工记账/)
 })
 
+test('家庭财务顶部以两列汇总资产、应收、负债和可投资资产', () => {
+  assert.match(viewSource, /<span>总资产<\/span><strong>\{\{ money\(summary\.total_assets\) \}\}<\/strong>/)
+  assert.match(viewSource, /<span>应收款<\/span><strong>\{\{ money\(summary\.receivable_value\) \}\}<\/strong>/)
+  assert.match(viewSource, /<span>总负债<\/span><strong>\{\{ money\(summary\.total_liabilities\) \}\}<\/strong>/)
+  assert.match(viewSource, /<span>可投资资产<\/span><strong>\{\{ money\(summary\.investable_assets\) \}\}<\/strong>/)
+  assert.match(viewSource, /grid-template-columns: repeat\(2, 1fr\)/)
+})
+
 test('家庭财务变更后仍在后台自动记录快照', () => {
   assert.doesNotMatch(viewSource, /保存今日快照|captureSnapshot/)
   assert.match(functionSource, /async function captureFamilySnapshot/)

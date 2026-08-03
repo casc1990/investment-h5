@@ -9,6 +9,7 @@
       <div class="net-value">{{ money(summary.net_worth) }}</div>
       <div class="hero-grid">
         <div><span>总资产</span><strong>{{ money(summary.total_assets) }}</strong></div>
+        <div><span>应收款</span><strong>{{ money(summary.receivable_value) }}</strong></div>
         <div><span>总负债</span><strong>{{ money(summary.total_liabilities) }}</strong></div>
         <div><span>可投资资产</span><strong>{{ money(summary.investable_assets) }}</strong></div>
       </div>
@@ -192,7 +193,7 @@ const assetAction = ref('create')
 const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([]), receivableTrend = ref([])
 const selectedAssetTrend = ref(null)
 const selectedReceivableTrend = ref(null)
-const summary = reactive({ fund_value: 0, total_assets: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
+const summary = reactive({ fund_value: 0, total_assets: 0, receivable_value: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
 const receivableSummary = reactive({ total_amount: 0, total_count: 0, overdue_amount: 0, overdue_count: 0 })
 const categories = reactive({ assets: [], receivables: [], liabilities: [] })
 const form = reactive({})
@@ -404,14 +405,15 @@ onActivated(loadData)
 
 .hero-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   margin-top: 14px;
-  padding: 10px 0;
+  padding: 2px 0;
   border-radius: 10px;
   background: rgba(255, 255, 255, .12);
 }
-.hero-grid div { padding: 0 8px; text-align: center; }
-.hero-grid div + div { border-left: 1px solid rgba(255, 255, 255, .24); }
+.hero-grid div { padding: 8px; text-align: center; }
+.hero-grid div:nth-child(even) { border-left: 1px solid rgba(255, 255, 255, .24); }
+.hero-grid div:nth-child(n + 3) { border-top: 1px solid rgba(255, 255, 255, .24); }
 .hero-grid span,
 .hero-grid strong { display: block; }
 .hero-grid span { font-size: 11px; opacity: .8; }
