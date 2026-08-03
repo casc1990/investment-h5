@@ -11,7 +11,7 @@
       </section>
 
       <section class="overview-card">
-        <div class="section-head"><div><h2>资产总览</h2><p>当前登记信息</p></div><button @click="openEdit">更新资产</button></div>
+        <div class="section-head"><div><h2>资产总览</h2><p>当前登记信息</p></div><span class="overview-actions"><button class="secondary" @click="openInfoEdit">编辑</button><button @click="openAmountUpdate">更新资产</button></span></div>
         <div class="overview-grid">
           <div><span>资产大类</span><strong>{{ category?.groupName || '其他资产' }}</strong></div>
           <div><span>二级分类</span><strong>{{ category?.name || '其他' }}</strong></div>
@@ -36,17 +36,22 @@
 
     <van-popup v-model:show="editVisible" position="bottom" round safe-area-inset-bottom teleport="body" class="asset-popup">
       <form class="edit-sheet" @submit.prevent="saveAsset">
-        <div class="form-head"><div><small>家庭财务记账</small><h2>更新资产</h2></div><button type="button" @click="editVisible = false">×</button></div>
-        <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
-        <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyCategoryDefault"><option value="" disabled>请选择二级分类</option><option v-for="item in filteredCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
-        <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" /></label>
-        <label><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /><small class="field-tip">当前金额 {{ money(asset.current_value) }}，保存后将按本次变化自动计算</small></label>
-        <label><span>记录日期</span><input v-model="form.valuation_date" required type="date" /></label>
-        <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
-        <label><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：更新8月份账户余额" /></label>
-        <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
-        <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
-        <div class="form-actions"><button type="button" class="danger" @click="removeAsset">删除资产</button><button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : '保存更新' }}</button></div>
+        <div class="form-head"><div><small>家庭财务记账</small><h2>{{ editorMode === 'info' ? '编辑资产' : '更新资产金额' }}</h2></div><button type="button" @click="editVisible = false">×</button></div>
+        <template v-if="editorMode === 'info'">
+          <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
+          <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyCategoryDefault"><option value="" disabled>请选择二级分类</option><option v-for="item in filteredCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
+          <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" /></label>
+          <label><span>记录日期</span><input v-model="form.valuation_date" required type="date" /></label>
+          <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
+          <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
+          <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
+        </template>
+        <template v-else>
+          <label><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /><small class="field-tip">当前金额 {{ money(asset.current_value) }}，保存后将按本次变化自动计算</small></label>
+          <label><span>记录日期</span><input v-model="form.valuation_date" required type="date" /></label>
+          <label><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：更新8月份账户余额" /></label>
+        </template>
+        <div class="form-actions"><button v-if="editorMode === 'info'" type="button" class="danger" @click="removeAsset">删除</button><button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : '更新' }}</button></div>
       </form>
     </van-popup>
   </div>
@@ -64,6 +69,7 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const editVisible = ref(false)
+const editorMode = ref('change')
 const asset = ref(null)
 const category = ref(null)
 const records = ref([])
@@ -111,10 +117,17 @@ const loadDetail = async () => {
   } catch (error) { showFailToast(asset.value ? '详情刷新失败，已显示最近数据' : (error.response?.data?.message || error.message || '资产详情加载失败')) }
   finally { loading.value = false }
 }
-const openEdit = () => {
+const openInfoEdit = () => {
+  editorMode.value = 'info'
   Object.keys(form).forEach(key => delete form[key])
-  Object.assign(form, { ...asset.value, asset_group: category.value?.group || '', change_value: '', member_id: asset.value.member_id || '', include_in_investable_assets: Boolean(asset.value.include_in_investable_assets), update_remark: '' })
+  Object.assign(form, { ...asset.value, asset_group: category.value?.group || '', member_id: asset.value.member_id || '', include_in_investable_assets: Boolean(asset.value.include_in_investable_assets) })
   delete form.current_value
+  editVisible.value = true
+}
+const openAmountUpdate = () => {
+  editorMode.value = 'change'
+  Object.keys(form).forEach(key => delete form[key])
+  Object.assign(form, { change_value: '', valuation_date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()), update_remark: '' })
   editVisible.value = true
 }
 const handleGroupChange = () => { form.category_code = ''; form.include_in_investable_assets = false }
@@ -122,7 +135,7 @@ const applyCategoryDefault = () => { form.include_in_investable_assets = Boolean
 const saveAsset = async () => {
   saving.value = true
   try {
-    const changeValue = Number(form.change_value || 0)
+    const changeValue = editorMode.value === 'change' ? Number(form.change_value || 0) : 0
     await familyFinanceApi.updateAsset(route.params.id, form)
     asset.value = { ...asset.value, ...form, current_value: Number(asset.value.current_value || 0) + changeValue }
     category.value = categories.value.find(item => item.code === form.category_code) || category.value
@@ -159,6 +172,8 @@ onMounted(loadDetail)
 .section-head h2 { font-size: 16px; }
 .section-head p { margin-top: 4px; color: #94a3b8; font-size: 12px; }
 .section-head button { border: 0; border-radius: 9px; padding: 9px 12px; background: #1e80ff; color: #fff; font-size: 12px; }
+.overview-actions { display: flex; gap: 7px; }
+.section-head .overview-actions .secondary { background: #e8f3ff; color: #1e80ff; }
 .section-head > b { color: #64748b; font-size: 12px; }
 .overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
 .overview-grid div { padding: 11px; border-radius: 9px; background: #f8fafc; }

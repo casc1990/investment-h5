@@ -64,8 +64,9 @@ test('资产备注支持填写金融机构和存放位置等附加信息', () =>
   assert.match(functionSource, /String\(body\.remark \?\? current\.remark \?\? ''\)\.trim\(\)/)
 })
 
-test('资产列表提供查看和更新入口，详情页展示总览、记录及管理操作', () => {
+test('资产列表提供查看、编辑和更新入口，详情页展示总览、记录及管理操作', () => {
   assert.match(viewSource, />查看<\/button>/)
+  assert.match(viewSource, />编辑<\/button>/)
   assert.match(viewSource, />更新<\/button>/)
   assert.match(viewSource, /router\.push\(`\/family-finance\/assets\/\$\{id\}`\)/)
   assert.match(viewSource, /onActivated\(loadData\)/)
@@ -92,16 +93,17 @@ test('资产删除确认框使用 Vant 自动层级，不再被编辑弹层遮�
   assert.match(detailSource, /await showConfirmDialog\(\{ title: '删除资产'/)
 })
 
-test('每次资产更新都会追加记录，包括金额不变的信息更新', () => {
+test('只有金额更新追加资产记录，编辑原始资料不生成趋势点', () => {
   const updateStart = functionSource.indexOf("const current = results[0];", functionSource.indexOf('/api/family-finance/assets'))
   const updateBlock = functionSource.slice(updateStart, functionSource.indexOf("method === 'GET'", updateStart))
   assert.match(updateBlock, /INSERT INTO family_asset_records/)
-  assert.doesNotMatch(updateBlock, /if \(changed\) statements\.push/)
-  assert.match(updateBlock, /更新资产信息/)
+  assert.match(updateBlock, /hasAmountChange/)
+  assert.match(updateBlock, /if \(hasAmountChange\) statements\.push/)
+  assert.match(updateBlock, /更新资产金额/)
 })
 
 test('资产更新按本次增减额计算，记录不再展示前后总额', () => {
-  assert.match(viewSource, /v-else><span>本次金额变化<\/span><input v-model="form\.change_value"/)
+  assert.match(viewSource, /isChangingAsset[\s\S]*?<span>本次金额变化<\/span><input v-model="form\.change_value"/)
   assert.match(detailSource, />本次金额变化<\/span><input v-model="form\.change_value"/)
   assert.match(detailSource, /增加输入 100，减少输入 -100/)
   assert.doesNotMatch(detailSource, /money\(record\.previous_value\).*money\(record\.current_value\)/)
@@ -110,6 +112,16 @@ test('资产更新按本次增减额计算，记录不再展示前后总额', ()
   assert.match(updateBlock, /body\.change_value \?\? 0/)
   assert.match(updateBlock, /previousValue \+ changeValue/)
   assert.match(updateBlock, /本次减少金额不能大于当前金额/)
+})
+
+test('编辑资产只修改原始资料，更新入口只保留金额变化字段', () => {
+  assert.match(viewSource, /assetAction\.value = 'edit'/)
+  assert.match(viewSource, /assetAction\.value = 'change'/)
+  assert.match(viewSource, /openAssetChange/)
+  assert.match(detailSource, /editorMode === 'info'/)
+  assert.match(detailSource, /openInfoEdit/)
+  assert.match(detailSource, /openAmountUpdate/)
+  assert.match(detailSource, /v-if="editorMode === 'info'" type="button" class="danger"/)
 })
 
 test('资产保存不等待快照和详情刷新，避免触发 12 秒超时', () => {

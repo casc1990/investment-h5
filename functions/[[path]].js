@@ -2286,6 +2286,7 @@ export async function onRequest(context) {
       if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
       const current = results[0];
       const previousValue = normalizeFamilyMoney(current.current_value);
+      const hasAmountChange = Object.prototype.hasOwnProperty.call(body, 'change_value');
       const changeValue = normalizeFamilyMoney(body.change_value ?? 0);
       const nextValue = normalizeFamilyMoney(previousValue + changeValue);
       const payload = {
@@ -2310,14 +2311,14 @@ export async function onRequest(context) {
         Number(body.include_in_net_worth ?? current.include_in_net_worth ?? 1),
         Number(body.include_in_investable_assets ?? current.include_in_investable_assets ?? 0),
         String(body.remark ?? current.remark ?? '').trim(), id)];
-      statements.push(env.DB.prepare(`
-        INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(generateId(), id, previousValue, payload.current_value, changeValue,
-        valuationDate, String(body.update_remark || '更新资产信息').trim()));
+      if (hasAmountChange) statements.push(env.DB.prepare(`
+          INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(generateId(), id, previousValue, payload.current_value, changeValue,
+          valuationDate, String(body.update_remark || '更新资产金额').trim()));
       await env.DB.batch(statements);
       queueFamilySnapshot();
-      return jsonResponse({ code: 0, data: { id, value_changed: changed } });
+      return jsonResponse({ code: 0, data: { id, value_changed: hasAmountChange && changed } });
     }
 
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'GET') {

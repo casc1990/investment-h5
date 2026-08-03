@@ -40,7 +40,7 @@
               <span class="row-icon">{{ assetIcon(item.category_code) }}</span>
               <span class="row-main"><strong>{{ item.name }}</strong><small>{{ categoryName('assets', item.category_code) }} · {{ ownerName(item) }} · {{ item.valuation_date }}</small></span>
               <span class="row-value"><b>{{ money(item.current_value) }}</b><small>{{ item.remark || '暂无备注' }}</small></span>
-              <span class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">更新</button></span>
+              <span class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">编辑</button><button type="button" class="secondary" @click="openAssetChange(item)">更新</button></span>
             </article>
           </section>
         </div>
@@ -94,16 +94,21 @@
         <div class="form-head"><div><small>{{ formEyebrow }}</small><h2>{{ formTitle }}</h2></div><button type="button" @click="formVisible = false">×</button></div>
 
         <template v-if="formMode === 'asset'">
-          <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleAssetGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
-          <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyAssetCategoryDefault"><option value="" disabled>{{ form.asset_group ? '请选择二级分类' : '请先选择资产大类' }}</option><option v-for="item in filteredAssetCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
-          <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" placeholder="例如：招商银行工资卡" /></label>
-          <label v-if="!isEditingAsset"><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
-          <label v-else><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /></label>
-          <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
-          <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
-          <label v-if="isEditingAsset"><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：7月份公积金缴存后余额" /></label>
-          <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
-          <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
+          <template v-if="isChangingAsset">
+            <label><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /></label>
+            <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
+            <label><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：7月份公积金缴存" /></label>
+          </template>
+          <template v-else>
+            <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleAssetGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
+            <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyAssetCategoryDefault"><option value="" disabled>{{ form.asset_group ? '请选择二级分类' : '请先选择资产大类' }}</option><option v-for="item in filteredAssetCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
+            <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" placeholder="例如：招商银行工资卡" /></label>
+            <label v-if="!isEditingAsset"><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
+            <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
+            <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
+            <label><span>所属成员</span><select v-model="form.member_id" required><option value="" disabled>请选择家庭成员</option><option v-for="item in members" :key="item.id" :value="item.id">{{ item.emoji || '👤' }} {{ item.name }}</option></select></label>
+            <label class="switch-row"><span><b>计入可投资资产</b><small>受限资产通常不计入</small></span><input v-model="form.include_in_investable_assets" type="checkbox" /></label>
+          </template>
         </template>
 
         <template v-else-if="formMode === 'receivable'">
@@ -133,7 +138,7 @@
 
         <div class="form-actions">
           <button v-if="isEditingAsset" type="button" class="danger" @click="removeAsset">删除</button>
-          <button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
+          <button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : isEditingAsset ? '更新' : '保存' }}</button>
         </div>
       </form>
     </van-popup>
@@ -158,6 +163,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai'
 const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
+const assetAction = ref('create')
 const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([])
 const selectedAssetTrend = ref(null)
 const summary = reactive({ fund_value: 0, total_assets: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
@@ -194,8 +200,10 @@ const tabs = computed(() => [
 ])
 const activeTabLabel = computed(() => tabs.value.find(item => item.key === activeTab.value)?.label || '')
 const activeTabDescription = computed(() => ({ assets: '手工记录银行、股票、公积金等余额', receivables: '跟踪借出和待收回的款项', liabilities: '记录家庭剩余待还本金' }[activeTab.value]))
-const isEditingAsset = computed(() => formMode.value === 'asset' && Boolean(editingAssetId.value))
-const formTitle = computed(() => formMode.value === 'payment' ? (paymentType.value === 'receivable' ? '记录回款' : '记录还款') : isEditingAsset.value ? '更新资产' : `新增${activeTabLabel.value}`)
+const isEditingAsset = computed(() => formMode.value === 'asset' && assetAction.value === 'edit')
+const isChangingAsset = computed(() => formMode.value === 'asset' && assetAction.value === 'change')
+const hasSelectedAsset = computed(() => formMode.value === 'asset' && Boolean(editingAssetId.value))
+const formTitle = computed(() => formMode.value === 'payment' ? (paymentType.value === 'receivable' ? '记录回款' : '记录还款') : isEditingAsset.value ? '编辑资产' : isChangingAsset.value ? '更新资产金额' : `新增${activeTabLabel.value}`)
 const formEyebrow = computed(() => formMode.value === 'payment' ? paymentItem.value?.name : '家庭财务记账')
 const paymentBalance = computed(() => Number(paymentType.value === 'receivable' ? paymentItem.value?.outstanding_amount : paymentItem.value?.outstanding_principal) || 0)
 const assetGroups = computed(() => {
@@ -262,17 +270,22 @@ const handleAssetGroupChange = () => {
   form.include_in_investable_assets = false
 }
 const openCreate = () => {
-  editingAssetId.value = ''; formMode.value = activeTab.value === 'assets' ? 'asset' : activeTab.value === 'receivables' ? 'receivable' : 'liability'
+  editingAssetId.value = ''; assetAction.value = 'create'; formMode.value = activeTab.value === 'assets' ? 'asset' : activeTab.value === 'receivables' ? 'receivable' : 'liability'
   if (formMode.value === 'asset') resetForm({ asset_group: '', category_code: '', name: '', current_value: '', valuation_date: today(), member_id: '', include_in_investable_assets: false, remark: '' })
   if (formMode.value === 'receivable') resetForm({ category_code: '', name: '', debtor_name: '', original_amount: '', due_date: '', member_id: '' })
   if (formMode.value === 'liability') resetForm({ category_code: '', name: '', creditor_name: '', outstanding_principal: '', monthly_payment: '', member_id: '' })
   formVisible.value = true
 }
 const openAssetEdit = item => {
-  formMode.value = 'asset'; editingAssetId.value = item.id
+  formMode.value = 'asset'; assetAction.value = 'edit'; editingAssetId.value = item.id
   const category = categories.assets.find(categoryItem => categoryItem.code === item.category_code)
-  resetForm({ ...item, asset_group: category?.group || '', change_value: '', member_id: item.member_id || '', include_in_investable_assets: Boolean(item.include_in_investable_assets), update_remark: '' })
+  resetForm({ ...item, asset_group: category?.group || '', member_id: item.member_id || '', include_in_investable_assets: Boolean(item.include_in_investable_assets) })
   delete form.current_value
+  formVisible.value = true
+}
+const openAssetChange = item => {
+  formMode.value = 'asset'; assetAction.value = 'change'; editingAssetId.value = item.id
+  resetForm({ change_value: '', valuation_date: today(), update_remark: '' })
   formVisible.value = true
 }
 const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
@@ -281,7 +294,7 @@ const openPayment = (type, item) => { formMode.value = 'payment'; paymentType.va
 const submitForm = async () => {
   saving.value = true
   try {
-    if (formMode.value === 'asset') isEditingAsset.value ? await familyFinanceApi.updateAsset(editingAssetId.value, form) : await familyFinanceApi.createAsset(form)
+    if (formMode.value === 'asset') hasSelectedAsset.value ? await familyFinanceApi.updateAsset(editingAssetId.value, form) : await familyFinanceApi.createAsset(form)
     else if (formMode.value === 'receivable') await familyFinanceApi.createReceivable(form)
     else if (formMode.value === 'liability') await familyFinanceApi.createLiability({ ...form, original_amount: form.outstanding_principal })
     else if (paymentType.value === 'receivable') await familyFinanceApi.receivePayment(paymentItem.value.id, form)
