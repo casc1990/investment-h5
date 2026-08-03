@@ -2490,6 +2490,31 @@ export async function onRequest(context) {
       return jsonResponse({ code: 0, data: { id } });
     }
 
+    if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'PUT') {
+      const id = path.split('/').pop();
+      const body = await context.request.json();
+      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ?').bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
+      const current = results[0];
+      const name = String(body.name ?? current.name ?? '').trim();
+      const categoryCode = String(body.category_code ?? current.category_code ?? '');
+      const originalAmount = normalizeFamilyMoney(body.original_amount ?? current.original_amount);
+      const paidAmount = normalizeFamilyMoney(Number(current.original_amount || 0) - Number(current.outstanding_amount || 0));
+      const outstandingAmount = normalizeFamilyMoney(originalAmount - paidAmount);
+      if (!name) return jsonResponse({ code: 400, message: '应收款名称不能为空' }, 400);
+      if (!familyReceivableCategoryCodes.has(categoryCode)) return jsonResponse({ code: 400, message: '应收款类别无效' }, 400);
+      if (!Number.isFinite(originalAmount) || originalAmount < paidAmount) return jsonResponse({ code: 400, message: `原始金额不能低于已回款金额 ${paidAmount.toFixed(2)}` }, 400);
+      await env.DB.prepare(`
+        UPDATE family_receivables SET member_id = ?, category_code = ?, name = ?, debtor_name = ?,
+          original_amount = ?, outstanding_amount = ?, due_date = ?, status = ?, updated_at = unixepoch()
+        WHERE id = ?
+      `).bind(normalizeFamilyMemberId(body.member_id ?? current.member_id), categoryCode, name,
+        String(body.debtor_name ?? current.debtor_name ?? '').trim(), originalAmount, outstandingAmount,
+        body.due_date || null, outstandingAmount === 0 ? 'settled' : paidAmount > 0 ? 'partially_paid' : 'normal', id).run();
+      queueFamilySnapshot();
+      return jsonResponse({ code: 0, data: { id, original_amount: originalAmount, outstanding_amount: outstandingAmount } });
+    }
+
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+\/payments$/) && method === 'POST') {
       const id = path.split('/').slice(-2)[0];
       const body = await context.request.json();

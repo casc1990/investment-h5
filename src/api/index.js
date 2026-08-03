@@ -192,6 +192,7 @@ export const familyFinanceApi = {
   deleteAsset: id => apiClient.delete(`/family-finance/assets/${id}`),
   assetRecords: id => apiClient.get(`/family-finance/assets/${id}/records`),
   createReceivable: data => apiClient.post('/family-finance/receivables', data),
+  updateReceivable: (id, data) => apiClient.put(`/family-finance/receivables/${id}`, data),
   receivePayment: (id, data) => apiClient.post(`/family-finance/receivables/${id}/payments`, data),
   settleReceivable: id => apiClient.delete(`/family-finance/receivables/${id}`),
   createLiability: data => apiClient.post('/family-finance/liabilities', data),

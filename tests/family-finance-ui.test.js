@@ -75,6 +75,14 @@ test('应收页展示汇总字段和独立应收趋势，不再显示资产趋�
   assert.match(functionSource, /receivable_summary: receivableSummary/)
 })
 
+test('应收记录支持编辑原始资料且不伪造回款记录', () => {
+  assert.match(viewSource, /openReceivableEdit\(item\)">编辑<\/button>/)
+  assert.match(viewSource, /isEditingReceivable/)
+  assert.match(viewSource, /familyFinanceApi\.updateReceivable/)
+  assert.match(functionSource, /method === 'PUT'[\s\S]*?paidAmount[\s\S]*?outstandingAmount/)
+  assert.match(functionSource, /原始金额不能低于已回款金额/)
+})
+
 test('新增应收、记录回款和直接结清都能形成趋势操作', () => {
   assert.match(functionSource, /const receivableEvents = receivableRows\.map/)
   assert.match(functionSource, /receivablePaymentQuery\.results/)

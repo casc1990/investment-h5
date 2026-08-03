@@ -60,7 +60,7 @@
           <article v-for="item in receivables" :key="item.id" class="debt-row">
             <div class="debt-top"><div><strong>{{ item.name }}</strong><span>{{ categoryName('receivables', item.category_code) }} · {{ item.debtor_name || '未填债务人' }}</span></div><b>{{ money(item.outstanding_amount) }}</b></div>
             <div class="debt-meta"><span>{{ item.due_date ? `到期 ${item.due_date}` : '未设到期日' }}</span><span>{{ ownerName(item) }}</span></div>
-            <div class="row-actions"><button @click="openPayment('receivable', item)">记录回款</button><button class="ghost" @click="settle('receivable', item)">结清</button></div>
+            <div class="row-actions"><button class="ghost" @click="openReceivableEdit(item)">编辑</button><button @click="openPayment('receivable', item)">记录回款</button><button class="ghost" @click="settle('receivable', item)">结清</button></div>
           </article>
         </div>
         <EmptyState v-else text="暂无应收款" />
@@ -143,6 +143,7 @@
           <label><span>应收款名称</span><input v-model.trim="form.name" required placeholder="例如：张某借款" /></label>
           <label><span>债务人 / 来源</span><input v-model.trim="form.debtor_name" placeholder="选填" /></label>
           <label><span>原始金额</span><input v-model="form.original_amount" required type="number" min="0.01" step="0.01" /></label>
+          <small v-if="isEditingReceivable" class="field-tip">已回款 {{ money(receivablePaidAmount) }}，修改原始金额后将自动重算待收余额</small>
           <label><span>约定到期日</span><input v-model="form.due_date" type="date" /></label>
           <MemberSelect v-model="form.member_id" :members="members" />
         </template>
@@ -165,7 +166,7 @@
 
         <div class="form-actions">
           <button v-if="isEditingAsset" type="button" class="danger" @click="removeAsset">删除</button>
-          <button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : isEditingAsset ? '更新' : '保存' }}</button>
+          <button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中...' : isEditingAsset || isEditingReceivable ? '更新' : '保存' }}</button>
         </div>
       </form>
     </van-popup>
@@ -189,7 +190,7 @@ const MemberSelect = defineComponent({
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
 const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
-const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
+const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), editingReceivableId = ref(''), paymentType = ref(''), paymentItem = ref(null)
 const assetAction = ref('create')
 const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), advisoryProducts = ref([]), assetTrend = ref([]), receivableTrend = ref([])
 const selectedAssetTrend = ref(null)
@@ -236,8 +237,10 @@ const activeTabLabel = computed(() => tabs.value.find(item => item.key === activ
 const activeTabDescription = computed(() => ({ assets: '手工记录银行、股票、公积金等余额', receivables: '跟踪借出和待收回的款项', liabilities: '记录家庭剩余待还本金' }[activeTab.value]))
 const isEditingAsset = computed(() => formMode.value === 'asset' && assetAction.value === 'edit')
 const isChangingAsset = computed(() => formMode.value === 'asset' && assetAction.value === 'change')
+const isEditingReceivable = computed(() => formMode.value === 'receivable' && Boolean(editingReceivableId.value))
+const receivablePaidAmount = computed(() => Math.max(0, Number(form.original_amount_at_edit || 0) - Number(form.outstanding_amount_at_edit || 0)))
 const hasSelectedAsset = computed(() => formMode.value === 'asset' && Boolean(editingAssetId.value))
-const formTitle = computed(() => formMode.value === 'payment' ? (paymentType.value === 'receivable' ? '记录回款' : '记录还款') : isEditingAsset.value ? '编辑资产' : isChangingAsset.value ? '更新资产金额' : `新增${activeTabLabel.value}`)
+const formTitle = computed(() => formMode.value === 'payment' ? (paymentType.value === 'receivable' ? '记录回款' : '记录还款') : isEditingAsset.value ? '编辑资产' : isChangingAsset.value ? '更新资产金额' : isEditingReceivable.value ? '编辑应收款' : `新增${activeTabLabel.value}`)
 const formEyebrow = computed(() => formMode.value === 'payment' ? paymentItem.value?.name : '家庭财务记账')
 const paymentBalance = computed(() => Number(paymentType.value === 'receivable' ? paymentItem.value?.outstanding_amount : paymentItem.value?.outstanding_principal) || 0)
 const assetGroups = computed(() => {
@@ -324,7 +327,7 @@ const handleAssetGroupChange = () => {
   form.include_in_investable_assets = false
 }
 const openCreate = () => {
-  editingAssetId.value = ''; assetAction.value = 'create'; formMode.value = activeTab.value === 'assets' ? 'asset' : activeTab.value === 'receivables' ? 'receivable' : 'liability'
+  editingAssetId.value = ''; editingReceivableId.value = ''; assetAction.value = 'create'; formMode.value = activeTab.value === 'assets' ? 'asset' : activeTab.value === 'receivables' ? 'receivable' : 'liability'
   if (formMode.value === 'asset') resetForm({ asset_group: '', category_code: '', name: '', current_value: '', valuation_date: today(), member_id: '', include_in_investable_assets: false, remark: '' })
   if (formMode.value === 'receivable') resetForm({ category_code: '', name: '', debtor_name: '', original_amount: '', due_date: '', member_id: '' })
   if (formMode.value === 'liability') resetForm({ category_code: '', name: '', creditor_name: '', outstanding_principal: '', monthly_payment: '', member_id: '' })
@@ -344,13 +347,19 @@ const openAssetChange = item => {
 }
 const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
 const openAdvisory = (item, action = '') => router.push({ path: '/advisory', query: { product_id: item.advisory_id, ...(action ? { action } : {}) } })
+const openReceivableEdit = item => {
+  formMode.value = 'receivable'
+  editingReceivableId.value = item.id
+  resetForm({ category_code: item.category_code, name: item.name, debtor_name: item.debtor_name || '', original_amount: item.original_amount, original_amount_at_edit: item.original_amount, outstanding_amount_at_edit: item.outstanding_amount, due_date: item.due_date || '', member_id: item.member_id || '' })
+  formVisible.value = true
+}
 const openPayment = (type, item) => { formMode.value = 'payment'; paymentType.value = type; paymentItem.value = item; resetForm({ amount: '', payment_date: today(), remark: '' }); formVisible.value = true }
 
 const submitForm = async () => {
   saving.value = true
   try {
     if (formMode.value === 'asset') hasSelectedAsset.value ? await familyFinanceApi.updateAsset(editingAssetId.value, form) : await familyFinanceApi.createAsset(form)
-    else if (formMode.value === 'receivable') await familyFinanceApi.createReceivable(form)
+    else if (formMode.value === 'receivable') isEditingReceivable.value ? await familyFinanceApi.updateReceivable(editingReceivableId.value, form) : await familyFinanceApi.createReceivable(form)
     else if (formMode.value === 'liability') await familyFinanceApi.createLiability({ ...form, original_amount: form.outstanding_principal })
     else if (paymentType.value === 'receivable') await familyFinanceApi.receivePayment(paymentItem.value.id, form)
     else await familyFinanceApi.repayLiability(paymentItem.value.id, form)
@@ -576,6 +585,7 @@ onActivated(loadData)
   font-weight: 600;
 }
 .row-actions .ghost { background: #f3f4f6; color: #64748b; }
+.field-tip { display: block; margin-top: 6px; color: #94a3b8; font-size: 11px; line-height: 1.5; }
 
 .empty-state { display: flex; align-items: center; flex-direction: column; padding: 42px 0 30px; color: #94a3b8; }
 .empty-state span { font-size: 34px; }
