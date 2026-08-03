@@ -1198,11 +1198,17 @@ export async function onRequest(context) {
             platform TEXT DEFAULT 'xueqiu',
             product_name TEXT NOT NULL,
             status TEXT DEFAULT '正常',
+            include_in_investable_assets INTEGER NOT NULL DEFAULT 1,
             remark TEXT DEFAULT '',
             created_at INTEGER DEFAULT (unixepoch()),
             updated_at INTEGER DEFAULT (unixepoch())
           )
         `).run();
+      }
+
+      const productColumns = await env.DB.prepare('PRAGMA table_info(advisory_products)').all();
+      if (!(productColumns.results || []).some(column => column.name === 'include_in_investable_assets')) {
+        await env.DB.prepare('ALTER TABLE advisory_products ADD COLUMN include_in_investable_assets INTEGER NOT NULL DEFAULT 1').run();
       }
 
       const snapshotTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='advisory_product_snapshots'").all();
@@ -1577,7 +1583,7 @@ export async function onRequest(context) {
           WHERE COALESCE(p.quantity, 0) > 0
         `).all(),
         env.DB.prepare(`
-          SELECT p.id, p.product_name, p.account_id, p.status, p.remark,
+          SELECT p.id, p.product_name, p.account_id, p.status, p.remark, p.include_in_investable_assets,
                  a.name AS account_name, a.channel AS account_channel,
                  m.name AS member_name, m.emoji AS member_emoji,
                  s.snapshot_date, COALESCE(s.total_amount, 0) AS total_amount,
@@ -1602,15 +1608,18 @@ export async function onRequest(context) {
       const liabilities = liabilityQuery.results || [];
       const advisoryProducts = (advisoryQuery.results || []).map(item => ({
         ...item,
+        include_in_investable_assets: Number(item.include_in_investable_assets ?? 1),
         total_amount: normalizeFamilyMoney(item.total_amount),
         daily_profit: normalizeFamilyMoney(item.daily_profit),
         current_profit: normalizeFamilyMoney(item.current_profit),
         profit_rate: Number(Number(item.profit_rate || 0).toFixed(2)),
       }));
       const advisoryValue = advisoryProducts.reduce((sum, item) => sum + Number(item.total_amount || 0), 0);
+      const advisoryInvestableValue = advisoryProducts.reduce((sum, item) => sum + (item.include_in_investable_assets === 1 ? Number(item.total_amount || 0) : 0), 0);
       const summary = buildFamilySummary({
         fundValue: Number(fundQuery.results?.[0]?.fund_value || 0),
         advisoryValue,
+        advisoryInvestableValue,
         assets,
         receivables,
         liabilities,
@@ -3032,6 +3041,7 @@ export async function onRequest(context) {
         member_name: r.member_name || '',
         member_emoji: r.member_emoji || '👤',
         status: r.status || '正常',
+        include_in_investable_assets: Number(r.include_in_investable_assets ?? 1),
         remark: r.remark || '',
         snapshot_date: r.snapshot_date || null,
         total_amount: Number((r.total_amount || 0).toFixed ? r.total_amount.toFixed(2) : Number(r.total_amount || 0).toFixed(2)),
@@ -3057,11 +3067,12 @@ export async function onRequest(context) {
       const member_id = body.member_id || body.memberId || null;
       const platform = body.platform || 'xueqiu';
       const status = body.status || '正常';
+      const include_in_investable_assets = Number(Boolean(body.include_in_investable_assets ?? true));
       const remark = body.remark || '';
       await env.DB.prepare(
-        'INSERT INTO advisory_products (id, account_id, member_id, platform, product_name, status, remark) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, member_id, platform, productName, status, remark).run();
-      return jsonResponse({ code: 0, data: { id, product_name: productName, account_id, member_id, platform, status, remark } });
+        'INSERT INTO advisory_products (id, account_id, member_id, platform, product_name, status, include_in_investable_assets, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, account_id, member_id, platform, productName, status, include_in_investable_assets, remark).run();
+      return jsonResponse({ code: 0, data: { id, product_name: productName, account_id, member_id, platform, status, include_in_investable_assets, remark } });
     }
 
     if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'GET') {
@@ -3111,6 +3122,7 @@ export async function onRequest(context) {
       const member_id = body.member_id ?? body.memberId;
       const platform = body.platform;
       const status = body.status;
+      const include_in_investable_assets = body.include_in_investable_assets;
       const remark = body.remark;
       const fields = [];
       const values = [];
@@ -3119,6 +3131,7 @@ export async function onRequest(context) {
       if (member_id !== undefined) { fields.push('member_id = ?'); values.push(member_id); }
       if (platform !== undefined) { fields.push('platform = ?'); values.push(platform); }
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
+      if (include_in_investable_assets !== undefined) { fields.push('include_in_investable_assets = ?'); values.push(Number(Boolean(include_in_investable_assets))); }
       if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
       if (fields.length > 0) {
         values.push(id);

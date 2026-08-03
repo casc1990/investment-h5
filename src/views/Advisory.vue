@@ -60,6 +60,7 @@
           <label><span>组合名称</span><input v-model.trim="form.productName" required maxlength="80" placeholder="例如：长钱账户" /></label>
           <label><span>归属账户</span><button type="button" class="select-field" @click="showAccountPicker = true">{{ form.accountName || '请选择（可选）' }} <b>›</b></button></label>
           <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写组合策略等附加信息" /></label>
+          <label class="switch-row"><span><b>计入可投资资产</b><small>关闭后仍计入总资产和净资产</small></span><input v-model="form.includeInInvestableAssets" type="checkbox" /></label>
         </template>
 
         <template v-if="modalMode !== 'edit'">
@@ -107,7 +108,7 @@ const numberValue = value => value === '' || value === null || value === undefin
 
 const resetForm = values => {
   Object.keys(form).forEach(key => delete form[key])
-  Object.assign(form, { productId: '', productName: '', accountId: '', accountName: '', remark: '', snapshotDate: today(), totalAmount: '', currentProfit: '' }, values)
+  Object.assign(form, { productId: '', productName: '', accountId: '', accountName: '', remark: '', includeInInvestableAssets: true, snapshotDate: today(), totalAmount: '', currentProfit: '' }, values)
 }
 
 const loadDetail = async id => {
@@ -141,7 +142,7 @@ const viewProduct = product => router.push({ path: '/advisory', query: { product
 const openAdd = () => { modalMode.value = 'add'; resetForm(); showModal.value = true }
 const openEdit = product => {
   modalMode.value = 'edit'
-  resetForm({ productId: product.id, productName: product.product_name || '', accountId: product.account_id || '', accountName: product.account_name || '', remark: product.remark || '' })
+  resetForm({ productId: product.id, productName: product.product_name || '', accountId: product.account_id || '', accountName: product.account_name || '', remark: product.remark || '', includeInInvestableAssets: Number(product.include_in_investable_assets ?? 1) === 1 })
   showModal.value = true
 }
 const openUpdate = product => {
@@ -156,10 +157,10 @@ const submitForm = async () => {
   try {
     let productId = form.productId
     if (modalMode.value === 'add') {
-      const created = await advisoryApi.createProduct({ product_name: form.productName, account_id: form.accountId || null, remark: form.remark, status: '正常', platform: 'xueqiu' })
+      const created = await advisoryApi.createProduct({ product_name: form.productName, account_id: form.accountId || null, remark: form.remark, include_in_investable_assets: form.includeInInvestableAssets, status: '正常', platform: 'xueqiu' })
       productId = created.id
     } else if (modalMode.value === 'edit') {
-      await advisoryApi.updateProduct(productId, { product_name: form.productName, account_id: form.accountId || null, remark: form.remark, status: '正常', platform: 'xueqiu' })
+      await advisoryApi.updateProduct(productId, { product_name: form.productName, account_id: form.accountId || null, remark: form.remark, include_in_investable_assets: form.includeInInvestableAssets, status: '正常', platform: 'xueqiu' })
     }
     if (modalMode.value !== 'edit') {
       await advisoryApi.saveSnapshot({ product_id: productId, snapshot_date: form.snapshotDate, total_amount: numberValue(form.totalAmount), current_profit: numberValue(form.currentProfit) })
@@ -240,5 +241,10 @@ label { display: block; margin-top: 14px; }label > span { display: block; margin
 input, .select-field { box-sizing: border-box; width: 100%; min-height: 46px; border: 1px solid #dbe2ea; border-radius: 10px; padding: 0 13px; color: #1f2937; background: #fff; font-size: 14px; text-align: left; }
 .select-field { display: flex; align-items: center; justify-content: space-between; font-weight: 400; }
 .field-tip { display: block; margin-top: 6px; color: #94a3b8; font-size: 11px; font-weight: 400; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 13px; border: 1px solid #e5eaf0; border-radius: 10px; background: #f8fafc; }
+.switch-row > span { margin: 0; color: #334155; }
+.switch-row b, .switch-row small { display: block; }
+.switch-row small { margin-top: 4px; color: #94a3b8; font-size: 11px; font-weight: 400; }
+.switch-row input { width: 22px; min-height: 22px; margin: 0; accent-color: #1e80ff; }
 .form-actions { margin-top: 22px; }.form-actions button { flex: 1; min-height: 44px; }.form-actions .danger { color: #ef4444; background: #fff1f2; }
 </style>

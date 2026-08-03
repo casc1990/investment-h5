@@ -33,3 +33,11 @@ test('顾投资产只录入持有收益并由服务端自动计算收益率', ()
   assert.match(apiSource, /const invested_amount = total_amount - current_profit;/)
   assert.match(apiSource, /current_profit \/ invested_amount/)
 })
+
+test('顾投资产可配置是否计入可投资资产且旧数据默认计入', () => {
+  assert.match(source, /计入可投资资产/)
+  assert.match(source, /v-model="form\.includeInInvestableAssets"/)
+  assert.match(source, /include_in_investable_assets: form\.includeInInvestableAssets/)
+  assert.match(apiSource, /include_in_investable_assets INTEGER NOT NULL DEFAULT 1/)
+  assert.match(apiSource, /advisoryInvestableValue/)
+})

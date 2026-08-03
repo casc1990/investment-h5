@@ -29,3 +29,11 @@ test('普通资产不允许基金类别或负数余额', () => {
   assert.ok(validateFamilyAsset({ name: '', category_code: 'fund', current_value: -1 }).length >= 3)
   assert.ok(validateFamilyAsset({ name: '异常资产', category_code: 'bank_demand', current_value: 'abc' }).includes('当前金额必须大于或等于0'))
 })
+
+test('顾投关闭计入可投资资产后仍保留在总资产和净资产', () => {
+  const summary = buildFamilySummary({ fundValue: 100000, advisoryValue: 30000, advisoryInvestableValue: 0 })
+  assert.equal(summary.total_assets, 130000)
+  assert.equal(summary.net_worth, 130000)
+  assert.equal(summary.investable_assets, 100000)
+  assert.equal(summary.advisory_investable_value, 0)
+})

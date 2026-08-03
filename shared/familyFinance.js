@@ -44,7 +44,7 @@ export function validateFamilyAsset(input = {}) {
   return errors
 }
 
-export function buildFamilySummary({ fundValue = 0, advisoryValue = 0, assets = [], receivables = [], liabilities = [] } = {}) {
+export function buildFamilySummary({ fundValue = 0, advisoryValue = 0, advisoryInvestableValue = advisoryValue, assets = [], receivables = [], liabilities = [] } = {}) {
   const activeAssets = assets.filter(item => item.status !== 'archived' && Number(item.include_in_net_worth ?? 1) === 1)
   const activeReceivables = receivables.filter(item => item.status !== 'settled')
   const activeLiabilities = liabilities.filter(item => item.status !== 'settled')
@@ -65,12 +65,13 @@ export function buildFamilySummary({ fundValue = 0, advisoryValue = 0, assets = 
   return {
     fund_value: roundMoney(fundValue),
     advisory_value: roundMoney(advisoryValue),
+    advisory_investable_value: roundMoney(advisoryInvestableValue),
     manual_asset_value: roundMoney(manualAssets),
     receivable_value: roundMoney(receivableValue),
     total_assets: roundMoney(totalAssets),
     total_liabilities: roundMoney(liabilityValue),
     net_worth: roundMoney(totalAssets - liabilityValue),
-    investable_assets: roundMoney(Number(fundValue || 0) + Number(advisoryValue || 0) + investableManual),
+    investable_assets: roundMoney(Number(fundValue || 0) + Number(advisoryInvestableValue || 0) + investableManual),
     groups,
   }
 }
