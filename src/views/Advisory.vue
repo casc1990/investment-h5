@@ -113,7 +113,8 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { showConfirmDialog, showSuccessToast, showToast } from 'vant'
 import { accountApi, advisoryApi } from '../api'
 import SectionShortcutNav from '../components/SectionShortcutNav.vue'
@@ -121,6 +122,7 @@ import { formatAmount, formatPercent, profitClass } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 
 const loading = ref(false)
+const route = useRoute()
 const showModal = ref(false)
 const showAccountPicker = ref(false)
 const editingProduct = ref(null)
@@ -144,9 +146,8 @@ const formData = ref({
 })
 
 const analysisLinks = [
+  { label: '家庭财务', to: '/family-finance', icon: '🏠' },
   { label: '统计', to: '/stats', icon: '📈' },
-  { label: '台账', to: '/ledger', icon: '📒' },
-  { label: '顾投', to: '/advisory', icon: '🤖' },
 ]
 
 const accountOptions = computed(() => [
@@ -176,7 +177,7 @@ const fetchAccounts = async () => {
 const fetchProducts = async () => {
   loading.value = true
   try {
-    const data = await advisoryApi.list()
+    const data = await advisoryApi.list(route.query.account_id ? { account_id: route.query.account_id } : undefined)
     products.value = data?.products || []
   } catch (error) {
     console.error('Failed to fetch advisory products:', error)
@@ -308,6 +309,8 @@ onMounted(() => {
 onActivated(() => {
   ensureFreshData()
 })
+
+watch(() => route.query.account_id, () => ensureFreshData({ force: true }))
 </script>
 
 <style scoped>

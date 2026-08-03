@@ -405,7 +405,10 @@ const displayPercent = value => {
   return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`
 }
 const openPosition = item => item.positionId ? router.push(`/positions/${item.positionId}`) : router.push('/positions')
-const openAccount = account => router.push({ path: '/positions', query: { account_id: account.accountId } })
+const openAccount = account => router.push({
+  path: account.hasAdvisory && !account.hasPositions ? '/advisory' : '/positions',
+  query: { account_id: account.accountId },
+})
 const eventDetailDescription = event => {
   if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
   const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)

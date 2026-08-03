@@ -43,7 +43,7 @@ export function validateFamilyAsset(input = {}) {
   return errors
 }
 
-export function buildFamilySummary({ fundValue = 0, assets = [], receivables = [], liabilities = [] } = {}) {
+export function buildFamilySummary({ fundValue = 0, advisoryValue = 0, assets = [], receivables = [], liabilities = [] } = {}) {
   const activeAssets = assets.filter(item => item.status !== 'archived' && Number(item.include_in_net_worth ?? 1) === 1)
   const activeReceivables = receivables.filter(item => item.status !== 'settled')
   const activeLiabilities = liabilities.filter(item => item.status !== 'settled')
@@ -51,7 +51,7 @@ export function buildFamilySummary({ fundValue = 0, assets = [], receivables = [
   const receivableValue = activeReceivables.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0)
   const liabilityValue = activeLiabilities.reduce((sum, item) => sum + Number(item.outstanding_principal || 0), 0)
   const investableManual = activeAssets.reduce((sum, item) => sum + (Number(item.include_in_investable_assets || 0) === 1 ? Number(item.current_value || 0) : 0), 0)
-  const totalAssets = Number(fundValue || 0) + manualAssets + receivableValue
+  const totalAssets = Number(fundValue || 0) + Number(advisoryValue || 0) + manualAssets + receivableValue
   const groups = {}
   activeAssets.forEach(item => {
     const category = FAMILY_ASSET_CATEGORY_MAP[item.category_code]
@@ -59,15 +59,17 @@ export function buildFamilySummary({ fundValue = 0, assets = [], receivables = [
     groups[group] = roundMoney((groups[group] || 0) + Number(item.current_value || 0))
   })
   groups.fund = roundMoney(fundValue)
+  groups.advisory = roundMoney(advisoryValue)
   groups.receivable = roundMoney(receivableValue)
   return {
     fund_value: roundMoney(fundValue),
+    advisory_value: roundMoney(advisoryValue),
     manual_asset_value: roundMoney(manualAssets),
     receivable_value: roundMoney(receivableValue),
     total_assets: roundMoney(totalAssets),
     total_liabilities: roundMoney(liabilityValue),
     net_worth: roundMoney(totalAssets - liabilityValue),
-    investable_assets: roundMoney(Number(fundValue || 0) + investableManual),
+    investable_assets: roundMoney(Number(fundValue || 0) + Number(advisoryValue || 0) + investableManual),
     groups,
   }
 }

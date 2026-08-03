@@ -354,6 +354,7 @@ const familyStructureRows = computed(() => {
   const summary = familyOverview.value?.summary || {}
   return [
     { key: 'fund', label: '基金资产', value: summary.fund_value },
+    { key: 'advisory', label: '顾投资产', value: summary.advisory_value },
     { key: 'manual', label: '其他资产', value: summary.manual_asset_value },
     { key: 'receivable', label: '应收款', value: summary.receivable_value },
     { key: 'liability', label: '家庭负债', value: summary.total_liabilities },
@@ -644,6 +645,7 @@ onActivated(() => {
 .family-structure-list span { display: flex; align-items: center; gap: 9px; color: #536074; font-size: 13px; }
 .family-structure-list i { width: 9px; height: 9px; border-radius: 50%; background: #1e80ff; }
 .family-structure-list i.manual { background: #8b5cf6; }
+.family-structure-list i.advisory { background: #06b6d4; }
 .family-structure-list i.receivable { background: #f59e0b; }
 .family-structure-list i.liability { background: #22c55e; }
 .family-structure-list b { color: #172033; font-size: 14px; }

@@ -1546,7 +1546,8 @@ export async function onRequest(context) {
     const normalizeFamilyMoney = value => Number(Number(value || 0).toFixed(2));
 
     async function getFamilyFinanceData() {
-      const [assetQuery, receivableQuery, liabilityQuery, fundQuery] = await Promise.all([
+      await ensureAdvisorySchemaOnce();
+      const [assetQuery, receivableQuery, liabilityQuery, fundQuery, advisoryQuery] = await Promise.all([
         env.DB.prepare(`
           SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
@@ -1575,17 +1576,46 @@ export async function onRequest(context) {
           FROM positions p LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
           WHERE COALESCE(p.quantity, 0) > 0
         `).all(),
+        env.DB.prepare(`
+          SELECT p.id, p.product_name, p.account_id, p.status, p.remark,
+                 a.name AS account_name, a.channel AS account_channel,
+                 m.name AS member_name, m.emoji AS member_emoji,
+                 s.snapshot_date, COALESCE(s.total_amount, 0) AS total_amount,
+                 COALESCE(s.daily_profit, 0) AS daily_profit,
+                 COALESCE(s.current_profit, 0) AS current_profit,
+                 COALESCE(s.profit_rate, 0) AS profit_rate
+          FROM advisory_products p
+          LEFT JOIN accounts a ON p.account_id = a.id
+          LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
+          LEFT JOIN advisory_product_snapshots s ON s.id = (
+            SELECT s2.id FROM advisory_product_snapshots s2
+            WHERE s2.product_id = p.id
+            ORDER BY s2.snapshot_date DESC, s2.updated_at DESC, s2.created_at DESC
+            LIMIT 1
+          )
+          WHERE COALESCE(p.status, '正常') != '已删除'
+          ORDER BY COALESCE(s.total_amount, 0) DESC, p.created_at DESC
+        `).all(),
       ]);
       const assets = assetQuery.results || [];
       const receivables = receivableQuery.results || [];
       const liabilities = liabilityQuery.results || [];
+      const advisoryProducts = (advisoryQuery.results || []).map(item => ({
+        ...item,
+        total_amount: normalizeFamilyMoney(item.total_amount),
+        daily_profit: normalizeFamilyMoney(item.daily_profit),
+        current_profit: normalizeFamilyMoney(item.current_profit),
+        profit_rate: Number(Number(item.profit_rate || 0).toFixed(2)),
+      }));
+      const advisoryValue = advisoryProducts.reduce((sum, item) => sum + Number(item.total_amount || 0), 0);
       const summary = buildFamilySummary({
         fundValue: Number(fundQuery.results?.[0]?.fund_value || 0),
+        advisoryValue,
         assets,
         receivables,
         liabilities,
       });
-      return { assets, receivables, liabilities, summary };
+      return { assets, receivables, liabilities, advisory_products: advisoryProducts, summary };
     }
 
     async function resolveFamilyMemberId(value) {
@@ -3517,12 +3547,15 @@ export async function onRequest(context) {
           profit: 0,
           profitRate: 0,
           dailyProfit: 0,
+          hasAdvisory: false,
+          hasPositions: false,
         };
       });
 
       positions.forEach(pos => {
         const accountStats = accountStatsMap[pos.account_id];
         if (!accountStats) return;
+        accountStats.hasPositions = true;
         const cost = pos.cost || 0;
         const snap = snapshotMap[pos.fund_code];
         // 首页主资产与持仓页保持一致：优先使用确认净值，估算净值只在缺少确认值时兜底。
@@ -3567,6 +3600,7 @@ export async function onRequest(context) {
         totalAdvisoryYesterdayProfit += item.dailyProfit;
         if (item.account_id && accountStatsMap[item.account_id]) {
           const accountStats = accountStatsMap[item.account_id];
+          accountStats.hasAdvisory = true;
           accountStats.invested += item.invested;
           accountStats.marketValue += item.marketValue;
           accountStats.dailyProfit += item.dailyProfit;
@@ -3582,6 +3616,8 @@ export async function onRequest(context) {
             profit: 0,
             profitRate: 0,
             dailyProfit: item.dailyProfit,
+            hasAdvisory: true,
+            hasPositions: false,
           };
         }
       });

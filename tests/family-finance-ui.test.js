@@ -23,6 +23,14 @@ test('家庭财务顶部以两列汇总资产、应收、负债和可投资资�
   assert.match(viewSource, /grid-template-columns: repeat\(2, 1fr\)/)
 })
 
+test('家庭财务纳入顾投资产并提供顾投日报管理入口', () => {
+  assert.match(viewSource, /<strong>顾投资产<\/strong>/)
+  assert.match(viewSource, /summary\.advisory_value/)
+  assert.match(viewSource, /router\.push\('\/advisory'\)/)
+  assert.match(functionSource, /advisory_products p[\s\S]*?advisoryValue/)
+  assert.match(functionSource, /advisory_products: advisoryProducts/)
+})
+
 test('顶部总资产和应收款为正数时使用红色金额', () => {
   assert.match(viewSource, /summary\.total_assets > 0/)
   assert.match(viewSource, /summary\.receivable_value > 0/)

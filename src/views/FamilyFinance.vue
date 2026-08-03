@@ -21,6 +21,12 @@
       <b>{{ money(summary.fund_value) }}</b>
     </section>
 
+    <section class="source-card advisory-source-card" role="button" tabindex="0" @click="router.push('/advisory')" @keydown.enter="router.push('/advisory')">
+      <div class="source-icon advisory"><van-icon name="cluster-o" /></div>
+      <div><strong>顾投资产</strong><span>{{ advisoryProducts.length }} 个组合 · 手工更新日报</span></div>
+      <b>{{ money(summary.advisory_value) }} <small>管理 ›</small></b>
+    </section>
+
     <nav class="section-tabs">
       <button v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
         {{ tab.label }}<span>{{ tab.count }}</span>
@@ -190,10 +196,10 @@ const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
 const assetAction = ref('create')
-const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([]), receivableTrend = ref([])
+const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), advisoryProducts = ref([]), assetTrend = ref([]), receivableTrend = ref([])
 const selectedAssetTrend = ref(null)
 const selectedReceivableTrend = ref(null)
-const summary = reactive({ fund_value: 0, total_assets: 0, receivable_value: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
+const summary = reactive({ fund_value: 0, advisory_value: 0, total_assets: 0, receivable_value: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
 const receivableSummary = reactive({ total_amount: 0, total_count: 0, overdue_amount: 0, overdue_count: 0 })
 const categories = reactive({ assets: [], receivables: [], liabilities: [] })
 const form = reactive({})
@@ -203,6 +209,7 @@ const applyOverviewData = data => {
   assets.value = data.assets || []
   receivables.value = data.receivables || []
   liabilities.value = data.liabilities || []
+  advisoryProducts.value = data.advisory_products || []
   assetTrend.value = data.asset_trend || []
   receivableTrend.value = data.receivable_trend || []
   Object.assign(receivableSummary, data.receivable_summary || {})
@@ -448,6 +455,9 @@ onActivated(loadData)
 .source-card strong { font-size: 15px; }
 .source-card span { margin-top: 3px; color: #94a3b8; font-size: 12px; }
 .source-card b { font-family: 'Courier New', monospace; font-size: 15px; }
+.source-card b small { margin-left: 3px; color: #1e80ff; font-family: inherit; font-size: 10px; }
+.advisory-source-card { cursor: pointer; }
+.source-icon.advisory { color: #7c3aed; background: #f2edff; }
 
 .section-tabs {
   display: grid;
