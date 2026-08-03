@@ -18,7 +18,7 @@ test('家庭财务页覆盖资产、应收、负债和资产增长场景', () =>
 test('家庭财务顶部以两列汇总资产、应收、负债和可投资资产', () => {
   assert.match(viewSource, /<span>总资产<\/span><strong :class="\{ positive: summary\.total_assets > 0 \}">\{\{ money\(summary\.total_assets\) \}\}<\/strong>/)
   assert.match(viewSource, /<span>应收款<\/span><strong :class="\{ positive: summary\.receivable_value > 0 \}">\{\{ money\(summary\.receivable_value\) \}\}<\/strong>/)
-  assert.match(viewSource, /<span>总负债<\/span><strong>\{\{ money\(summary\.total_liabilities\) \}\}<\/strong>/)
+  assert.match(viewSource, /<span>总负债<\/span><strong :class="\{ negative: summary\.total_liabilities > 0 \}">\{\{ money\(summary\.total_liabilities\) \}\}<\/strong>/)
   assert.match(viewSource, /<span>可投资资产<\/span><strong>\{\{ money\(summary\.investable_assets\) \}\}<\/strong>/)
   assert.match(viewSource, /grid-template-columns: repeat\(2, 1fr\)/)
 })
@@ -27,6 +27,11 @@ test('顶部总资产和应收款为正数时使用红色金额', () => {
   assert.match(viewSource, /summary\.total_assets > 0/)
   assert.match(viewSource, /summary\.receivable_value > 0/)
   assert.match(viewSource, /\.hero-grid strong\.positive \{ color: #ff8a8a; \}/)
+})
+
+test('顶部总负债为正数时使用绿色金额', () => {
+  assert.match(viewSource, /summary\.total_liabilities > 0/)
+  assert.match(viewSource, /\.hero-grid strong\.negative \{ color: #7ddf64; \}/)
 })
 
 test('家庭财务变更后仍在后台自动记录快照', () => {

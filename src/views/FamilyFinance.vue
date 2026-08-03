@@ -10,7 +10,7 @@
       <div class="hero-grid">
         <div><span>总资产</span><strong :class="{ positive: summary.total_assets > 0 }">{{ money(summary.total_assets) }}</strong></div>
         <div><span>应收款</span><strong :class="{ positive: summary.receivable_value > 0 }">{{ money(summary.receivable_value) }}</strong></div>
-        <div><span>总负债</span><strong>{{ money(summary.total_liabilities) }}</strong></div>
+        <div><span>总负债</span><strong :class="{ negative: summary.total_liabilities > 0 }">{{ money(summary.total_liabilities) }}</strong></div>
         <div><span>可投资资产</span><strong>{{ money(summary.investable_assets) }}</strong></div>
       </div>
     </header>
@@ -419,6 +419,7 @@ onActivated(loadData)
 .hero-grid span { font-size: 11px; opacity: .8; }
 .hero-grid strong { margin-top: 4px; font-family: 'Courier New', monospace; font-size: 13px; }
 .hero-grid strong.positive { color: #ff8a8a; }
+.hero-grid strong.negative { color: #7ddf64; }
 
 .source-card,
 .content-card,
