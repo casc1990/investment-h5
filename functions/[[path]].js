@@ -75,6 +75,25 @@ export function validateAllocationProfile(profile = {}) {
   return [...new Set(errors)];
 }
 
+export function pruneAllocationProfileFunds(profile = {}, existingPositionIds = []) {
+  const existingIds = existingPositionIds instanceof Set
+    ? existingPositionIds
+    : new Set(existingPositionIds || []);
+  const funds = Array.isArray(profile.funds) ? profile.funds : [];
+  const prunedPositionIds = [...new Set(
+    funds
+      .map(fund => fund?.positionId)
+      .filter(positionId => positionId && !existingIds.has(positionId))
+  )];
+  return {
+    profile: {
+      ...profile,
+      funds: funds.filter(fund => existingIds.has(fund?.positionId)),
+    },
+    prunedPositionIds,
+  };
+}
+
 export function requiresAuthentication(path = '', method = 'GET') {
   const normalizedMethod = String(method || 'GET').toUpperCase();
   if (normalizedMethod === 'OPTIONS') return false;
@@ -2473,12 +2492,15 @@ export async function onRequest(context) {
       if (String(profile?.id || '') !== id) errors.push('策略ID与请求路径不一致');
       if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
       const fundIds = [...new Set((profile.funds || []).map(fund => fund.positionId))];
+      let cleanedProfile = profile;
+      let prunedPositionIds = [];
       if (fundIds.length) {
         const placeholders = fundIds.map(() => '?').join(',');
         const { results: positionRows } = await env.DB.prepare(`SELECT id FROM positions WHERE id IN (${placeholders})`).bind(...fundIds).all();
         const existingPositionIds = new Set((positionRows || []).map(row => row.id));
-        const missingPositionIds = fundIds.filter(positionId => !existingPositionIds.has(positionId));
-        if (missingPositionIds.length) return jsonResponse({ code: 400, message: '策略包含已删除或不存在的持仓', data: { missing_position_ids: missingPositionIds } }, 400);
+        const pruned = pruneAllocationProfileFunds(profile, existingPositionIds);
+        cleanedProfile = pruned.profile;
+        prunedPositionIds = pruned.prunedPositionIds;
       }
       const { results: existingRows } = await env.DB.prepare('SELECT version, deleted_at FROM allocation_profiles WHERE id = ?').bind(id).all();
       const existing = existingRows[0] || null;
@@ -2487,7 +2509,7 @@ export async function onRequest(context) {
         return jsonResponse({ code: 409, message: '策略已在其他设备更新，请刷新后重试', data: { current_version: Number(existing.version || 1) } }, 409);
       }
       const nextVersion = existing ? Number(existing.version || 1) + 1 : 1;
-      const savedProfile = { ...profile, id, version: nextVersion, updatedAt: new Date().toISOString() };
+      const savedProfile = { ...cleanedProfile, id, version: nextVersion, updatedAt: new Date().toISOString() };
       const payload = JSON.stringify(savedProfile);
       await env.DB.batch([
         env.DB.prepare(`
@@ -2498,7 +2520,7 @@ export async function onRequest(context) {
         env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
           .bind(generateId(), id, existing ? 'update' : 'create', nextVersion, payload),
       ]);
-      return jsonResponse({ code: 0, data: { profile: savedProfile } });
+      return jsonResponse({ code: 0, data: { profile: savedProfile, pruned_position_ids: prunedPositionIds } });
     }
 
     if (path.match(/^\/api\/allocation-profiles\/[\w-]+$/) && method === 'DELETE') {

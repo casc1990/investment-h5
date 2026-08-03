@@ -288,6 +288,9 @@ async function saveSelection() {
     }
   })
 
+  const existingPositionIds = new Set(positions.value.map(position => position.id))
+  nextProfile.funds = nextProfile.funds.filter(fund => existingPositionIds.has(fund.positionId))
+
   const nextProfiles = profiles.value.map(profile => (
     profile.id === nextProfile.id ? normalizeAllocationProfile(nextProfile) : profile
   ))

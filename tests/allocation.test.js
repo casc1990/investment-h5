@@ -731,6 +731,13 @@ test('批量保存分类选择时，会替换当前分类并保留已存在基�
   assert.equal(removedOldBucketFund.assetType, ALLOCATION_ASSET_TYPES.FIXED_INCOME)
 })
 
+test('基金选择页保存前会清理策略中已不存在的历史持仓引用', () => {
+  const file = readFileSync(new URL('../src/views/AllocationBucketSelector.vue', import.meta.url), 'utf8')
+
+  assert.match(file, /const existingPositionIds = new Set\(positions\.value\.map/)
+  assert.match(file, /nextProfile\.funds = nextProfile\.funds\.filter/)
+})
+
 test('配置建议详情可按分类拆出补仓与调仓数据', () => {
   const suggestions = buildAllocationSuggestions({
     profile,

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isAuthorizedCronRequest, requiresAuthentication, validateAllocationProfile } from '../functions/[[path]].js'
+import { isAuthorizedCronRequest, pruneAllocationProfileFunds, requiresAuthentication, validateAllocationProfile } from '../functions/[[path]].js'
 
 test('健康检查和认证入口保持公开', () => {
   assert.equal(requiresAuthentication('/api/health', 'GET'), false)
@@ -64,4 +64,18 @@ test('配置策略后端校验比例、分类、状态和重复持仓', () => {
   assert.ok(errors.includes('目标比例合计必须等于100%'))
   assert.ok(errors.includes('基金状态无效'))
   assert.ok(errors.includes('同一持仓不能重复纳入策略'))
+})
+
+test('保存策略时会清理已删除持仓引用并保留现有基金', () => {
+  const result = pruneAllocationProfileFunds({
+    id: 'strategy-1',
+    funds: [
+      { positionId: 'active-1', assetType: 'pure_bond', status: '保留' },
+      { positionId: 'deleted-1', assetType: 'fixed_income', status: '观察' },
+      { positionId: 'active-2', assetType: 'index', status: '保留' },
+    ],
+  }, new Set(['active-1', 'active-2']))
+
+  assert.deepEqual(result.profile.funds.map(item => item.positionId), ['active-1', 'active-2'])
+  assert.deepEqual(result.prunedPositionIds, ['deleted-1'])
 })
