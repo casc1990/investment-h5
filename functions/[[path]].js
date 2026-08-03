@@ -2247,18 +2247,22 @@ export async function onRequest(context) {
       const { results } = await env.DB.prepare('SELECT * FROM family_assets WHERE id = ? AND status != ?').bind(id, 'archived').all();
       if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
       const current = results[0];
+      const previousValue = normalizeFamilyMoney(current.current_value);
+      const changeValue = normalizeFamilyMoney(body.change_value ?? 0);
+      const nextValue = normalizeFamilyMoney(previousValue + changeValue);
       const payload = {
         name: String(body.name ?? current.name).trim(),
         category_code: String(body.category_code ?? current.category_code),
-        current_value: normalizeFamilyMoney(body.current_value ?? current.current_value),
+        current_value: nextValue,
       };
+      if (!Number.isFinite(changeValue)) return jsonResponse({ code: 400, message: '本次金额变化无效' }, 400);
+      if (nextValue < 0) return jsonResponse({ code: 400, message: '本次减少金额不能大于当前金额' }, 400);
       const errors = validateFamilyAsset(payload);
       if (errors.length) return jsonResponse({ code: 400, message: errors[0], errors }, 400);
       const memberId = await resolveFamilyMemberId(body.member_id ?? current.member_id);
       if (!memberId) return jsonResponse({ code: 400, message: '请选择有效的家庭成员' }, 400);
       const valuationDate = normalizeFamilyDate(body.valuation_date || current.valuation_date);
-      const previousValue = normalizeFamilyMoney(current.current_value);
-      const changed = payload.current_value !== previousValue;
+      const changed = changeValue !== 0;
       const statements = [env.DB.prepare(`
         UPDATE family_assets SET member_id = ?, name = ?, category_code = ?, institution = ?, current_value = ?,
           valuation_date = ?, include_in_net_worth = ?, include_in_investable_assets = ?, remark = ?, updated_at = unixepoch()
@@ -2271,7 +2275,7 @@ export async function onRequest(context) {
       statements.push(env.DB.prepare(`
         INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(generateId(), id, previousValue, payload.current_value, normalizeFamilyMoney(payload.current_value - previousValue),
+      `).bind(generateId(), id, previousValue, payload.current_value, changeValue,
         valuationDate, String(body.update_remark || '更新资产信息').trim()));
       await env.DB.batch(statements);
       await captureFamilySnapshot();

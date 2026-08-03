@@ -89,6 +89,17 @@ test('每次资产更新都会追加记录，包括金额不变的信息更新',
   assert.match(updateBlock, /更新资产信息/)
 })
 
+test('资产更新按本次增减额计算，记录不再展示前后总额', () => {
+  assert.match(detailSource, />本次金额变化<\/span><input v-model="form\.change_value"/)
+  assert.match(detailSource, /增加输入 100，减少输入 -100/)
+  assert.doesNotMatch(detailSource, /money\(record\.previous_value\).*money\(record\.current_value\)/)
+  const updateStart = functionSource.indexOf("const current = results[0];", functionSource.indexOf('/api/family-finance/assets'))
+  const updateBlock = functionSource.slice(updateStart, functionSource.indexOf("method === 'GET'", updateStart))
+  assert.match(updateBlock, /body\.change_value \?\? 0/)
+  assert.match(updateBlock, /previousValue \+ changeValue/)
+  assert.match(updateBlock, /本次减少金额不能大于当前金额/)
+})
+
 test('家庭财务刷新优先加载总览，成员失败时保留缓存且不拖死页面', () => {
   assert.match(viewSource, /readPageCache\('family-finance'\)/)
   assert.match(viewSource, /writePageCache\('family-finance'/)

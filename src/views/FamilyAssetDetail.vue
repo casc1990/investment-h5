@@ -26,7 +26,7 @@
         <div v-if="records.length" class="record-list">
           <article v-for="record in records" :key="record.id" class="record-row">
             <div class="record-line"><strong>{{ record.remark || '资产更新' }}</strong><time>{{ record.record_date }}</time></div>
-            <div class="record-values"><span>{{ money(record.previous_value) }} → {{ money(record.current_value) }}</span><b :class="changeClass(record.change_value)">{{ signedMoney(record.change_value) }}</b></div>
+            <div class="record-values"><span>本次金额变化</span><b :class="changeClass(record.change_value)">{{ signedMoney(record.change_value) }}</b></div>
           </article>
         </div>
         <van-empty v-else description="暂无资产记录" />
@@ -40,7 +40,7 @@
         <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
         <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyCategoryDefault"><option value="" disabled>请选择二级分类</option><option v-for="item in filteredCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
         <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" /></label>
-        <label><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" /></label>
+        <label><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /><small class="field-tip">当前金额 {{ money(asset.current_value) }}，保存后将按本次变化自动计算</small></label>
         <label><span>记录日期</span><input v-model="form.valuation_date" required type="date" /></label>
         <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
         <label><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：更新8月份账户余额" /></label>
@@ -113,7 +113,8 @@ const loadDetail = async () => {
 }
 const openEdit = () => {
   Object.keys(form).forEach(key => delete form[key])
-  Object.assign(form, { ...asset.value, asset_group: category.value?.group || '', current_value: Number(asset.value.current_value), member_id: asset.value.member_id || '', include_in_investable_assets: Boolean(asset.value.include_in_investable_assets), update_remark: '' })
+  Object.assign(form, { ...asset.value, asset_group: category.value?.group || '', change_value: '', member_id: asset.value.member_id || '', include_in_investable_assets: Boolean(asset.value.include_in_investable_assets), update_remark: '' })
+  delete form.current_value
   editVisible.value = true
 }
 const handleGroupChange = () => { form.category_code = ''; form.include_in_investable_assets = false }
@@ -121,8 +122,9 @@ const applyCategoryDefault = () => { form.include_in_investable_assets = Boolean
 const saveAsset = async () => {
   saving.value = true
   try {
+    const changeValue = Number(form.change_value || 0)
     await familyFinanceApi.updateAsset(route.params.id, form)
-    asset.value = { ...asset.value, ...form }
+    asset.value = { ...asset.value, ...form, current_value: Number(asset.value.current_value || 0) + changeValue }
     category.value = categories.value.find(item => item.code === form.category_code) || category.value
     editVisible.value = false
     await loadDetail()
@@ -184,6 +186,7 @@ onMounted(loadDetail)
 .form-head button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: #f3f4f6; color: #64748b; font-size: 22px; }
 .edit-sheet label { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .edit-sheet label > span { color: #64748b; font-size: 12px; font-weight: 600; }
+.field-tip { color: #94a3b8; font-size: 11px; font-weight: 400; }
 .edit-sheet input:not([type=checkbox]),.edit-sheet select { width: 100%; height: 44px; padding: 0 12px; border: 1px solid #dfe4ec; border-radius: 10px; background: #fff; color: #1f2937; font-size: 14px; }
 .edit-sheet input:focus,.edit-sheet select:focus { border-color: #1e80ff; outline: none; box-shadow: 0 0 0 3px rgba(30,128,255,.1); }
 .switch-row { flex-direction: row !important; align-items: center; justify-content: space-between; padding: 10px 0; }
