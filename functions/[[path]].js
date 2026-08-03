@@ -3594,33 +3594,9 @@ export async function onRequest(context) {
         };
       });
 
-      advisoryStats.forEach(item => {
-        totalInvested += item.invested;
-        totalMarketValue += item.marketValue;
-        totalAdvisoryYesterdayProfit += item.dailyProfit;
-        if (item.account_id && accountStatsMap[item.account_id]) {
-          const accountStats = accountStatsMap[item.account_id];
-          accountStats.hasAdvisory = true;
-          accountStats.invested += item.invested;
-          accountStats.marketValue += item.marketValue;
-          accountStats.dailyProfit += item.dailyProfit;
-        } else if (item.account_id) {
-          const account = accounts.find(acc => acc.id === item.account_id);
-          accountStatsMap[item.account_id] = {
-            accountId: item.account_id,
-            accountName: account?.name || item.product_name,
-            channel: account?.channel || '雪球顾投',
-            member_id: item.member_id,
-            invested: item.invested,
-            marketValue: item.marketValue,
-            profit: 0,
-            profitRate: 0,
-            dailyProfit: item.dailyProfit,
-            hasAdvisory: true,
-            hasPositions: false,
-          };
-        }
-      });
+      // 首页与基金收益统计只汇总真实基金持仓。顾投归入家庭财务的增值资产，
+      // 不在这里叠加到账户、成员或基金资产总额，避免混入基金口径。
+      totalAdvisoryYesterdayProfit = advisoryStats.reduce((sum, item) => sum + item.dailyProfit, 0);
 
       Object.values(accountStatsMap).forEach(accountStats => {
         accountStats.profit = Number((accountStats.marketValue - accountStats.invested).toFixed(2));
@@ -3632,7 +3608,7 @@ export async function onRequest(context) {
 
       const memberStats = members
         .map(member => {
-          const memberAccounts = Object.values(accountStatsMap).filter(a => a.member_id === member.id);
+          const memberAccounts = Object.values(accountStatsMap).filter(a => a.member_id === member.id && a.hasPositions);
           const memberMarketValue = memberAccounts.reduce((sum, a) => sum + a.marketValue, 0);
           const memberInvested = memberAccounts.reduce((sum, a) => sum + a.invested, 0);
           const memberProfit = memberMarketValue - memberInvested;
@@ -3652,13 +3628,13 @@ export async function onRequest(context) {
         })
         .filter(member => !memberId || member.member_id === memberId);
 
-      const filteredAccounts = Object.values(accountStatsMap).filter(a => !memberId || a.member_id === memberId);
+      const filteredAccounts = Object.values(accountStatsMap).filter(a => a.hasPositions && (!memberId || a.member_id === memberId));
       const unassignedAccounts = filteredAccounts.filter(a => !a.member_id);
       const totalProfit = totalMarketValue - totalInvested;
       const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
       const totalHoldingProfit = totalProfit;
       totalCumulativeProfit = totalProfit + positions.reduce((sum, position) => sum + Number(position.realized_profit || 0), 0);
-      const dailyProfitSummary = summarizeOverviewDailyProfits(totalPositionYesterdayProfit, totalAdvisoryYesterdayProfit);
+      const dailyProfitSummary = summarizeOverviewDailyProfits(totalPositionYesterdayProfit, 0);
       const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
       const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
       const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;

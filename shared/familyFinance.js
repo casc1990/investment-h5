@@ -1,4 +1,5 @@
 export const FAMILY_ASSET_CATEGORIES = Object.freeze([
+  { code: 'advisory', name: '顾投', group: 'investment', groupName: '增值资产', investable: true },
   { code: 'stock', name: '股票', group: 'investment', groupName: '增值资产', investable: true },
   { code: 'bank_wealth', name: '银行理财', group: 'investment', groupName: '增值资产', investable: true },
   { code: 'bond', name: '债券', group: 'investment', groupName: '增值资产', investable: true },
@@ -59,7 +60,7 @@ export function buildFamilySummary({ fundValue = 0, advisoryValue = 0, assets = 
     groups[group] = roundMoney((groups[group] || 0) + Number(item.current_value || 0))
   })
   groups.fund = roundMoney(fundValue)
-  groups.advisory = roundMoney(advisoryValue)
+  groups.investment = roundMoney((groups.investment || 0) + Number(advisoryValue || 0))
   groups.receivable = roundMoney(receivableValue)
   return {
     fund_value: roundMoney(fundValue),

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { buildFamilySummary, validateFamilyAsset } from '../shared/familyFinance.js'
 
-test('家庭资产汇总计算基金、顾投并扣除负债', () => {
+test('家庭资产汇总将顾投计入增值资产并扣除负债', () => {
   const summary = buildFamilySummary({
     fundValue: 100000,
     advisoryValue: 30000,
@@ -20,7 +20,7 @@ test('家庭资产汇总计算基金、顾投并扣除负债', () => {
   assert.equal(summary.net_worth, 190000)
   assert.equal(summary.investable_assets, 160000)
   assert.equal(summary.groups.fund, 100000)
-  assert.equal(summary.groups.advisory, 30000)
+  assert.equal(summary.groups.investment, 30000)
   assert.equal(summary.advisory_value, 30000)
 })
 

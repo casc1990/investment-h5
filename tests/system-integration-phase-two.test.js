@@ -34,6 +34,7 @@ test('家庭统计加载失败不会阻断现有基金统计', () => {
   assert.match(statsSource, /Failed to fetch family stats/)
 })
 
-test('首页顾投账户进入顾投管理，普通基金账户仍进入持仓', () => {
-  assert.match(homeSource, /account\.hasAdvisory && !account\.hasPositions \? '\/advisory' : '\/positions'/)
+test('首页账户入口和基金统计只保留真实基金持仓口径', () => {
+  assert.match(homeSource, /path: '\/positions'/)
+  assert.doesNotMatch(homeSource, /account\.hasAdvisory/)
 })

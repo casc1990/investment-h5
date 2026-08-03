@@ -23,10 +23,13 @@ test('家庭财务顶部以两列汇总资产、应收、负债和可投资资�
   assert.match(viewSource, /grid-template-columns: repeat\(2, 1fr\)/)
 })
 
-test('家庭财务纳入顾投资产并提供顾投日报管理入口', () => {
-  assert.match(viewSource, /<strong>顾投资产<\/strong>/)
-  assert.match(viewSource, /summary\.advisory_value/)
-  assert.match(viewSource, /router\.push\('\/advisory'\)/)
+test('家庭财务把顾投记录归入增值资产的顾投二级分类', () => {
+  assert.doesNotMatch(viewSource, /<strong>顾投资产<\/strong>/)
+  assert.match(viewSource, /category_code: 'advisory'/)
+  assert.match(viewSource, /source_type: 'advisory'/)
+  assert.match(viewSource, /openAdvisory/)
+  assert.match(functionSource, /a\.member_id === member\.id && a\.hasPositions/)
+  assert.match(functionSource, /summarizeOverviewDailyProfits\(totalPositionYesterdayProfit, 0\)/)
   assert.match(functionSource, /advisory_products p[\s\S]*?advisoryValue/)
   assert.match(functionSource, /advisory_products: advisoryProducts/)
 })

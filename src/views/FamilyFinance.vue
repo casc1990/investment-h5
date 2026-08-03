@@ -21,12 +21,6 @@
       <b>{{ money(summary.fund_value) }}</b>
     </section>
 
-    <section class="source-card advisory-source-card" role="button" tabindex="0" @click="router.push('/advisory')" @keydown.enter="router.push('/advisory')">
-      <div class="source-icon advisory"><van-icon name="cluster-o" /></div>
-      <div><strong>顾投资产</strong><span>{{ advisoryProducts.length }} 个组合 · 手工更新日报</span></div>
-      <b>{{ money(summary.advisory_value) }} <small>管理 ›</small></b>
-    </section>
-
     <nav class="section-tabs">
       <button v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
         {{ tab.label }}<span>{{ tab.count }}</span>
@@ -47,7 +41,8 @@
               <span class="row-icon">{{ assetIcon(item.category_code) }}</span>
               <span class="row-main"><strong>{{ item.name }}</strong><small>{{ categoryName('assets', item.category_code) }} · {{ ownerName(item) }} · {{ item.valuation_date }}</small></span>
               <span class="row-value"><b>{{ money(item.current_value) }}</b><small>{{ item.remark || '暂无备注' }}</small></span>
-              <span class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">编辑</button><button type="button" class="secondary" @click="openAssetChange(item)">更新</button></span>
+              <span v-if="item.source_type === 'advisory'" class="asset-row-actions"><button type="button" @click="openAdvisory(item)">查看记录</button><button type="button" class="secondary" @click="openAdvisory(item)">更新</button></span>
+              <span v-else class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">编辑</button><button type="button" class="secondary" @click="openAssetChange(item)">更新</button></span>
             </article>
           </section>
         </div>
@@ -233,7 +228,7 @@ if (cachedFamilyFinance?.overview) applyOverviewData(cachedFamilyFinance.overvie
 if (cachedFamilyFinance?.members) members.value = cachedFamilyFinance.members
 
 const tabs = computed(() => [
-  { key: 'assets', label: '资产', count: assets.value.length },
+  { key: 'assets', label: '资产', count: assets.value.length + advisoryProducts.value.length },
   { key: 'receivables', label: '应收', count: receivables.value.length },
   { key: 'liabilities', label: '负债', count: liabilities.value.length },
 ])
@@ -265,10 +260,23 @@ const compactMoney = value => {
 }
 const signedMoney = value => `${Number(value || 0) > 0 ? '+' : ''}${money(value)}`
 const changeClass = value => Number(value || 0) > 0 ? 'increase' : Number(value || 0) < 0 ? 'decrease' : 'unchanged'
-const assetIcon = code => ({ stock: '📈', bank_wealth: '🏦', bond: '📜', gold: '🪙', bank_demand: '💳', bank_fixed: '🏦', cash: '💵', provident_fund: '🏠', medical_account: '🏥', pension_account: '👵', property: '🏡', vehicle: '🚗' }[code] || '📦')
+const assetIcon = code => ({ advisory: '🤖', stock: '📈', bank_wealth: '🏦', bond: '📜', gold: '🪙', bank_demand: '💳', bank_fixed: '🏦', cash: '💵', provident_fund: '🏠', medical_account: '🏥', pension_account: '👵', property: '🏡', vehicle: '🚗' }[code] || '📦')
 const groupedAssets = computed(() => {
   const map = new Map()
-  for (const item of assets.value) {
+  const advisoryAssets = advisoryProducts.value.map(item => ({
+    id: `advisory-${item.id}`,
+    advisory_id: item.id,
+    account_id: item.account_id,
+    source_type: 'advisory',
+    category_code: 'advisory',
+    name: item.product_name,
+    current_value: item.total_amount,
+    valuation_date: item.snapshot_date || '暂无记录',
+    member_name: item.member_name,
+    member_emoji: item.member_emoji,
+    remark: item.remark || '顾投组合日报',
+  }))
+  for (const item of [...advisoryAssets, ...assets.value]) {
     const category = categories.assets.find(categoryItem => categoryItem.code === item.category_code)
     const key = category?.group || 'other', name = category?.groupName || '其他资产'
     if (!map.has(key)) map.set(key, { key, name, total: 0, items: [] })
@@ -335,6 +343,7 @@ const openAssetChange = item => {
   formVisible.value = true
 }
 const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
+const openAdvisory = item => router.push({ path: '/advisory', query: item.account_id ? { account_id: item.account_id } : {} })
 const openPayment = (type, item) => { formMode.value = 'payment'; paymentType.value = type; paymentItem.value = item; resetForm({ amount: '', payment_date: today(), remark: '' }); formVisible.value = true }
 
 const submitForm = async () => {
@@ -456,8 +465,6 @@ onActivated(loadData)
 .source-card span { margin-top: 3px; color: #94a3b8; font-size: 12px; }
 .source-card b { font-family: 'Courier New', monospace; font-size: 15px; }
 .source-card b small { margin-left: 3px; color: #1e80ff; font-family: inherit; font-size: 10px; }
-.advisory-source-card { cursor: pointer; }
-.source-icon.advisory { color: #7c3aed; background: #f2edff; }
 
 .section-tabs {
   display: grid;
