@@ -1,5 +1,6 @@
 <template>
   <div class="trades-page">
+    <FundSectionNav />
     <section class="trade-hero">
       <div class="eyebrow">交易中心</div>
       <h1>今天要做什么？</h1>
@@ -254,6 +255,7 @@ import { accountApi, marketApi, memberApi, positionApi, tradeApi } from '../api'
 import { formatAmount as formatNumber, formatDateLabel as formatDate, todayDateParts } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { buildTradeQuickFundOptions, resolveTradeDraft } from '../utils/tradeForm'
+import FundSectionNav from '../components/FundSectionNav.vue'
 
 const route = useRoute()
 const TRADE_DRAFT_STORAGE_KEY = 'investment-h5:trade-draft'

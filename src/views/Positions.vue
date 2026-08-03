@@ -1,5 +1,6 @@
 <template>
   <div class="positions-page">
+    <FundSectionNav />
     <!-- 筛选栏 -->
     <div class="filter-bar">
       <div class="filter-dropdowns">
@@ -357,6 +358,7 @@ import {
 } from '../utils/allocationStorage'
 import { readPageCache, writePageCache } from '../utils/pageCache'
 import { readPositionViewState, writePositionViewState } from '../utils/positionViewState'
+import FundSectionNav from '../components/FundSectionNav.vue'
 
 const router = useRouter()
 const route = useRoute()

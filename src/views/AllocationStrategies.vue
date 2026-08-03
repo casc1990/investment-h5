@@ -1,5 +1,6 @@
 <template>
   <div class="allocation-strategies-page">
+    <FundSectionNav />
     <div class="hero-card">
       <div>
         <div class="hero-label">🎯 策略配置</div>
@@ -81,6 +82,7 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { allocationProfileApi } from '../api'
+import FundSectionNav from '../components/FundSectionNav.vue'
 import {
   ALLOCATION_ASSET_TYPE_LABELS,
   createDefaultAllocationBuckets,
