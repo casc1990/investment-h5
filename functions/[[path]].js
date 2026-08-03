@@ -3039,6 +3039,44 @@ export async function onRequest(context) {
       return jsonResponse({ code: 0, data: { id, product_name: productName, account_id, member_id, platform, status, remark } });
     }
 
+    if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'GET') {
+      await ensureAdvisorySchemaOnce();
+      const id = path.split('/').pop();
+      const { results } = await env.DB.prepare(`
+        SELECT p.*, a.name AS account_name, a.channel AS account_channel,
+               m.name AS member_name, m.emoji AS member_emoji
+        FROM advisory_products p
+        LEFT JOIN accounts a ON p.account_id = a.id
+        LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
+        WHERE p.id = ? LIMIT 1
+      `).bind(id).all();
+      if (!results.length) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
+      const { results: snapshots } = await env.DB.prepare(`
+        SELECT id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate, created_at, updated_at
+        FROM advisory_product_snapshots WHERE product_id = ?
+        ORDER BY snapshot_date DESC, updated_at DESC, created_at DESC
+      `).bind(id).all();
+      const latest = snapshots[0] || {};
+      return jsonResponse({ code: 0, data: {
+        product: {
+          ...results[0],
+          member_emoji: results[0].member_emoji || '👤',
+          snapshot_date: latest.snapshot_date || null,
+          total_amount: normalizeFamilyMoney(latest.total_amount),
+          daily_profit: normalizeFamilyMoney(latest.daily_profit),
+          current_profit: normalizeFamilyMoney(latest.current_profit),
+          profit_rate: Number(Number(latest.profit_rate || 0).toFixed(2)),
+        },
+        snapshots: snapshots.map(item => ({
+          ...item,
+          total_amount: normalizeFamilyMoney(item.total_amount),
+          daily_profit: normalizeFamilyMoney(item.daily_profit),
+          current_profit: normalizeFamilyMoney(item.current_profit),
+          profit_rate: Number(Number(item.profit_rate || 0).toFixed(2)),
+        })),
+      } });
+    }
+
     if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'PUT') {
       await ensureAdvisorySchemaOnce();
       const id = path.split('/').pop();

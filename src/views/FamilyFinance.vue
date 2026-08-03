@@ -41,7 +41,7 @@
               <span class="row-icon">{{ assetIcon(item.category_code) }}</span>
               <span class="row-main"><strong>{{ item.name }}</strong><small>{{ categoryName('assets', item.category_code) }} · {{ ownerName(item) }} · {{ item.valuation_date }}</small></span>
               <span class="row-value"><b>{{ money(item.current_value) }}</b><small>{{ item.remark || '暂无备注' }}</small></span>
-              <span v-if="item.source_type === 'advisory'" class="asset-row-actions"><button type="button" @click="openAdvisory(item)">查看记录</button><button type="button" class="secondary" @click="openAdvisory(item)">更新</button></span>
+              <span v-if="item.source_type === 'advisory'" class="asset-row-actions"><button type="button" @click="openAdvisory(item)">查看</button><button type="button" class="secondary" @click="openAdvisory(item, 'edit')">编辑</button><button type="button" class="secondary" @click="openAdvisory(item, 'update')">更新</button></span>
               <span v-else class="asset-row-actions"><button type="button" @click="openAssetDetail(item.id)">查看</button><button type="button" class="secondary" @click="openAssetEdit(item)">编辑</button><button type="button" class="secondary" @click="openAssetChange(item)">更新</button></span>
             </article>
           </section>
@@ -343,7 +343,7 @@ const openAssetChange = item => {
   formVisible.value = true
 }
 const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
-const openAdvisory = item => router.push({ path: '/advisory', query: item.account_id ? { account_id: item.account_id } : {} })
+const openAdvisory = (item, action = '') => router.push({ path: '/advisory', query: { product_id: item.advisory_id, ...(action ? { action } : {}) } })
 const openPayment = (type, item) => { formMode.value = 'payment'; paymentType.value = type; paymentItem.value = item; resetForm({ amount: '', payment_date: today(), remark: '' }); formVisible.value = true }
 
 const submitForm = async () => {

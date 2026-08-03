@@ -153,6 +153,7 @@ export const memberApi = {
 
 export const advisoryApi = {
   list: (params) => dedupedGet('/advisory-products', { params }),
+  detail: (id) => apiClient.get(`/advisory-products/${id}`),
   createProduct: (data) => apiClient.post('/advisory-products', data),
   updateProduct: (id, data) => apiClient.put(`/advisory-products/${id}`, data),
   deleteProduct: (id) => apiClient.delete(`/advisory-products/${id}`),
