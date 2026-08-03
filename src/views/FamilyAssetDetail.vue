@@ -127,8 +127,8 @@ const saveAsset = async () => {
     asset.value = { ...asset.value, ...form, current_value: Number(asset.value.current_value || 0) + changeValue }
     category.value = categories.value.find(item => item.code === form.category_code) || category.value
     editVisible.value = false
-    await loadDetail()
     showSuccessToast('资产已更新')
+    loadDetail()
   } catch (error) { showFailToast(error.response?.data?.message || error.message || '更新失败') }
   finally { saving.value = false }
 }

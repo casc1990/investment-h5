@@ -1586,6 +1586,12 @@ export async function onRequest(context) {
       return data.summary;
     }
 
+    function queueFamilySnapshot(snapshotDate) {
+      context.waitUntil(
+        captureFamilySnapshot(snapshotDate).catch(error => console.error('家庭财务快照写入失败:', error))
+      );
+    }
+
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
@@ -2237,7 +2243,7 @@ export async function onRequest(context) {
           VALUES (?, ?, 0, ?, ?, ?, ?)
         `).bind(generateId(), id, payload.current_value, payload.current_value, valuationDate, '初始录入'),
       ]);
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2278,7 +2284,7 @@ export async function onRequest(context) {
       `).bind(generateId(), id, previousValue, payload.current_value, changeValue,
         valuationDate, String(body.update_remark || '更新资产信息').trim()));
       await env.DB.batch(statements);
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, value_changed: changed } });
     }
 
@@ -2305,7 +2311,7 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_assets SET status = 'archived', updated_at = unixepoch() WHERE id = ?").bind(id).run();
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '资产已删除' });
     }
 
@@ -2333,7 +2339,7 @@ export async function onRequest(context) {
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.debtor_name || '').trim(),
         amount, outstanding, body.lent_date || null, body.due_date || null, outstanding === 0 ? 'settled' : 'normal',
         String(body.risk_level || 'normal'), String(body.remark || '').trim()).run();
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2351,14 +2357,14 @@ export async function onRequest(context) {
         env.DB.prepare("UPDATE family_receivables SET outstanding_amount = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
           .bind(remaining, remaining === 0 ? 'settled' : 'partially_paid', id),
       ]);
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, outstanding_amount: remaining } });
     }
 
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '应收款已结清' });
     }
 
@@ -2378,7 +2384,7 @@ export async function onRequest(context) {
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.creditor_name || '').trim(),
         amount, outstanding, Number(body.interest_rate || 0), normalizeFamilyMoney(body.monthly_payment),
         body.due_date || null, outstanding === 0 ? 'settled' : 'normal', String(body.remark || '').trim()).run();
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
 
@@ -2396,14 +2402,14 @@ export async function onRequest(context) {
         env.DB.prepare("UPDATE family_liabilities SET outstanding_principal = ?, status = ?, updated_at = unixepoch() WHERE id = ?")
           .bind(remaining, remaining === 0 ? 'settled' : 'normal', id),
       ]);
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, outstanding_principal: remaining } });
     }
 
     if (path.match(/^\/api\/family-finance\/liabilities\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       await env.DB.prepare("UPDATE family_liabilities SET status = 'settled', outstanding_principal = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
-      await captureFamilySnapshot();
+      queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '负债已结清' });
     }
 

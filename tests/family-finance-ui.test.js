@@ -18,7 +18,8 @@ test('净资产快照改为家庭财务变更后自动记录', () => {
   assert.doesNotMatch(viewSource, /保存今日快照|captureSnapshot/)
   assert.match(viewSource, /家庭资产、应收和负债发生变化后自动记录/)
   assert.match(functionSource, /async function captureFamilySnapshot/)
-  assert.ok((functionSource.match(/await captureFamilySnapshot\(\)/g) || []).length >= 9)
+  assert.ok((functionSource.match(/queueFamilySnapshot\(\)/g) || []).length >= 9)
+  assert.match(functionSource, /context\.waitUntil\([\s\S]*?captureFamilySnapshot/)
 })
 
 test('手工资产必须关联家庭成员', () => {
@@ -98,6 +99,13 @@ test('资产更新按本次增减额计算，记录不再展示前后总额', ()
   assert.match(updateBlock, /body\.change_value \?\? 0/)
   assert.match(updateBlock, /previousValue \+ changeValue/)
   assert.match(updateBlock, /本次减少金额不能大于当前金额/)
+})
+
+test('资产保存不等待快照和详情刷新，避免触发 12 秒超时', () => {
+  assert.match(functionSource, /function queueFamilySnapshot/)
+  assert.doesNotMatch(functionSource, /await captureFamilySnapshot\(\);/)
+  assert.match(detailSource, /showSuccessToast\('资产已更新'\)\s*loadDetail\(\)/)
+  assert.doesNotMatch(detailSource, /await loadDetail\(\)\s*showSuccessToast\('资产已更新'\)/)
 })
 
 test('家庭财务刷新优先加载总览，成员失败时保留缓存且不拖死页面', () => {
