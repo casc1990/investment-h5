@@ -1,9 +1,22 @@
 <template>
   <div class="home">
+    <section class="family-overview-card" @click="router.push('/family-finance')">
+      <div class="family-overview-head">
+        <div><small>家庭资产负债</small><strong>家庭净资产</strong></div>
+        <span>查看详情 ›</span>
+      </div>
+      <div class="family-net-worth">{{ displayMoney(familyOverview?.summary?.net_worth) }}</div>
+      <div class="family-metrics">
+        <div><span>总资产</span><b>{{ displayMoney(familyOverview?.summary?.total_assets) }}</b></div>
+        <div><span>应收款</span><b>{{ displayMoney(familyOverview?.summary?.receivable_value) }}</b></div>
+        <div><span>总负债</span><b>{{ displayMoney(familyOverview?.summary?.total_liabilities) }}</b></div>
+      </div>
+    </section>
+
     <!-- 顶部卡片 - 总资产 -->
     <div class="header-card">
       <div class="header-top">
-        <div class="header-title">确认总资产</div>
+        <div class="header-title">基金资产</div>
         <div class="header-actions">
           <button @click="amountsHidden = !amountsHidden">{{ amountsHidden ? '显示' : '隐藏' }}</button>
           <button :disabled="refreshing" @click="refreshHome">{{ refreshing ? '刷新中' : '刷新' }}</button>
@@ -240,7 +253,7 @@
 import { ref, computed, onActivated, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { authApi, eventApi, fundApi, statsApi } from '../api'
+import { authApi, eventApi, familyFinanceApi, fundApi, statsApi } from '../api'
 import { formatAmount as formatNumber } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { clearPageCaches, readPageCache, writePageCache } from '../utils/pageCache'
@@ -251,6 +264,7 @@ const loading = ref(false)
 const refreshing = ref(false)
 const amountsHidden = ref(false)
 const overview = ref(cachedHome?.overview || null)
+const familyOverview = ref(cachedHome?.familyOverview || null)
 const eventSyncing = ref(false)
 const eventProcessing = ref(false)
 const activeEventTab = ref('pending')
@@ -315,7 +329,7 @@ const fetchEvents = async () => {
   const data = await eventApi.list({ group: 'all', limit: 5 })
   eventGroups.value = data?.groups || { pending: [], confirmed: [] }
   eventCounts.value = data?.counts || { pending: 0, confirmed: 0 }
-  writePageCache('home', { overview: overview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
+  writePageCache('home', { overview: overview.value, familyOverview: familyOverview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
 }
 
 const reconcileEventsInBackground = () => {
@@ -327,8 +341,9 @@ const reconcileEventsInBackground = () => {
 const fetchData = async () => {
   loading.value = true
   try {
-    const [overviewResult, eventsResult] = await Promise.allSettled([
+    const [overviewResult, familyResult, eventsResult] = await Promise.allSettled([
       statsApi.overview(),
+      familyFinanceApi.overview(),
       fetchEvents(),
     ])
 
@@ -342,6 +357,12 @@ const fetchData = async () => {
       throw overviewResult.reason
     }
 
+    if (familyResult.status === 'fulfilled') {
+      familyOverview.value = familyResult.value
+    } else {
+      console.warn('Failed to fetch family overview:', familyResult.reason)
+    }
+
     if (eventsResult.status === 'rejected') {
       console.error('Failed to fetch events:', eventsResult.reason)
       eventGroups.value = { pending: [], confirmed: [] }
@@ -349,7 +370,7 @@ const fetchData = async () => {
 
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
-    writePageCache('home', { overview: overview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
+    writePageCache('home', { overview: overview.value, familyOverview: familyOverview.value, eventGroups: eventGroups.value, eventCounts: eventCounts.value })
     reconcileEventsInBackground()
   } catch (error) {
     console.error('Failed to fetch overview:', error)
@@ -509,7 +530,37 @@ onActivated(() => {
   padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
+.family-overview-card {
+  margin: 10px 12px 12px;
+  padding: 17px 18px 15px;
+  border: 0;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, #1e80ff 0%, #0066cc 100%);
+  box-shadow: 0 10px 26px rgba(0, 102, 204, .18);
+}
+.family-overview-head { display: flex; align-items: center; justify-content: space-between; }
+.family-overview-head div { display: flex; flex-direction: column; gap: 2px; }
+.family-overview-head small { font-size: 11px; opacity: .72; }
+.family-overview-head strong { font-size: 15px; }
+.family-overview-head > span { font-size: 11px; opacity: .82; }
+.family-net-worth { margin-top: 10px; font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.family-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,.2);
+}
+.family-metrics div { min-width: 0; text-align: center; }
+.family-metrics div + div { border-left: 1px solid rgba(255,255,255,.2); }
+.family-metrics span, .family-metrics b { display: block; }
+.family-metrics span { font-size: 10px; opacity: .72; }
+.family-metrics b { margin-top: 4px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
 .header-card {
+  margin: 0 12px 12px;
+  border-radius: 18px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px 20px 18px;
   color: white;

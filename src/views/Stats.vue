@@ -1,5 +1,37 @@
 <template>
   <div class="stats-page">
+    <nav class="stats-domain-tabs" aria-label="统计类型">
+      <button :class="{ active: activeStatsDomain === 'family' }" @click="activeStatsDomain = 'family'">家庭资产</button>
+      <button :class="{ active: activeStatsDomain === 'fund' }" @click="activeStatsDomain = 'fund'">基金收益</button>
+    </nav>
+
+    <template v-if="activeStatsDomain === 'family'">
+      <section class="family-stats-hero">
+        <div class="family-stats-head"><span>家庭净资产</span><button @click="handleRefresh">刷新数据</button></div>
+        <strong>{{ familyMoney(familyOverview?.summary?.net_worth) }}</strong>
+        <div class="family-stats-grid">
+          <div><span>总资产</span><b>{{ familyMoney(familyOverview?.summary?.total_assets) }}</b></div>
+          <div><span>应收款</span><b>{{ familyMoney(familyOverview?.summary?.receivable_value) }}</b></div>
+          <div><span>总负债</span><b>{{ familyMoney(familyOverview?.summary?.total_liabilities) }}</b></div>
+          <div><span>可投资资产</span><b>{{ familyMoney(familyOverview?.summary?.investable_assets) }}</b></div>
+        </div>
+      </section>
+
+      <section class="section family-trend-section">
+        <div class="section-header"><div><div class="section-title">📈 净资产趋势</div><div class="section-subtitle">家庭资产、应收和负债变化后自动记录</div></div></div>
+        <TrendChart :points="familyNetWorthPoints" summary-label="所选日期净资产" :formatter="familyMoney" :y-axis-formatter="compactFamilyMoney" />
+      </section>
+
+      <section class="section">
+        <div class="section-header"><div><div class="section-title">🏠 家庭资产结构</div><div class="section-subtitle">基金自动汇总，其他项目来自家庭财务记账</div></div></div>
+        <div class="family-structure-list">
+          <div v-for="item in familyStructureRows" :key="item.key"><span><i :class="item.key"></i>{{ item.label }}</span><b>{{ familyMoney(item.value) }}</b></div>
+        </div>
+        <button class="family-detail-button" @click="router.push('/family-finance')">查看家庭财务明细</button>
+      </section>
+    </template>
+
+    <template v-else>
     <div class="overview-card">
       <div class="header-row">
         <div>
@@ -250,15 +282,19 @@
       <van-empty v-else description="暂无历史快照，点一次刷新统计即可开始积累" />
     </div>
 
+    </template>
     <van-loading v-if="loading" type="spinner" class="loading" />
   </div>
 </template>
 
 <script setup>
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
 import PeriodProfitBarChart from '../components/PeriodProfitBarChart.vue'
+import TrendChart from '../components/TrendChart.vue'
+import { familyFinanceApi } from '../api'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
@@ -276,8 +312,11 @@ import {
 } from '../utils/statsHistory'
 
 const cachedStats = readPageCache('stats')
+const router = useRouter()
 const loading = ref(false)
 const overview = ref(cachedStats?.overview || null)
+const familyOverview = ref(cachedStats?.familyOverview || null)
+const activeStatsDomain = ref('family')
 const allSnapshots = ref(getProfitSnapshots())
 const lastLoadedAt = ref(cachedStats?.savedAt || 0)
 const hasLoadedOnce = ref(Boolean(cachedStats?.overview))
@@ -299,6 +338,27 @@ const periodVisibleCountMap = ref({
 })
 const dailyHistoryVisibleCount = ref(2)
 const contributionRange = ref(30)
+
+const familyMoney = value => `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const compactFamilyMoney = value => {
+  const number = Number(value || 0)
+  if (Math.abs(number) >= 10000) return `¥${(number / 10000).toFixed(1)}万`
+  return `¥${Math.round(number).toLocaleString('zh-CN')}`
+}
+const familyNetWorthPoints = computed(() => (familyOverview.value?.snapshots || []).map(item => ({
+  key: item.date,
+  date: item.date,
+  total_value: Number(item.net_worth || 0),
+})))
+const familyStructureRows = computed(() => {
+  const summary = familyOverview.value?.summary || {}
+  return [
+    { key: 'fund', label: '基金资产', value: summary.fund_value },
+    { key: 'manual', label: '其他资产', value: summary.manual_asset_value },
+    { key: 'receivable', label: '应收款', value: summary.receivable_value },
+    { key: 'liability', label: '家庭负债', value: summary.total_liabilities },
+  ]
+})
 
 const trendModeOptions = [
   { text: '按天', value: 'daily' },
@@ -332,10 +392,13 @@ const syncSnapshots = async () => {
 const fetchData = async () => {
   loading.value = true
   try {
-    const data = await captureProfitSnapshotFromApis()
-    overview.value = data.overview
+    const [fundResult, familyResult] = await Promise.allSettled([captureProfitSnapshotFromApis(), familyFinanceApi.overview()])
+    if (fundResult.status === 'rejected') throw fundResult.reason
+    overview.value = fundResult.value.overview
+    if (familyResult.status === 'fulfilled') familyOverview.value = familyResult.value
+    else console.warn('Failed to fetch family stats:', familyResult.reason)
     refreshSnapshots()
-    writePageCache('stats', { overview: overview.value })
+    writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value })
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
   } catch (error) {
@@ -352,8 +415,22 @@ const ensureFreshData = async ({ force = false } = {}) => {
 }
 
 const handleRefresh = async () => {
+  if (activeStatsDomain.value === 'family') {
+    loading.value = true
+    try {
+      familyOverview.value = await familyFinanceApi.overview()
+      writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value })
+      showToast('家庭资产统计已刷新')
+    } catch (error) {
+      console.error('Failed to refresh family stats:', error)
+      showToast('家庭资产刷新失败')
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   await fetchData()
-  showToast('统计页已刷新')
+  showToast('基金收益统计已刷新')
 }
 
 const memberOptions = computed(() => buildMemberFilterOptions(allSnapshots.value))
@@ -530,6 +607,47 @@ onActivated(() => {
   background: #f5f5f5;
   padding-bottom: var(--app-floating-page-space);
 }
+
+.stats-domain-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin: 10px 12px 12px;
+  padding: 4px;
+  border: 1px solid #e4eaf2;
+  border-radius: 14px;
+  background: #eef2f7;
+}
+.stats-domain-tabs button { height: 40px; border: 0; border-radius: 10px; background: transparent; color: #758196; font-size: 14px; font-weight: 600; }
+.stats-domain-tabs button.active { color: #1e80ff; background: #fff; box-shadow: 0 3px 10px rgba(37,59,91,.09); }
+
+.family-stats-hero {
+  margin: 0 12px 12px;
+  padding: 17px 18px 15px;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, #1e80ff 0%, #0066cc 100%);
+}
+.family-stats-head { display: flex; align-items: center; justify-content: space-between; }
+.family-stats-head span { font-size: 13px; opacity: .78; }
+.family-stats-head button { height: 28px; padding: 0 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 999px; color: #fff; background: rgba(255,255,255,.1); font-size: 11px; }
+.family-stats-hero > strong { display: block; margin-top: 6px; font-size: 29px; font-variant-numeric: tabular-nums; }
+.family-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); margin-top: 13px; border-radius: 10px; background: rgba(255,255,255,.1); }
+.family-stats-grid div { padding: 9px; text-align: center; }
+.family-stats-grid div:nth-child(even) { border-left: 1px solid rgba(255,255,255,.2); }
+.family-stats-grid div:nth-child(n + 3) { border-top: 1px solid rgba(255,255,255,.2); }
+.family-stats-grid span, .family-stats-grid b { display: block; }
+.family-stats-grid span { font-size: 10px; opacity: .72; }
+.family-stats-grid b { margin-top: 3px; font-size: 12px; }
+.family-trend-section { overflow: hidden; }
+.family-structure-list > div { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px; border-bottom: 1px solid #eef2f7; }
+.family-structure-list span { display: flex; align-items: center; gap: 9px; color: #536074; font-size: 13px; }
+.family-structure-list i { width: 9px; height: 9px; border-radius: 50%; background: #1e80ff; }
+.family-structure-list i.manual { background: #8b5cf6; }
+.family-structure-list i.receivable { background: #f59e0b; }
+.family-structure-list i.liability { background: #22c55e; }
+.family-structure-list b { color: #172033; font-size: 14px; }
+.family-detail-button { width: 100%; height: 40px; margin-top: 13px; border: 0; border-radius: 10px; color: #1e80ff; background: #eaf3ff; font-size: 13px; font-weight: 600; }
 
 .overview-card {
   background: linear-gradient(135deg, #1e80ff 0%, #0066cc 100%);
