@@ -184,7 +184,7 @@ import TrendChart from '../components/TrendChart.vue'
 const EmptyState = defineComponent({ props: { text: String }, setup: props => () => h('div', { class: 'empty-state' }, [h('span', '🏡'), h('strong', props.text), h('small', '点击右上角新增开始记账')]) })
 const MemberSelect = defineComponent({
   props: { modelValue: String, members: Array }, emits: ['update:modelValue'],
-  setup: (props, { emit }) => () => h('label', [h('span', '所属成员'), h('select', { value: props.modelValue, onChange: event => emit('update:modelValue', event.target.value) }, [h('option', { value: '' }, '家庭共有'), ...(props.members || []).map(item => h('option', { value: item.id }, `${item.emoji || '👤'} ${item.name}`))])])
+  setup: (props, { emit }) => () => h('label', { class: 'member-select' }, [h('span', '所属成员'), h('select', { value: props.modelValue, onChange: event => emit('update:modelValue', event.target.value) }, [h('option', { value: '' }, '家庭共有'), ...(props.members || []).map(item => h('option', { value: item.id }, `${item.emoji || '👤'} ${item.name}`))])])
 })
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
@@ -633,6 +633,10 @@ onActivated(loadData)
   color: #1f2937;
   font-size: 14px;
 }
+:deep(.member-select) { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+:deep(.member-select > span) { color: #64748b; font-size: 12px; font-weight: 600; }
+:deep(.member-select select) { box-sizing: border-box; width: 100%; height: 44px; padding: 0 12px; border: 1px solid #dfe4ec; border-radius: 10px; background: #fff; color: #1f2937; font-size: 14px; }
+:deep(.member-select select:focus) { border-color: #1e80ff; outline: none; box-shadow: 0 0 0 3px rgba(30, 128, 255, .1); }
 .form-sheet input:focus,
 .form-sheet select:focus { border-color: #1e80ff; outline: none; box-shadow: 0 0 0 3px rgba(30, 128, 255, .1); }
 .switch-row { flex-direction: row !important; align-items: center; justify-content: space-between; padding: 10px 0; }

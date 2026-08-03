@@ -83,6 +83,11 @@ test('应收记录支持编辑原始资料且不伪造回款记录', () => {
   assert.match(functionSource, /原始金额不能低于已回款金额/)
 })
 
+test('应收和负债的所属成员下拉框保持标准表单尺寸', () => {
+  assert.match(viewSource, /class: 'member-select'/)
+  assert.match(viewSource, /:deep\(\.member-select select\)[^{]*\{[^}]*height: 44px[^}]*font-size: 14px/s)
+})
+
 test('新增应收、记录回款和直接结清都能形成趋势操作', () => {
   assert.match(functionSource, /const receivableEvents = receivableRows\.map/)
   assert.match(functionSource, /receivablePaymentQuery\.results/)
