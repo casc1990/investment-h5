@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { isStaleAssetLoadError, recoverFromStalePwaAssets } from '../src/utils/pwaRecovery.js'
+import { readFileSync } from 'node:fs'
+
+const mainSource = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 
 test('PWA 自愈只识别分片、模块和样式资源加载错误', () => {
   assert.equal(isStaleAssetLoadError(new Error('Failed to fetch dynamically imported module: /assets/Home-old.js')), true)
@@ -33,4 +36,10 @@ test('PWA 自愈会注销旧 Service Worker、清缓存并仅刷新一次', asyn
   assert.deepEqual(calls, ['unregister', 'delete:workbox-precache-v1', 'reload'])
   assert.equal(await recoverFromStalePwaAssets({ windowRef, navigatorRef, cachesRef, now: 2000 }), false)
   assert.deepEqual(calls, ['unregister', 'delete:workbox-precache-v1', 'reload'])
+})
+
+test('新 Service Worker 接管后自动刷新当前页面', () => {
+  assert.match(mainSource, /serviceWorker\.addEventListener\('controllerchange'/)
+  assert.match(mainSource, /reloadingForServiceWorker = true\s*window\.location\.reload\(\)/)
+  assert.match(mainSource, /onRegisteredSW\(_swUrl, registration\)[\s\S]*?registration\.update\(\)/)
 })

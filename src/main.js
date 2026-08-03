@@ -23,6 +23,15 @@ import 'vant/lib/action-sheet/style'
 import 'vant/lib/icon/style'
 import 'vant/lib/badge/style'
 
+let reloadingForServiceWorker = false
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForServiceWorker) return
+    reloadingForServiceWorker = true
+    window.location.reload()
+  })
+}
+
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
@@ -30,6 +39,7 @@ const updateSW = registerSW({
   },
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
+    registration.update().catch(() => {})
     setInterval(() => {
       registration.update().catch(() => {})
     }, 60 * 1000)
