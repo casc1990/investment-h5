@@ -22,3 +22,14 @@ test('顾投详情页提供返回、精简总览和全部更新记录', () => {
   assert.match(source, /modalMode !== 'edit'/)
   assert.match(apiSource, /snapshots: snapshots\.map/)
 })
+
+test('顾投资产只录入持有收益并由服务端自动计算收益率', () => {
+  assert.doesNotMatch(source, /<span>当日收益<\/span>/)
+  assert.doesNotMatch(source, /v-model="form\.dailyProfit"/)
+  assert.doesNotMatch(source, /v-model="form\.profitRate"/)
+  assert.match(source, /持有收益率将根据当前总金额自动计算/)
+  assert.match(source, /current_profit: numberValue\(form\.currentProfit\)/)
+  assert.match(apiSource, /const daily_profit = 0;/)
+  assert.match(apiSource, /const invested_amount = total_amount - current_profit;/)
+  assert.match(apiSource, /current_profit \/ invested_amount/)
+})

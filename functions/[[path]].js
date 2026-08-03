@@ -3146,12 +3146,10 @@ export async function onRequest(context) {
         return jsonResponse({ code: 400, message: 'product_id 和 snapshot_date 必填' }, 400);
       }
       const total_amount = Number(body.total_amount ?? body.totalAmount ?? 0);
-      const daily_profit = Number(body.daily_profit ?? body.dailyProfit ?? 0);
+      const daily_profit = 0;
       const current_profit = Number(body.current_profit ?? body.currentProfit ?? 0);
-      const inputProfitRate = body.profit_rate ?? body.profitRate;
-      const profit_rate = inputProfitRate !== undefined && inputProfitRate !== null && inputProfitRate !== ''
-        ? Number(inputProfitRate)
-        : ((total_amount - current_profit) > 0 ? Number(((current_profit / (total_amount - current_profit)) * 100).toFixed(2)) : 0);
+      const invested_amount = total_amount - current_profit;
+      const profit_rate = invested_amount > 0 ? Number(((current_profit / invested_amount) * 100).toFixed(2)) : 0;
       const existing = await env.DB.prepare('SELECT id FROM advisory_product_snapshots WHERE product_id = ? AND snapshot_date = ?').bind(product_id, snapshot_date).all();
       if (existing.results.length > 0) {
         await env.DB.prepare(

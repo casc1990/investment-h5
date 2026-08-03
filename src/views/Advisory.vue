@@ -13,10 +13,10 @@
       <section class="content-card">
         <div class="section-head"><div><h2>资产总览</h2><p>当前顾投组合信息</p></div><div class="head-actions"><button class="ghost" @click="openEdit(selectedProduct)">编辑</button><button @click="openUpdate(selectedProduct)">更新</button></div></div>
         <div class="overview-grid">
-          <div><span>当日收益</span><strong :class="profitClass(selectedProduct.daily_profit)">{{ signedAmount(selectedProduct.daily_profit) }}</strong></div>
           <div><span>持有收益</span><strong :class="profitClass(selectedProduct.current_profit)">{{ signedAmount(selectedProduct.current_profit) }}</strong></div>
           <div><span>持有收益率</span><strong :class="profitClass(selectedProduct.profit_rate)">{{ signedRate(selectedProduct.profit_rate) }}</strong></div>
           <div><span>归属账户</span><strong>{{ selectedProduct.account_name || '未绑定' }}</strong></div>
+          <div><span>记录日期</span><strong>{{ selectedProduct.snapshot_date || '暂无' }}</strong></div>
         </div>
         <div class="remark-box"><span>备注</span><p>{{ selectedProduct.remark || '暂无备注' }}</p></div>
       </section>
@@ -27,7 +27,7 @@
           <article v-for="record in snapshots" :key="record.id" class="record-row">
             <div><strong>{{ record.snapshot_date }}</strong><small>账户总金额</small></div>
             <div class="record-total">¥{{ formatAmount(record.total_amount) }}</div>
-            <div class="record-profit"><span>当日 {{ signedAmount(record.daily_profit) }}</span><span :class="profitClass(record.current_profit)">持有 {{ signedAmount(record.current_profit) }}</span></div>
+            <div class="record-profit"><span :class="profitClass(record.current_profit)">持有 {{ signedAmount(record.current_profit) }}</span><span :class="profitClass(record.profit_rate)">{{ signedRate(record.profit_rate) }}</span></div>
           </article>
         </div>
         <van-empty v-else description="暂无更新记录" />
@@ -43,7 +43,7 @@
       <main class="product-list">
         <article v-for="product in products" :key="product.id" class="product-card">
           <div class="product-head"><div><h2>{{ product.product_name }}</h2><p>{{ product.account_name || '未绑定账户' }} · {{ product.snapshot_date || '暂无记录' }}</p></div><strong>¥{{ formatAmount(product.total_amount) }}</strong></div>
-          <div class="profit-line"><span>当日收益 <b :class="profitClass(product.daily_profit)">{{ signedAmount(product.daily_profit) }}</b></span><span>持有收益 <b :class="profitClass(product.current_profit)">{{ signedAmount(product.current_profit) }}</b></span></div>
+          <div class="profit-line"><span>持有收益 <b :class="profitClass(product.current_profit)">{{ signedAmount(product.current_profit) }}</b></span><span>收益率 <b :class="profitClass(product.profit_rate)">{{ signedRate(product.profit_rate) }}</b></span></div>
           <div class="card-actions"><button @click="viewProduct(product)">查看</button><button class="secondary" @click="openEdit(product)">编辑</button><button class="secondary" @click="openUpdate(product)">更新</button></div>
         </article>
         <van-empty v-if="!products.length && !loading" description="暂无顾投资产" />
@@ -65,8 +65,7 @@
         <template v-if="modalMode !== 'edit'">
           <label><span>记录日期</span><input v-model="form.snapshotDate" required type="date" /></label>
           <label><span>当前总金额</span><input v-model="form.totalAmount" required type="number" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
-          <div class="field-pair"><label><span>当日收益</span><input v-model="form.dailyProfit" type="number" step="0.01" inputmode="decimal" placeholder="0.00" /></label><label><span>持有收益</span><input v-model="form.currentProfit" type="number" step="0.01" inputmode="decimal" placeholder="0.00" /></label></div>
-          <label><span>持有收益率（%）</span><input v-model="form.profitRate" type="number" step="0.01" inputmode="decimal" placeholder="可不填，自动计算" /></label>
+          <label><span>持有收益</span><input v-model="form.currentProfit" required type="number" step="0.01" inputmode="decimal" placeholder="0.00" /><small class="field-tip">持有收益率将根据当前总金额自动计算</small></label>
         </template>
 
         <div class="form-actions"><button v-if="modalMode === 'edit'" type="button" class="danger" @click="removeProduct">删除</button><button type="submit" class="primary" :disabled="saving">{{ saving ? '保存中…' : modalMode === 'add' ? '保存新增' : modalMode === 'edit' ? '保存修改' : '保存更新' }}</button></div>
@@ -108,7 +107,7 @@ const numberValue = value => value === '' || value === null || value === undefin
 
 const resetForm = values => {
   Object.keys(form).forEach(key => delete form[key])
-  Object.assign(form, { productId: '', productName: '', accountId: '', accountName: '', remark: '', snapshotDate: today(), totalAmount: '', dailyProfit: '', currentProfit: '', profitRate: '' }, values)
+  Object.assign(form, { productId: '', productName: '', accountId: '', accountName: '', remark: '', snapshotDate: today(), totalAmount: '', currentProfit: '' }, values)
 }
 
 const loadDetail = async id => {
@@ -147,7 +146,7 @@ const openEdit = product => {
 }
 const openUpdate = product => {
   modalMode.value = 'update'
-  resetForm({ productId: product.id, snapshotDate: today(), totalAmount: product.total_amount ?? '', dailyProfit: '', currentProfit: product.current_profit ?? '', profitRate: product.profit_rate ?? '' })
+  resetForm({ productId: product.id, snapshotDate: today(), totalAmount: product.total_amount ?? '', currentProfit: product.current_profit ?? '' })
   showModal.value = true
 }
 const closeModal = () => { showModal.value = false; resetForm() }
@@ -163,7 +162,7 @@ const submitForm = async () => {
       await advisoryApi.updateProduct(productId, { product_name: form.productName, account_id: form.accountId || null, remark: form.remark, status: '正常', platform: 'xueqiu' })
     }
     if (modalMode.value !== 'edit') {
-      await advisoryApi.saveSnapshot({ product_id: productId, snapshot_date: form.snapshotDate, total_amount: numberValue(form.totalAmount), daily_profit: numberValue(form.dailyProfit), current_profit: numberValue(form.currentProfit), profit_rate: form.profitRate === '' ? null : numberValue(form.profitRate) })
+      await advisoryApi.saveSnapshot({ product_id: productId, snapshot_date: form.snapshotDate, total_amount: numberValue(form.totalAmount), current_profit: numberValue(form.currentProfit) })
     }
     showSuccessToast(modalMode.value === 'add' ? '新增成功' : modalMode.value === 'edit' ? '资料已更新' : '金额已更新')
     closeModal()
@@ -240,6 +239,6 @@ button.secondary, button.ghost { color: #1e80ff; background: #edf5ff; }
 label { display: block; margin-top: 14px; }label > span { display: block; margin-bottom: 7px; color: #64748b; font-size: 13px; font-weight: 600; }
 input, .select-field { box-sizing: border-box; width: 100%; min-height: 46px; border: 1px solid #dbe2ea; border-radius: 10px; padding: 0 13px; color: #1f2937; background: #fff; font-size: 14px; text-align: left; }
 .select-field { display: flex; align-items: center; justify-content: space-between; font-weight: 400; }
-.field-pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.field-tip { display: block; margin-top: 6px; color: #94a3b8; font-size: 11px; font-weight: 400; }
 .form-actions { margin-top: 22px; }.form-actions button { flex: 1; min-height: 44px; }.form-actions .danger { color: #ef4444; background: #fff1f2; }
 </style>
