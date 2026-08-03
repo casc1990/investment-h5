@@ -70,10 +70,22 @@
       </template>
     </main>
 
-    <section class="snapshot-card">
-      <div><h2>净资产档案</h2><p>家庭资产、应收和负债发生变化后自动记录</p></div>
-      <div v-if="snapshots.length" class="snapshot-list">
-        <div v-for="item in snapshots.slice(-6).reverse()" :key="item.date"><span>{{ item.date }}</span><strong>{{ money(item.net_worth) }}</strong></div>
+    <section class="trend-section">
+      <div class="trend-head"><h2>资产增长趋势</h2><p>每次手工资产录入或更新都会生成坐标点</p></div>
+      <TrendChart
+        :points="assetTrendPoints"
+        summary-label="所选节点资产"
+        :formatter="money"
+        :y-axis-formatter="compactMoney"
+        @select="selectedAssetTrend = $event"
+      />
+      <div v-if="selectedAssetOperations.length" class="trend-operation-list">
+        <div class="operation-title"><span>{{ selectedAssetTrend?.date }} 操作记录</span><b>{{ selectedAssetOperations.length }} 条</b></div>
+        <article v-for="item in selectedAssetOperations" :key="item.id" class="trend-operation-row">
+          <span class="operation-icon">{{ assetIcon(item.category_code) }}</span>
+          <span class="operation-main"><strong>{{ item.asset_name }}</strong><small>{{ item.remark || '资产更新' }} · {{ item.member_emoji || '👤' }} {{ item.member_name || '未关联成员' }}</small></span>
+          <b :class="changeClass(item.change_value)">{{ signedMoney(item.change_value) }}</b>
+        </article>
       </div>
     </section>
 
@@ -85,7 +97,8 @@
           <label><span>资产大类</span><select v-model="form.asset_group" required @change="handleAssetGroupChange"><option value="" disabled>请选择大类</option><option v-for="item in assetGroups" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
           <label><span>二级分类</span><select v-model="form.category_code" required :disabled="!form.asset_group" @change="applyAssetCategoryDefault"><option value="" disabled>{{ form.asset_group ? '请选择二级分类' : '请先选择资产大类' }}</option><option v-for="item in filteredAssetCategories" :key="item.code" :value="item.code">{{ item.name }}</option></select></label>
           <label><span>资产名称</span><input v-model.trim="form.name" required maxlength="80" placeholder="例如：招商银行工资卡" /></label>
-          <label><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
+          <label v-if="!isEditingAsset"><span>当前金额</span><input v-model="form.current_value" required type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
+          <label v-else><span>本次金额变化</span><input v-model="form.change_value" required type="number" step="0.01" inputmode="decimal" placeholder="增加输入 100，减少输入 -100" /></label>
           <label><span>记录日期</span><input v-model="form.valuation_date" type="date" required /></label>
           <label><span>备注</span><input v-model.trim="form.remark" maxlength="200" placeholder="可填写金融机构、存放位置等附加信息" /></label>
           <label v-if="isEditingAsset"><span>本次更新说明</span><input v-model.trim="form.update_remark" maxlength="120" placeholder="例如：7月份公积金缴存后余额" /></label>
@@ -133,6 +146,7 @@ import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
 import { readPageCache, writePageCache } from '../utils/pageCache'
+import TrendChart from '../components/TrendChart.vue'
 
 const EmptyState = defineComponent({ props: { text: String }, setup: props => () => h('div', { class: 'empty-state' }, [h('span', '🏡'), h('strong', props.text), h('small', '点击右上角新增开始记账')]) })
 const MemberSelect = defineComponent({
@@ -144,7 +158,8 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai'
 const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), paymentType = ref(''), paymentItem = ref(null)
-const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), snapshots = ref([])
+const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), assetTrend = ref([])
+const selectedAssetTrend = ref(null)
 const summary = reactive({ fund_value: 0, total_assets: 0, total_liabilities: 0, net_worth: 0, investable_assets: 0 })
 const categories = reactive({ assets: [], receivables: [], liabilities: [] })
 const form = reactive({})
@@ -154,7 +169,7 @@ const applyOverviewData = data => {
   assets.value = data.assets || []
   receivables.value = data.receivables || []
   liabilities.value = data.liabilities || []
-  snapshots.value = data.snapshots || []
+  assetTrend.value = data.asset_trend || []
   Object.assign(categories, data.categories || {})
 }
 const cacheFamilyFinance = () => writePageCache('family-finance', {
@@ -163,7 +178,7 @@ const cacheFamilyFinance = () => writePageCache('family-finance', {
     assets: assets.value,
     receivables: receivables.value,
     liabilities: liabilities.value,
-    snapshots: snapshots.value,
+    asset_trend: assetTrend.value,
     categories: { ...categories },
   },
   members: members.value,
@@ -195,6 +210,14 @@ const filteredAssetCategories = computed(() => categories.assets.filter(item => 
 const categoryName = (type, code) => categories[type].find(item => item.code === code)?.name || '其他'
 const ownerName = item => item.member_name ? `${item.member_emoji || '👤'} ${item.member_name}` : '家庭共有'
 const money = value => `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const compactMoney = value => {
+  const amount = Number(value || 0)
+  if (Math.abs(amount) >= 10000) return `¥${(amount / 10000).toFixed(1)}万`
+  if (Math.abs(amount) >= 1000) return `¥${(amount / 1000).toFixed(1)}千`
+  return `¥${amount.toFixed(0)}`
+}
+const signedMoney = value => `${Number(value || 0) > 0 ? '+' : ''}${money(value)}`
+const changeClass = value => Number(value || 0) > 0 ? 'increase' : Number(value || 0) < 0 ? 'decrease' : 'unchanged'
 const assetIcon = code => ({ stock: '📈', bank_wealth: '🏦', bond: '📜', gold: '🪙', bank_demand: '💳', bank_fixed: '🏦', cash: '💵', provident_fund: '🏠', medical_account: '🏥', pension_account: '👵', property: '🏡', vehicle: '🚗' }[code] || '📦')
 const groupedAssets = computed(() => {
   const map = new Map()
@@ -206,6 +229,13 @@ const groupedAssets = computed(() => {
   }
   return [...map.values()]
 })
+const assetTrendPoints = computed(() => assetTrend.value.map(item => ({
+  key: item.key,
+  date: item.date,
+  value: Number(item.total_value || 0),
+  raw: item,
+})))
+const selectedAssetOperations = computed(() => selectedAssetTrend.value?.operations || [])
 
 const loadData = async () => {
   if (loading.value) return
@@ -241,7 +271,8 @@ const openCreate = () => {
 const openAssetEdit = item => {
   formMode.value = 'asset'; editingAssetId.value = item.id
   const category = categories.assets.find(categoryItem => categoryItem.code === item.category_code)
-  resetForm({ ...item, asset_group: category?.group || '', current_value: Number(item.current_value), member_id: item.member_id || '', include_in_investable_assets: Boolean(item.include_in_investable_assets), update_remark: '' })
+  resetForm({ ...item, asset_group: category?.group || '', change_value: '', member_id: item.member_id || '', include_in_investable_assets: Boolean(item.include_in_investable_assets), update_remark: '' })
+  delete form.current_value
   formVisible.value = true
 }
 const openAssetDetail = id => router.push(`/family-finance/assets/${id}`)
@@ -255,7 +286,7 @@ const submitForm = async () => {
     else if (formMode.value === 'liability') await familyFinanceApi.createLiability({ ...form, original_amount: form.outstanding_principal })
     else if (paymentType.value === 'receivable') await familyFinanceApi.receivePayment(paymentItem.value.id, form)
     else await familyFinanceApi.repayLiability(paymentItem.value.id, form)
-    formVisible.value = false; await loadData(); showSuccessToast('已保存')
+    formVisible.value = false; showSuccessToast('已保存'); loadData()
   } catch (error) { showFailToast(error.response?.data?.message || error.message || '保存失败') }
   finally { saving.value = false }
 }
@@ -290,7 +321,7 @@ onActivated(loadData)
 .group-head,
 .debt-top,
 .debt-meta,
-.snapshot-list div,
+.operation-title,
 .form-head,
 .payment-balance {
   display: flex;
@@ -337,7 +368,7 @@ onActivated(loadData)
 
 .source-card,
 .content-card,
-.snapshot-card {
+.trend-section {
   background: #fff;
   border-radius: 12px;
 }
@@ -396,12 +427,12 @@ onActivated(loadData)
 .section-tabs button.active span { background: #1e80ff; color: #fff; }
 
 .content-card,
-.snapshot-card { margin-top: 12px; padding: 16px; }
+.trend-section { margin-top: 12px; padding: 16px; }
 .section-head { align-items: center; }
 .section-head h2,
-.snapshot-card h2 { color: #222; font-size: 16px; font-weight: 700; }
+.trend-section h2 { color: #222; font-size: 16px; font-weight: 700; }
 .section-head p,
-.snapshot-card p { margin-top: 5px; color: #94a3b8; font-size: 12px; }
+.trend-section p { margin-top: 5px; color: #94a3b8; font-size: 12px; }
 .add-button {
   border: 0;
   border-radius: 9px;
@@ -473,10 +504,19 @@ onActivated(loadData)
 .empty-state strong { margin-top: 8px; color: #64748b; font-size: 14px; }
 .empty-state small { margin-top: 5px; font-size: 12px; }
 
-.snapshot-card { position: relative; }
-.snapshot-list { margin-top: 14px; }
-.snapshot-list div { padding: 10px 0; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 12px; }
-.snapshot-list strong { color: #1f2937; font-family: 'Courier New', monospace; }
+.trend-head { margin-bottom: 12px; }
+.trend-operation-list { margin-top: 14px; }
+.operation-title { padding: 0 2px 8px; color: #64748b; font-size: 12px; }
+.operation-title b { color: #94a3b8; font-size: 11px; }
+.trend-operation-row { display: flex; align-items: center; gap: 9px; padding: 11px 2px; border-top: 1px solid #f1f5f9; }
+.operation-icon { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 9px; background: #f8fbff; font-size: 17px; }
+.operation-main { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.operation-main strong { overflow: hidden; color: #1f2937; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.operation-main small { margin-top: 4px; overflow: hidden; color: #94a3b8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.trend-operation-row > b { font-family: 'Courier New', monospace; font-size: 12px; white-space: nowrap; }
+.trend-operation-row > b.increase { color: #dc2626; }
+.trend-operation-row > b.decrease { color: #16a34a; }
+.trend-operation-row > b.unchanged { color: #64748b; }
 
 .finance-popup { max-height: 90vh; overflow-y: auto; }
 .form-sheet { padding: 20px 18px 26px; }

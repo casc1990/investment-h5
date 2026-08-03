@@ -6,20 +6,30 @@ const viewSource = readFileSync(new URL('../src/views/FamilyFinance.vue', import
 const detailSource = readFileSync(new URL('../src/views/FamilyAssetDetail.vue', import.meta.url), 'utf8')
 const functionSource = readFileSync(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 
-test('家庭财务页覆盖资产、应收、负债和快照场景', () => {
+test('家庭财务页覆盖资产、应收、负债和资产增长场景', () => {
   assert.match(viewSource, /label: '资产'/)
   assert.match(viewSource, /label: '应收'/)
   assert.match(viewSource, /label: '负债'/)
-  assert.match(viewSource, /净资产档案/)
+  assert.match(viewSource, /资产增长趋势/)
+  assert.doesNotMatch(viewSource, /净资产档案/)
   assert.match(viewSource, /基金自动汇总，其他资产手工记账/)
 })
 
-test('净资产快照改为家庭财务变更后自动记录', () => {
+test('家庭财务变更后仍在后台自动记录快照', () => {
   assert.doesNotMatch(viewSource, /保存今日快照|captureSnapshot/)
-  assert.match(viewSource, /家庭资产、应收和负债发生变化后自动记录/)
   assert.match(functionSource, /async function captureFamilySnapshot/)
   assert.ok((functionSource.match(/queueFamilySnapshot\(\)/g) || []).length >= 9)
   assert.match(functionSource, /context\.waitUntil\([\s\S]*?captureFamilySnapshot/)
+})
+
+test('资产增长趋势按每次手工资产操作生成坐标点并联动记录', () => {
+  assert.match(viewSource, /<TrendChart/)
+  assert.match(viewSource, /@select="selectedAssetTrend = \$event"/)
+  assert.match(viewSource, /selectedAssetOperations/)
+  assert.match(viewSource, /操作记录/)
+  assert.match(functionSource, /FROM family_asset_records r[\s\S]*?JOIN family_assets a/)
+  assert.match(functionSource, /assetBalances\.set\(record\.asset_id/)
+  assert.match(functionSource, /asset_trend: assetTrend/)
 })
 
 test('手工资产必须关联家庭成员', () => {
@@ -91,6 +101,7 @@ test('每次资产更新都会追加记录，包括金额不变的信息更新',
 })
 
 test('资产更新按本次增减额计算，记录不再展示前后总额', () => {
+  assert.match(viewSource, /v-else><span>本次金额变化<\/span><input v-model="form\.change_value"/)
   assert.match(detailSource, />本次金额变化<\/span><input v-model="form\.change_value"/)
   assert.match(detailSource, /增加输入 100，减少输入 -100/)
   assert.doesNotMatch(detailSource, /money\(record\.previous_value\).*money\(record\.current_value\)/)

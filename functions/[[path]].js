@@ -2195,9 +2195,40 @@ export async function onRequest(context) {
     // 与基金 positions/trades 完全隔离，只在总览中读取基金市值。
     if (path === '/api/family-finance/overview' && method === 'GET') {
       const data = await getFamilyFinanceData();
-      const { results: snapshots } = await env.DB.prepare(
-        'SELECT snapshot_date, summary_json FROM family_snapshots ORDER BY snapshot_date DESC LIMIT 24'
-      ).all();
+      const [snapshotQuery, assetRecordQuery] = await Promise.all([
+        env.DB.prepare('SELECT snapshot_date, summary_json FROM family_snapshots ORDER BY snapshot_date DESC LIMIT 24').all(),
+        env.DB.prepare(`
+          SELECT r.*, a.name AS asset_name, a.category_code, m.name AS member_name, m.emoji AS member_emoji
+          FROM family_asset_records r
+          JOIN family_assets a ON r.asset_id = a.id
+          LEFT JOIN members m ON a.member_id = m.id
+          WHERE a.status != 'archived'
+          ORDER BY r.record_date ASC, r.created_at ASC, r.id ASC
+          LIMIT 120
+        `).all(),
+      ]);
+      const assetBalances = new Map();
+      const assetTrend = (assetRecordQuery.results || []).map(record => {
+        assetBalances.set(record.asset_id, normalizeFamilyMoney(record.current_value));
+        const totalValue = normalizeFamilyMoney([...assetBalances.values()].reduce((sum, value) => sum + value, 0));
+        return {
+          key: record.id,
+          date: record.record_date,
+          created_at: record.created_at,
+          total_value: totalValue,
+          operations: [{
+            id: record.id,
+            asset_id: record.asset_id,
+            asset_name: record.asset_name,
+            category_code: record.category_code,
+            member_name: record.member_name,
+            member_emoji: record.member_emoji,
+            change_value: normalizeFamilyMoney(record.change_value),
+            remark: record.remark,
+          }],
+        };
+      });
+      const snapshots = snapshotQuery.results || [];
       return jsonResponse({
         code: 0,
         data: {
@@ -2208,6 +2239,7 @@ export async function onRequest(context) {
             liabilities: FAMILY_LIABILITY_CATEGORIES,
           },
           snapshots: (snapshots || []).map(row => ({ date: row.snapshot_date, ...JSON.parse(row.summary_json) })).reverse(),
+          asset_trend: assetTrend,
         },
       });
     }
