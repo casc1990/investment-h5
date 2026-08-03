@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs'
 const homeSource = readFileSync(new URL('../src/views/Home.vue', import.meta.url), 'utf8')
 const statsSource = readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
 
-test('首页增加家庭总览并保留基金资产看板', () => {
-  assert.match(homeSource, /class="family-overview-card"/)
+test('首页将家庭总览和基金资产合并为同一张主卡', () => {
+  assert.match(homeSource, /class="portfolio-overview-card"/)
   assert.match(homeSource, /家庭净资产/)
   assert.match(homeSource, /familyFinanceApi\.overview\(\)/)
   assert.match(homeSource, /familyOverview: familyOverview\.value/)
-  assert.match(homeSource, /<div class="header-title">基金资产<\/div>/)
+  assert.match(homeSource, /class="fund-summary-block"/)
+  assert.match(homeSource, /<span>基金资产<\/span>/)
+  assert.doesNotMatch(homeSource, /class="header-card"/)
   assert.match(homeSource, /每日收益贡献/)
 })
 

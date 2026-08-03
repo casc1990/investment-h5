@@ -1,38 +1,38 @@
 <template>
   <div class="home">
-    <section class="family-overview-card" @click="router.push('/family-finance')">
-      <div class="family-overview-head">
-        <div><small>家庭资产负债</small><strong>家庭净资产</strong></div>
-        <span>查看详情 ›</span>
-      </div>
-      <div class="family-net-worth">{{ displayMoney(familyOverview?.summary?.net_worth) }}</div>
-      <div class="family-metrics">
-        <div><span>总资产</span><b>{{ displayMoney(familyOverview?.summary?.total_assets) }}</b></div>
-        <div><span>应收款</span><b>{{ displayMoney(familyOverview?.summary?.receivable_value) }}</b></div>
-        <div><span>总负债</span><b>{{ displayMoney(familyOverview?.summary?.total_liabilities) }}</b></div>
-      </div>
-    </section>
-
-    <!-- 顶部卡片 - 总资产 -->
-    <div class="header-card">
-      <div class="header-top">
-        <div class="header-title">基金资产</div>
+    <section class="portfolio-overview-card">
+      <div class="portfolio-overview-head">
+        <div class="family-overview-copy"><small>家庭资产负债</small><strong>家庭净资产</strong></div>
         <div class="header-actions">
           <button @click="amountsHidden = !amountsHidden">{{ amountsHidden ? '显示' : '隐藏' }}</button>
           <button :disabled="refreshing" @click="refreshHome">{{ refreshing ? '刷新中' : '刷新' }}</button>
           <button @click="handleLogout">退出</button>
         </div>
       </div>
-      <div class="total-info">
-        <div class="amount">{{ displayMoney(overview?.summary?.totalMarketValue) }}</div>
-        <div class="profit" :class="profitClass(overview?.summary?.totalProfit)">
+      <div class="family-net-row">
+        <div class="family-net-worth">{{ displayMoney(familyOverview?.summary?.net_worth) }}</div>
+        <button class="family-detail-link" @click="router.push('/family-finance')">查看详情 ›</button>
+      </div>
+      <div class="family-metrics">
+        <div><span>总资产</span><b>{{ displayMoney(familyOverview?.summary?.total_assets) }}</b></div>
+        <div><span>应收款</span><b>{{ displayMoney(familyOverview?.summary?.receivable_value) }}</b></div>
+        <div><span>总负债</span><b>{{ displayMoney(familyOverview?.summary?.total_liabilities) }}</b></div>
+      </div>
+
+      <div class="fund-summary-block">
+        <div class="fund-summary-head">
+          <span>基金资产</span>
+          <button @click="router.push('/positions')">查看持仓 ›</button>
+        </div>
+        <div class="fund-summary-value">{{ displayMoney(overview?.summary?.totalMarketValue) }}</div>
+        <div class="fund-summary-meta" :class="profitClass(overview?.summary?.totalProfit)">
           <span class="profit-label">持有收益</span>
           <strong>{{ displaySignedMoney(overview?.summary?.totalProfit) }}</strong>
           <span class="rate">{{ displayPercent(overview?.summary?.totalProfitRate) }}</span>
           <span class="profit-freshness">{{ freshnessText }}</span>
         </div>
       </div>
-    </div>
+    </section>
 
     <div class="today-grid">
       <div class="today-card">
@@ -530,21 +530,21 @@ onActivated(() => {
   padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
-.family-overview-card {
+.portfolio-overview-card {
   margin: 10px 12px 12px;
-  padding: 17px 18px 15px;
-  border: 0;
+  padding: 17px 18px 16px;
   border-radius: 18px;
   color: #fff;
   background: linear-gradient(135deg, #1e80ff 0%, #0066cc 100%);
   box-shadow: 0 10px 26px rgba(0, 102, 204, .18);
 }
-.family-overview-head { display: flex; align-items: center; justify-content: space-between; }
-.family-overview-head div { display: flex; flex-direction: column; gap: 2px; }
-.family-overview-head small { font-size: 11px; opacity: .72; }
-.family-overview-head strong { font-size: 15px; }
-.family-overview-head > span { font-size: 11px; opacity: .82; }
-.family-net-worth { margin-top: 10px; font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.portfolio-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.family-overview-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.family-overview-copy small { font-size: 10px; opacity: .72; }
+.family-overview-copy strong { font-size: 14px; white-space: nowrap; }
+.family-net-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.family-net-worth { min-width: 0; overflow: hidden; font-size: clamp(28px, 8vw, 36px); font-weight: 800; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.family-detail-link { flex-shrink: 0; padding: 4px 0; border: 0; color: rgba(255,255,255,.82); background: transparent; font-size: 11px; }
 .family-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -558,22 +558,6 @@ onActivated(() => {
 .family-metrics span { font-size: 10px; opacity: .72; }
 .family-metrics b { margin-top: 4px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
-.header-card {
-  margin: 0 12px 12px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px 20px 18px;
-  color: white;
-}
-
-.header-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.header-title { font-size: 14px; font-weight: 500; letter-spacing: .04em; opacity: .86; }
 .header-actions { display: flex; gap: 7px; justify-content: flex-end; }
 .header-actions button {
   background: rgba(255, 255, 255, 0.12);
@@ -588,42 +572,24 @@ onActivated(() => {
   flex-shrink: 0;
 }
 
-.total-info {
-  margin-top: 14px;
-  text-align: left;
-}
-
-.total-info .amount {
-  font-size: clamp(30px, 8vw, 38px);
-  line-height: 1.12;
-  font-weight: 700;
-  letter-spacing: .015em;
-  font-variant-numeric: tabular-nums;
-}
-
-.total-info .profit {
+.fund-summary-block { margin-top: 14px; padding: 12px 13px 11px; border-radius: 13px; background: rgba(255,255,255,.12); }
+.fund-summary-head { display: flex; align-items: center; justify-content: space-between; }
+.fund-summary-head > span { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.86); }
+.fund-summary-head button { padding: 3px 0; border: 0; color: rgba(255,255,255,.75); background: transparent; font-size: 10px; }
+.fund-summary-value { margin-top: 5px; font-size: clamp(23px, 6.8vw, 30px); font-weight: 750; font-variant-numeric: tabular-nums; }
+.fund-summary-meta {
   display: flex;
   align-items: baseline;
   gap: 7px;
-  margin-top: 10px;
-  font-size: 14px;
+  margin-top: 7px;
+  font-size: 13px;
   white-space: nowrap;
 }
-.total-info .profit-label { color: rgba(255,255,255,.72); font-size: 12px; }
-.total-info .profit strong { font-size: 15px; font-variant-numeric: tabular-nums; }
-
-.total-info .profit.positive {
-  color: #f87171;
-}
-
-.total-info .profit.negative {
-  color: #4ade80;
-}
-
-.total-info .rate {
-  font-size: 12px;
-  opacity: .9;
-}
+.fund-summary-meta .profit-label { color: rgba(255,255,255,.7); font-size: 11px; }
+.fund-summary-meta strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.fund-summary-meta.positive { color: #ff8a8a; }
+.fund-summary-meta.negative { color: #7ddf64; }
+.fund-summary-meta .rate { font-size: 11px; opacity: .9; }
 .profit-freshness { margin-left: auto; color: rgba(255,255,255,.86); font-size: 12px; font-weight: 500; }
 
 .today-grid {
@@ -935,9 +901,10 @@ onActivated(() => {
 .skeleton-section i { height: 48px; margin-bottom: 10px; }
 @keyframes skeleton-wave { to { background-position: -200% 0; } }
 @media (max-width: 360px) {
-  .header-card { padding-left: 16px; padding-right: 16px; }
+  .portfolio-overview-card { padding-left: 15px; padding-right: 15px; }
   .header-actions { gap: 4px; }
-  .header-actions button { min-width: 40px; padding: 0 7px; }
+  .header-actions button { min-width: 36px; padding: 0 6px; font-size: 10px; }
+  .profit-freshness { font-size: 10px; }
   .contribution-main strong { max-width: 145px; }
 }
 
