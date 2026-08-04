@@ -383,7 +383,7 @@ function parsePingzhongdataJsonVar(text, varName) {
 }
 
 function toHistoryDateKey(timestamp) {
-  const date = new Date(Number(timestamp));
+  const date = new Date(Number(timestamp) + (8 * 60 * 60 * 1000));
   if (Number.isNaN(date.getTime())) return '';
   return date.toISOString().split('T')[0];
 }

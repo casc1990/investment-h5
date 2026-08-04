@@ -61,7 +61,7 @@
         <button class="section-tab" :class="{ active: positionTrendTab === 'cumulative' }" @click="positionTrendTab = 'cumulative'">累计收益</button>
       </div>
 
-      <div class="chip-row">
+      <div v-if="positionTrendTab === 'cumulative'" class="chip-row">
         <button
           v-for="item in positionRangeOptions"
           :key="item.value"
@@ -73,7 +73,16 @@
         </button>
       </div>
 
+      <AllocationBucketProfitCalendar
+        v-if="positionTrendTab === 'daily'"
+        :series="positionDailyCalendarSeries"
+        summary-label="所选日期每日收益"
+        :formatter="formatCurrencyValue"
+        @select="handlePositionTrendSelect"
+      />
+
       <TrendChart
+        v-else
         :points="positionTrendPoints"
         :summary-label="positionTrendSummaryLabel"
         :formatter="positionTrendFormatter"
@@ -233,6 +242,7 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, 
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import TrendChart from '../components/TrendChart.vue'
+import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
 import { fundApi, positionApi } from '../api'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
@@ -401,6 +411,18 @@ const positionTrendPoints = computed(() => {
   }
   return buildPositionTrendPoints(rows, { metric: positionTrendMetric.value })
 })
+
+const positionDailyCalendarSeries = computed(() => [{
+  key: 'fund-daily-profit',
+  assetType: 'fund-daily-profit',
+  label: position.value?.fund_name || '每日收益',
+  points: (effectivePositionRowsAll.value || []).map(row => ({
+    key: row.date,
+    date: row.date,
+    value: Number((Number(row.daily_profit ?? row.adjusted_daily_profit ?? 0) || 0).toFixed(2)),
+    raw: row,
+  })),
+}])
 
 const fundTrendRowsAll = computed(() => fundDetail.value?.net_worth_trend || [])
 const fundTrendRows = computed(() => filterFundDetailRange(fundTrendRowsAll.value, fundRange.value))

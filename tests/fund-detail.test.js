@@ -11,7 +11,7 @@ import {
   buildRecentFundNavRows,
   rebuildPositionRowsFromNavHistory,
 } from '../src/utils/fundDetail.js'
-import { mergeLatestConfirmedNavIntoHistory } from '../functions/[[path]].js'
+import { mergeLatestConfirmedNavIntoHistory, parsePingzhongdataFundHistory } from '../functions/[[path]].js'
 
 const snapshots = [
   {
@@ -112,6 +112,13 @@ test('基金详情把数据库中更新的确认净值补到东方财富历史�
   assert.equal(result.at(-1).nav, 1.0752)
   assert.equal(result.at(-1).daily_return_pct, 0.3)
   assert.equal(result.length, 3)
+})
+
+test('东方财富北京时间零点时间戳不会被转换成前一天', () => {
+  const timestamp = Date.parse('2026-08-02T16:00:00.000Z')
+  const parsed = parsePingzhongdataFundHistory(`var f_S_name = "测试基金"; var Data_netWorthTrend = [{"x":${timestamp},"y":1.0827,"equityReturn":0.02}];`)
+
+  assert.equal(parsed.net_worth_trend[0].date, '2026-08-03')
 })
 
 test('持仓收益曲线遇到基金分红时应按真实收益补回除息影响', () => {
