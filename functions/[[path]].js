@@ -2623,6 +2623,16 @@ export async function onRequest(context) {
       return jsonResponse({ code: 0, data: { household: results[0] || null } });
     }
 
+    if (path === '/api/household' && method === 'PATCH') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const body = await context.request.json().catch(() => ({}));
+      const name = String(body.name || '').trim();
+      if (!name || name.length > 20) return jsonResponse({ code: 400, message: '家庭名称请输入1至20个字符' }, 400);
+      await env.DB.prepare('UPDATE households SET name = ?, updated_at = unixepoch() WHERE id = ?').bind(name, householdId).run();
+      return jsonResponse({ code: 0, message: '家庭名称已更新', data: { household: { id: householdId, name } } });
+    }
+
     if (path === '/api/household/users' && method === 'GET') {
       const { results } = await env.DB.prepare(`
         SELECT u.id, u.username, u.display_name, u.role, u.status, u.linked_member_id, u.created_at,

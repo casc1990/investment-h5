@@ -102,6 +102,13 @@ test('家庭所有者管理用户角色和停用会话', () => {
   assert.match(source, /user\.status !== 'active'/)
 })
 
+test('家庭名称只允许家庭所有者修改并限制长度', () => {
+  assert.match(source, /path === '\/api\/household' && method === 'PATCH'/)
+  assert.match(source, /const denied = requireHouseholdOwner\(\)/)
+  assert.match(source, /name\.length > 20/)
+  assert.match(source, /UPDATE households SET name = \?, updated_at = unixepoch\(\) WHERE id = \?/)
+})
+
 test('定时快照和事件重建按家庭隔离执行', () => {
   assert.match(source, /captureCurrentProfitSnapshot\(targetHouseholdId = householdId \|\| DEFAULT_HOUSEHOLD_ID\)/)
   assert.match(source, /SELECT id FROM households WHERE status = 'active'/)

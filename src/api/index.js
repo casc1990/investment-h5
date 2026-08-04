@@ -93,6 +93,7 @@ export const authApi = {
 
 export const householdApi = {
   get: () => apiClient.get('/household'),
+  update: (data) => apiClient.patch('/household', data),
   users: () => apiClient.get('/household/users'),
   updateUser: (id, data) => apiClient.patch(`/household/users/${id}`, data),
   whitelist: () => apiClient.get('/household/registration-whitelist'),

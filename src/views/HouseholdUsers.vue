@@ -3,7 +3,9 @@
     <div class="household-card">
       <div>
         <span>当前家庭</span>
-        <strong>{{ me.household_name || '我的家庭' }}</strong>
+        <button type="button" class="household-name-button" :disabled="!isOwner" @click="openHouseholdEditor">
+          <strong>{{ me.household_name || '我的家庭' }}</strong><van-icon v-if="isOwner" name="edit" />
+        </button>
         <small>{{ roleLabel(me.role) }} · {{ users.length }} 位用户</small>
       </div>
       <div class="header-actions">
@@ -81,6 +83,15 @@
       </div>
     </van-popup>
 
+    <van-popup v-model:show="showHouseholdEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup">
+      <div class="popup-body">
+        <h3>修改家庭名称</h3>
+        <p>名称将展示给该家庭的所有受邀用户。</p>
+        <van-field v-model="householdName" label="家庭名称" placeholder="请输入1至20个字符" maxlength="20" clearable />
+        <van-button block round type="primary" :loading="saving" @click="saveHouseholdName">保存名称</van-button>
+      </div>
+    </van-popup>
+
     <van-popup v-model:show="showInviteEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup" @closed="createdInviteLink = ''">
       <div class="popup-body">
         <h3>邀请家人加入</h3>
@@ -145,8 +156,10 @@ const members = ref([])
 const showWhitelistEditor = ref(false)
 const showInviteEditor = ref(false)
 const showUserEditor = ref(false)
+const showHouseholdEditor = ref(false)
 const showInviteHistory = ref(false)
 const whitelistUsername = ref('')
+const householdName = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
 const saving = ref(false)
@@ -185,6 +198,25 @@ async function createInvite() {
     createdInviteLink.value = `${window.location.origin}/register?invite=${encodeURIComponent(data.invite_code)}`
     await load()
   } catch (error) { showToast(error?.response?.data?.message || '生成邀请失败') }
+  finally { saving.value = false }
+}
+
+function openHouseholdEditor() {
+  if (!isOwner.value) return
+  householdName.value = me.value.household_name || ''
+  showHouseholdEditor.value = true
+}
+
+async function saveHouseholdName() {
+  const name = householdName.value.trim()
+  if (!name) return showToast('请输入家庭名称')
+  saving.value = true
+  try {
+    await householdApi.update({ name })
+    me.value = { ...me.value, household_name: name }
+    showHouseholdEditor.value = false
+    showToast('家庭名称已更新')
+  } catch (error) { showToast(error?.response?.data?.message || '更新失败') }
   finally { saving.value = false }
 }
 
@@ -286,13 +318,14 @@ onActivated(() => {
 .household-card span,.section-title span,.user-info span,.user-info small,.invite-row span { color:#8a96a8; font-size:12px; }
 .header-actions { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .household-card strong { margin:3px 0; color:#172033; font-size:20px; }
+.household-name-button { display:flex; align-items:center; gap:6px; align-self:flex-start; padding:0; border:0; background:transparent; color:#1e80ff; text-align:left; }.household-name-button:disabled { color:inherit; }.household-name-button .van-icon { font-size:15px; }
 .section-title { margin-bottom:8px; }.section-title strong { color:#263247; font-size:17px; }.section-title span { margin-top:3px; }
 .user-row { display:flex; align-items:center; gap:11px; padding:13px 0; border-top:1px solid #edf0f5; }
 .avatar { display:grid; place-items:center; width:42px; height:42px; flex:none; border-radius:13px; background:#f1f6ff; font-size:22px; }
 .user-info { flex:1; gap:2px; }.user-info strong { color:#253044; font-size:15px; }.user-info em { margin-left:6px; padding:2px 5px; border-radius:6px; background:#e8f3ff; color:#1e80ff; font-size:9px; font-style:normal; }
 .invite-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-top:1px solid #edf0f5; }.invite-row>div:first-child { flex:1; }.invite-row button { padding:4px 0 4px 9px; border:0; background:transparent; color:#2580df; white-space:nowrap; }.invite-row button.danger-action { color:#ee5d5d; }.invite-row.historical { opacity:.72; }
 .row-actions { display:flex; flex-direction:row !important; align-items:center; flex:none; }.history-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; padding:11px 0 2px; border:0; border-top:1px solid #edf0f5; background:transparent; color:#7c899c; font-size:13px; }
-.invite-table-wrap { margin-top:10px; overflow-x:auto; border:1px solid #e8edf4; border-radius:12px; }.invite-table { min-width:460px; }.invite-table-row { display:grid; grid-template-columns:58px 54px minmax(74px,1fr) minmax(88px,1.2fr) 58px 42px; align-items:center; min-height:43px; border-top:1px solid #edf1f6; color:#647187; font-size:11px; }.invite-table-row:first-child { border-top:0; }.invite-table-row>* { min-width:0; padding:7px 5px; overflow:hidden; text-align:left; text-overflow:ellipsis; white-space:nowrap; }.invite-table-row strong { color:#28364b; font-size:12px; }.invite-table-row em { font-style:normal; }.invite-table-row button { border:0; background:transparent; color:#2580df; font-size:11px; }.invite-table-row button.danger-action { color:#ee5d5d; }.invite-table-head { min-height:34px; background:#f6f8fb; color:#8a96a8; font-weight:600; }.invite-table-row.historical { opacity:.7; }.invite-table-row .status-joined { color:#24a36a; }.invite-table-row .status-waiting { color:#e79a22; }.invite-table-row .status-revoked,.invite-table-row .status-expired { color:#9aa4b2; }
+.invite-table-wrap { margin-top:10px; overflow:hidden; border:1px solid #e8edf4; border-radius:12px; }.invite-table { width:100%; }.invite-table-row { display:grid; grid-template-columns:38px 38px minmax(46px,.9fr) minmax(58px,1.15fr) 42px 30px; align-items:center; min-height:41px; border-top:1px solid #edf1f6; color:#647187; font-size:10px; }.invite-table-row:first-child { border-top:0; }.invite-table-row>* { min-width:0; padding:6px 2px; overflow:hidden; text-align:left; text-overflow:ellipsis; white-space:nowrap; }.invite-table-row strong { color:#28364b; font-size:11px; }.invite-table-row em { font-style:normal; }.invite-table-row button { padding:6px 0; border:0; background:transparent; color:#2580df; font-size:10px; }.invite-table-row button.danger-action { color:#ee5d5d; }.invite-table-head { min-height:32px; background:#f6f8fb; color:#8a96a8; font-weight:600; }.invite-table-row.historical { opacity:.7; }.invite-table-row .status-joined { color:#24a36a; }.invite-table-row .status-waiting { color:#e79a22; }.invite-table-row .status-revoked,.invite-table-row .status-expired { color:#9aa4b2; }
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
