@@ -104,6 +104,12 @@ export function requiresAuthentication(path = '', method = 'GET') {
   return true;
 }
 
+export const DEFAULT_HOUSEHOLD_ID = 'default-household';
+
+export function canWriteHouseholdData(role = '') {
+  return role === 'owner' || role === 'admin';
+}
+
 function safeEqualStrings(left = '', right = '') {
   const a = new TextEncoder().encode(String(left));
   const b = new TextEncoder().encode(String(right));
@@ -1188,7 +1194,12 @@ export async function onRequest(context) {
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
       if (!token) return null;
       const { results } = await env.DB.prepare(
-        'SELECT t.* FROM auth_tokens t WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?)'
+        `SELECT t.*, u.id AS user_id, u.username, u.display_name, u.household_id, u.role, u.status AS user_status,
+                h.name AS household_name
+         FROM auth_tokens t
+         JOIN users u ON u.id = t.user_id
+         JOIN households h ON h.id = u.household_id
+         WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?) AND u.status = 'active'`
       ).bind(token, Math.floor(Date.now() / 1000)).all();
       return results.length > 0 ? results[0] : null;
     }
@@ -1364,6 +1375,7 @@ export async function onRequest(context) {
 
     async function captureCurrentProfitSnapshot() {
       await ensureAdvisorySchemaOnce();
+      const snapshotHouseholdId = householdId || DEFAULT_HOUSEHOLD_ID;
       const { results: positionRows } = await env.DB.prepare(`
         SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id,
                m.name as member_name, m.emoji as member_emoji,
@@ -1376,7 +1388,8 @@ export async function onRequest(context) {
         LEFT JOIN members m ON a.member_id = m.id
         LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
         LEFT JOIN fund_sync_status fs ON p.fund_code = fs.fund_code
-      `).all();
+        WHERE a.household_id = ?
+      `).bind(snapshotHouseholdId).all();
       const positions = (positionRows || []).map(serializePositionRow);
       const { results: advisoryProducts } = await env.DB.prepare(`
         SELECT p.id, p.product_name, p.account_id,
@@ -1392,7 +1405,8 @@ export async function onRequest(context) {
           ORDER BY s2.snapshot_date DESC, s2.updated_at DESC, s2.created_at DESC
           LIMIT 1
         )
-      `).all();
+        WHERE p.household_id = ?
+      `).bind(snapshotHouseholdId).all();
       const capturedAt = Date.now();
       const snapshot = buildServerProfitSnapshot({
         positions,
@@ -1401,14 +1415,14 @@ export async function onRequest(context) {
         fallbackDate: getChinaDateString(new Date(capturedAt)),
       });
       await env.DB.prepare(`
-        INSERT INTO profit_snapshots (snapshot_date, snapshot_json, captured_at, created_at, updated_at)
-        VALUES (?, ?, ?, unixepoch(), unixepoch())
-        ON CONFLICT(snapshot_date) DO UPDATE SET
+        INSERT INTO household_profit_snapshots (snapshot_date, snapshot_json, captured_at, household_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(household_id, snapshot_date) DO UPDATE SET
           snapshot_json = excluded.snapshot_json,
           captured_at = excluded.captured_at,
           updated_at = unixepoch()
-        WHERE excluded.captured_at > profit_snapshots.captured_at
-      `).bind(snapshot.date, JSON.stringify(snapshot), snapshot.captured_at).run();
+        WHERE excluded.captured_at > household_profit_snapshots.captured_at
+      `).bind(snapshot.date, JSON.stringify(snapshot), snapshot.captured_at, snapshotHouseholdId).run();
       return snapshot;
     }
 
@@ -1563,21 +1577,21 @@ export async function onRequest(context) {
         env.DB.prepare(`
           SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
-          WHERE a.status != 'archived'
+          WHERE a.status != 'archived' AND a.household_id = ?
           ORDER BY a.updated_at DESC, a.created_at DESC
-        `).all(),
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT r.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_receivables r LEFT JOIN members m ON r.member_id = m.id
-          WHERE r.status != 'settled'
+          WHERE r.status != 'settled' AND r.household_id = ?
           ORDER BY CASE WHEN r.due_date IS NULL OR r.due_date = '' THEN 1 ELSE 0 END, r.due_date, r.updated_at DESC
-        `).all(),
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT l.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_liabilities l LEFT JOIN members m ON l.member_id = m.id
-          WHERE l.status != 'settled'
+          WHERE l.status != 'settled' AND l.household_id = ?
           ORDER BY l.updated_at DESC, l.created_at DESC
-        `).all(),
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT COALESCE(SUM(
             CASE
@@ -1585,9 +1599,11 @@ export async function onRequest(context) {
               ELSE COALESCE(p.cost, p.amount, 0)
             END
           ), 0) AS fund_value
-          FROM positions p LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
-          WHERE COALESCE(p.quantity, 0) > 0
-        `).all(),
+          FROM positions p
+          JOIN accounts a ON p.account_id = a.id
+          LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
+          WHERE COALESCE(p.quantity, 0) > 0 AND a.household_id = ?
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT p.id, p.product_name, p.account_id, p.status, p.remark, p.include_in_investable_assets,
                  a.name AS account_name, a.channel AS account_channel,
@@ -1605,9 +1621,9 @@ export async function onRequest(context) {
             ORDER BY s2.snapshot_date DESC, s2.updated_at DESC, s2.created_at DESC
             LIMIT 1
           )
-          WHERE COALESCE(p.status, '正常') != '已删除'
+          WHERE COALESCE(p.status, '正常') != '已删除' AND p.household_id = ?
           ORDER BY COALESCE(s.total_amount, 0) DESC, p.created_at DESC
-        `).all(),
+        `).bind(householdId).all(),
       ]);
       const assets = assetQuery.results || [];
       const receivables = receivableQuery.results || [];
@@ -1636,17 +1652,17 @@ export async function onRequest(context) {
     async function resolveFamilyMemberId(value) {
       const memberId = normalizeFamilyMemberId(value);
       if (!memberId) return null;
-      const { results } = await env.DB.prepare('SELECT id FROM members WHERE id = ? LIMIT 1').bind(memberId).all();
+      const { results } = await env.DB.prepare('SELECT id FROM members WHERE id = ? AND household_id = ? LIMIT 1').bind(memberId, householdId).all();
       return results.length ? memberId : null;
     }
 
     async function captureFamilySnapshot(snapshotDate = getChinaDateString(new Date())) {
       const data = await getFamilyFinanceData();
       await env.DB.prepare(`
-        INSERT INTO family_snapshots (snapshot_date, summary_json, created_at, updated_at)
-        VALUES (?, ?, unixepoch(), unixepoch())
-        ON CONFLICT(snapshot_date) DO UPDATE SET summary_json = excluded.summary_json, updated_at = unixepoch()
-      `).bind(normalizeFamilyDate(snapshotDate), JSON.stringify(data.summary)).run();
+        INSERT INTO household_family_snapshots (snapshot_date, summary_json, household_id, created_at, updated_at)
+        VALUES (?, ?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(household_id, snapshot_date) DO UPDATE SET summary_json = excluded.summary_json, updated_at = unixepoch()
+      `).bind(normalizeFamilyDate(snapshotDate), JSON.stringify(data.summary), householdId).run();
       return data.summary;
     }
 
@@ -1659,7 +1675,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-02-family-finance-v1';
+          const runtimeSchemaVersion = '2026-08-04-household-isolation-v1';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1692,6 +1708,28 @@ export async function onRequest(context) {
               )
             `).run();
           }
+
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS households (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              owner_user_id TEXT,
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await ensureColumn('users', 'display_name', "display_name TEXT DEFAULT ''");
+          await ensureColumn('users', 'household_id', 'household_id TEXT');
+          await ensureColumn('users', 'role', "role TEXT NOT NULL DEFAULT 'owner'");
+          await ensureColumn('users', 'status', "status TEXT NOT NULL DEFAULT 'active'");
+          await ensureColumn('users', 'updated_at', 'updated_at INTEGER');
+          await ensureColumn('auth_tokens', 'user_id', 'user_id TEXT');
+
+          const householdTables = [
+            'members', 'accounts', 'family_assets', 'family_receivables', 'family_liabilities',
+            'advisory_products', 'allocation_profiles', 'profit_snapshots', 'family_snapshots', 'events',
+          ];
 
           await ensureMembersSchema();
           await ensureLedgerSchemas();
@@ -1777,6 +1815,65 @@ export async function onRequest(context) {
               updated_at INTEGER DEFAULT (unixepoch())
             )
           `).run();
+          for (const tableName of householdTables) {
+            await ensureColumn(tableName, 'household_id', 'household_id TEXT');
+          }
+
+          const { results: existingUsers } = await env.DB.prepare('SELECT id, username FROM users ORDER BY created_at ASC LIMIT 1').all();
+          if (existingUsers.length > 0) {
+            const legacyUser = existingUsers[0];
+            await env.DB.prepare(
+              `INSERT OR IGNORE INTO households (id, name, owner_user_id) VALUES (?, '我的家庭', ?)`
+            ).bind(DEFAULT_HOUSEHOLD_ID, legacyUser.id).run();
+            await env.DB.prepare(
+              `UPDATE users SET household_id = COALESCE(household_id, ?), role = COALESCE(NULLIF(role, ''), 'owner'),
+                      display_name = COALESCE(NULLIF(display_name, ''), username), status = COALESCE(NULLIF(status, ''), 'active')`
+            ).bind(DEFAULT_HOUSEHOLD_ID).run();
+            await env.DB.prepare('UPDATE auth_tokens SET user_id = COALESCE(user_id, ?)').bind(legacyUser.id).run();
+            for (const tableName of householdTables) {
+              await env.DB.prepare(`UPDATE ${tableName} SET household_id = COALESCE(household_id, ?)`).bind(DEFAULT_HOUSEHOLD_ID).run();
+            }
+          }
+
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS household_profit_snapshots (
+              household_id TEXT NOT NULL,
+              snapshot_date TEXT NOT NULL,
+              snapshot_json TEXT NOT NULL,
+              captured_at INTEGER NOT NULL,
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch()),
+              PRIMARY KEY (household_id, snapshot_date)
+            )
+          `).run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS household_family_snapshots (
+              household_id TEXT NOT NULL,
+              snapshot_date TEXT NOT NULL,
+              summary_json TEXT NOT NULL,
+              created_at INTEGER DEFAULT (unixepoch()),
+              updated_at INTEGER DEFAULT (unixepoch()),
+              PRIMARY KEY (household_id, snapshot_date)
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT OR IGNORE INTO household_profit_snapshots
+              (household_id, snapshot_date, snapshot_json, captured_at, created_at, updated_at)
+            SELECT COALESCE(household_id, ?), snapshot_date, snapshot_json, captured_at, created_at, updated_at
+            FROM profit_snapshots
+          `).bind(DEFAULT_HOUSEHOLD_ID).run();
+          await env.DB.prepare(`
+            INSERT OR IGNORE INTO household_family_snapshots
+              (household_id, snapshot_date, summary_json, created_at, updated_at)
+            SELECT COALESCE(household_id, ?), snapshot_date, summary_json, created_at, updated_at
+            FROM family_snapshots
+          `).bind(DEFAULT_HOUSEHOLD_ID).run();
+
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_users_household ON users(household_id, status)').run();
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id, expires_at)').run();
+          for (const tableName of householdTables) {
+            await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_${tableName}_household ON ${tableName}(household_id)`).run();
+          }
           await env.DB.prepare(`
             INSERT INTO app_meta (meta_key, meta_value, updated_at)
             VALUES ('runtime_schema_version', ?, unixepoch())
@@ -1839,18 +1936,18 @@ export async function onRequest(context) {
           await env.DB.prepare(`
             INSERT OR IGNORE INTO events (
               id, event_type, status, event_time, title, description, fund_code, fund_name,
-              source_type, source_id, detail_json
-            ) VALUES (?, 'nav_update', 'pending', unixepoch(), ?, ?, ?, ?, 'fund_nav', ?, ?)
+              source_type, source_id, detail_json, household_id
+            ) VALUES (?, 'nav_update', 'pending', unixepoch(), ?, ?, ?, ?, 'fund_nav', ?, ?, ?)
           `).bind(
             generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
             `最新净值仍停留在 ${fund.current_jzrq || '未知日期'}，可能影响今日收益统计。`,
-            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${fund.expected_jzrq}`, detail,
+            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${fund.expected_jzrq}`, detail, DEFAULT_HOUSEHOLD_ID,
           ).run();
         }
       }
 
       const { results: trades } = await env.DB.prepare(`
-        SELECT t.*, a.name AS account_name
+        SELECT t.*, a.name AS account_name, a.household_id
         FROM trades t LEFT JOIN accounts a ON a.id = t.account_id
         WHERE COALESCE(t.source_type, '') != 'dividend_event'
         ORDER BY t.created_at ASC
@@ -1874,11 +1971,12 @@ export async function onRequest(context) {
           INSERT OR IGNORE INTO events (
             id, event_type, status, event_time, title, description, fund_code, fund_name,
             account_id, account_name, source_type, source_id, detail_json
-          ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'trade', ?, ?)
+            , household_id
+          ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'trade', ?, ?, ?)
         `).bind(
           generateId(), eventType, eventTime, title, description, trade.fund_code,
           trade.fund_name || '', trade.account_id, trade.account_name || '', trade.id,
-          JSON.stringify({ trade_type: tradeType, quantity, amount, trade_date: trade.trade_date, note: trade.note || '' }),
+          JSON.stringify({ trade_type: tradeType, quantity, amount, trade_date: trade.trade_date, note: trade.note || '' }), trade.household_id || DEFAULT_HOUSEHOLD_ID,
         ).run();
       }
     }
@@ -1916,14 +2014,15 @@ export async function onRequest(context) {
                 await env.DB.prepare(`
                   INSERT OR IGNORE INTO events (
                     id, event_type, status, event_time, title, description, fund_code, fund_name,
-                    source_type, source_id, detail_json
-                  ) VALUES (?, 'dividend', 'pending', ?, ?, ?, ?, ?, 'dividend_announcement', ?, ?)
+                    source_type, source_id, detail_json, household_id
+                  ) VALUES (?, 'dividend', 'pending', ?, ?, ?, ?, ?, 'dividend_announcement', ?, ?, ?)
                 `).bind(
                   generateId(), eventTime, `${position.fund_name || position.fund_code}即将分红`,
                   `每份派现金 ${dividend.dividend_per_share.toFixed(4)} 元，预计分红 ${estimatedAmount.toFixed(2)} 元。`,
                   position.fund_code, position.fund_name || '',
                   `${position.fund_code}:${dividend.record_date}:${dividend.dividend_per_share}`,
                   JSON.stringify({ ...dividend, estimated_amount: estimatedAmount, shares: Number(position.quantity || 0) }),
+                  DEFAULT_HOUSEHOLD_ID,
                 ).run();
               }
             } catch (error) {
@@ -2174,8 +2273,8 @@ export async function onRequest(context) {
 
     // 检查是否已设置过管理员
     if (path === '/api/auth/status' && method === 'GET') {
-      const { results } = await env.DB.prepare('SELECT id, username, created_at FROM users LIMIT 1').all();
-      return jsonResponse({ code: 0, data: { configured: results.length > 0, username: results.length > 0 ? results[0].username : null } });
+      const { results } = await env.DB.prepare('SELECT id FROM users LIMIT 1').all();
+      return jsonResponse({ code: 0, data: { configured: results.length > 0 } });
     }
 
     // 注册管理员（首次设置）
@@ -2197,11 +2296,16 @@ export async function onRequest(context) {
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       const passwordHash = `${salt}$${hashHex}`;
       const id = generateId();
-      await env.DB.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').bind(id, username, passwordHash).run();
+      const householdId = generateId();
+      await env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, '我的家庭', id).run();
+      await env.DB.prepare(
+        `INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'owner', 'active', unixepoch())`
+      ).bind(id, username, passwordHash, username, householdId).run();
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
       const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
-      await env.DB.prepare('INSERT INTO auth_tokens (id, token, expires_at) VALUES (?, ?, ?)').bind(tokenId, token, expiresAt).run();
+      await env.DB.prepare('INSERT INTO auth_tokens (id, token, user_id, expires_at) VALUES (?, ?, ?, ?)').bind(tokenId, token, id, expiresAt).run();
       return jsonResponse({ code: 0, data: { token, username, expires_at: expiresAt } });
     }
 
@@ -2232,7 +2336,7 @@ export async function onRequest(context) {
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
       const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
-      await env.DB.prepare('INSERT INTO auth_tokens (id, token, expires_at) VALUES (?, ?, ?)').bind(tokenId, token, expiresAt).run();
+      await env.DB.prepare('INSERT INTO auth_tokens (id, token, user_id, expires_at) VALUES (?, ?, ?, ?)').bind(tokenId, token, user.id, expiresAt).run();
       return jsonResponse({ code: 0, data: { token, username: user.username, expires_at: expiresAt } });
     }
 
@@ -2248,11 +2352,37 @@ export async function onRequest(context) {
 
     // 除健康检查和认证入口外，所有业务接口都需要认证。
     // 部分 GET 路由会触发行情同步或返回敏感投资数据，不能按 HTTP 方法放行。
+    let authUser = null;
     if (requiresAuthentication(path, method) && !isCronAuthorized) {
-      const authUser = await verifyToken(context.request);
+      authUser = await verifyToken(context.request);
       if (!authUser) {
         return jsonResponse({ code: 401, message: '请先登录' }, 401);
       }
+      if (method !== 'GET' && !canWriteHouseholdData(authUser.role)) {
+        return jsonResponse({ code: 403, message: '当前家庭角色只有查看权限' }, 403);
+      }
+    }
+    const householdId = authUser?.household_id || null;
+    async function accountBelongsToHousehold(accountId) {
+      if (!accountId || !householdId) return false;
+      const { results } = await env.DB.prepare('SELECT id FROM accounts WHERE id = ? AND household_id = ? LIMIT 1').bind(accountId, householdId).all();
+      return results.length > 0;
+    }
+    async function memberBelongsToHousehold(memberId) {
+      if (!memberId) return true;
+      const { results } = await env.DB.prepare('SELECT id FROM members WHERE id = ? AND household_id = ? LIMIT 1').bind(memberId, householdId).all();
+      return results.length > 0;
+    }
+
+    if (path === '/api/auth/me' && method === 'GET') {
+      return jsonResponse({ code: 0, data: {
+        id: authUser.user_id,
+        username: authUser.username,
+        display_name: authUser.display_name || authUser.username,
+        household_id: householdId,
+        household_name: authUser.household_name,
+        role: authUser.role,
+      } });
     }
 
     // ========== 家庭财务记账 API ==========
@@ -2260,29 +2390,31 @@ export async function onRequest(context) {
     if (path === '/api/family-finance/overview' && method === 'GET') {
       const data = await getFamilyFinanceData();
       const [snapshotQuery, assetRecordQuery, receivableHistoryQuery, receivablePaymentQuery] = await Promise.all([
-        env.DB.prepare('SELECT snapshot_date, summary_json FROM family_snapshots ORDER BY snapshot_date DESC LIMIT 24').all(),
+        env.DB.prepare('SELECT snapshot_date, summary_json FROM household_family_snapshots WHERE household_id = ? ORDER BY snapshot_date DESC LIMIT 24').bind(householdId).all(),
         env.DB.prepare(`
           SELECT r.*, a.name AS asset_name, a.category_code, m.name AS member_name, m.emoji AS member_emoji
           FROM family_asset_records r
           JOIN family_assets a ON r.asset_id = a.id
           LEFT JOIN members m ON a.member_id = m.id
-          WHERE a.status != 'archived'
+          WHERE a.status != 'archived' AND a.household_id = ?
           ORDER BY r.record_date ASC, r.created_at ASC, r.id ASC
           LIMIT 120
-        `).all(),
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT r.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_receivables r LEFT JOIN members m ON r.member_id = m.id
+          WHERE r.household_id = ?
           ORDER BY r.created_at ASC, r.id ASC
-        `).all(),
+        `).bind(householdId).all(),
         env.DB.prepare(`
           SELECT p.*, r.name AS receivable_name, r.category_code, r.member_id,
                  m.name AS member_name, m.emoji AS member_emoji
           FROM family_receivable_payments p
           JOIN family_receivables r ON p.receivable_id = r.id
           LEFT JOIN members m ON r.member_id = m.id
+          WHERE r.household_id = ?
           ORDER BY p.payment_date ASC, p.created_at ASC, p.id ASC
-        `).all(),
+        `).bind(householdId).all(),
       ]);
       const assetBalances = new Map();
       const assetTrend = (assetRecordQuery.results || []).map(record => {
@@ -2394,11 +2526,11 @@ export async function onRequest(context) {
         env.DB.prepare(`
           INSERT INTO family_assets (
             id, member_id, name, category_code, institution, current_value, valuation_date,
-            include_in_net_worth, include_in_investable_assets, remark
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            include_in_net_worth, include_in_investable_assets, remark, household_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(id, memberId, payload.name, payload.category_code,
           String(body.institution || '').trim(), payload.current_value, valuationDate,
-          Number(body.include_in_net_worth !== false), investable, String(body.remark || '').trim()),
+          Number(body.include_in_net_worth !== false), investable, String(body.remark || '').trim(), householdId),
         env.DB.prepare(`
           INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
           VALUES (?, ?, 0, ?, ?, ?, ?)
@@ -2411,7 +2543,7 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'PUT') {
       const id = path.split('/').pop();
       const body = await context.request.json();
-      const { results } = await env.DB.prepare('SELECT * FROM family_assets WHERE id = ? AND status != ?').bind(id, 'archived').all();
+      const { results } = await env.DB.prepare('SELECT * FROM family_assets WHERE id = ? AND status != ? AND household_id = ?').bind(id, 'archived', householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '资产不存在' }, 404);
       const current = results[0];
       const previousValue = normalizeFamilyMoney(current.current_value);
@@ -2434,12 +2566,12 @@ export async function onRequest(context) {
       const statements = [env.DB.prepare(`
         UPDATE family_assets SET member_id = ?, name = ?, category_code = ?, institution = ?, current_value = ?,
           valuation_date = ?, include_in_net_worth = ?, include_in_investable_assets = ?, remark = ?, updated_at = unixepoch()
-        WHERE id = ?
+        WHERE id = ? AND household_id = ?
       `).bind(memberId, payload.name, payload.category_code,
         String(body.institution ?? current.institution ?? '').trim(), payload.current_value, valuationDate,
         Number(body.include_in_net_worth ?? current.include_in_net_worth ?? 1),
         Number(body.include_in_investable_assets ?? current.include_in_investable_assets ?? 0),
-        String(body.remark ?? current.remark ?? '').trim(), id)];
+        String(body.remark ?? current.remark ?? '').trim(), id, householdId)];
       if (hasAmountChange) statements.push(env.DB.prepare(`
           INSERT INTO family_asset_records (id, asset_id, previous_value, current_value, change_value, record_date, remark)
           VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -2456,9 +2588,9 @@ export async function onRequest(context) {
         env.DB.prepare(`
           SELECT a.*, m.name AS member_name, m.emoji AS member_emoji
           FROM family_assets a LEFT JOIN members m ON a.member_id = m.id
-          WHERE a.id = ? AND a.status != 'archived'
+          WHERE a.id = ? AND a.status != 'archived' AND a.household_id = ?
           LIMIT 1
-        `).bind(id).all(),
+        `).bind(id, householdId).all(),
         env.DB.prepare(
           'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
         ).bind(id).all(),
@@ -2472,7 +2604,7 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
-      await env.DB.prepare("UPDATE family_assets SET status = 'archived', updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      await env.DB.prepare("UPDATE family_assets SET status = 'archived', updated_at = unixepoch() WHERE id = ? AND household_id = ?").bind(id, householdId).run();
       queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '资产已删除' });
     }
@@ -2480,8 +2612,9 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/family-finance\/assets\/[\w-]+\/records$/) && method === 'GET') {
       const id = path.split('/').slice(-2)[0];
       const { results } = await env.DB.prepare(
-        'SELECT * FROM family_asset_records WHERE asset_id = ? ORDER BY record_date DESC, created_at DESC'
-      ).bind(id).all();
+        `SELECT r.* FROM family_asset_records r JOIN family_assets a ON a.id = r.asset_id
+         WHERE r.asset_id = ? AND a.household_id = ? ORDER BY r.record_date DESC, r.created_at DESC`
+      ).bind(id, householdId).all();
       return jsonResponse({ code: 0, data: { records: results || [] } });
     }
 
@@ -2496,11 +2629,11 @@ export async function onRequest(context) {
       const id = generateId();
       await env.DB.prepare(`
         INSERT INTO family_receivables (id, member_id, category_code, name, debtor_name, original_amount,
-          outstanding_amount, lent_date, due_date, status, risk_level, remark)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          outstanding_amount, lent_date, due_date, status, risk_level, remark, household_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.debtor_name || '').trim(),
         amount, outstanding, body.lent_date || null, body.due_date || null, outstanding === 0 ? 'settled' : 'normal',
-        String(body.risk_level || 'normal'), String(body.remark || '').trim()).run();
+        String(body.risk_level || 'normal'), String(body.remark || '').trim(), householdId).run();
       queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
@@ -2508,7 +2641,7 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'PUT') {
       const id = path.split('/').pop();
       const body = await context.request.json();
-      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
       const current = results[0];
       const name = String(body.name ?? current.name ?? '').trim();
@@ -2522,10 +2655,10 @@ export async function onRequest(context) {
       await env.DB.prepare(`
         UPDATE family_receivables SET member_id = ?, category_code = ?, name = ?, debtor_name = ?,
           original_amount = ?, outstanding_amount = ?, due_date = ?, status = ?, updated_at = unixepoch()
-        WHERE id = ?
+        WHERE id = ? AND household_id = ?
       `).bind(normalizeFamilyMemberId(body.member_id ?? current.member_id), categoryCode, name,
         String(body.debtor_name ?? current.debtor_name ?? '').trim(), originalAmount, outstandingAmount,
-        body.due_date || null, outstandingAmount === 0 ? 'settled' : paidAmount > 0 ? 'partially_paid' : 'normal', id).run();
+        body.due_date || null, outstandingAmount === 0 ? 'settled' : paidAmount > 0 ? 'partially_paid' : 'normal', id, householdId).run();
       queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id, original_amount: originalAmount, outstanding_amount: outstandingAmount } });
     }
@@ -2534,7 +2667,7 @@ export async function onRequest(context) {
       const id = path.split('/').slice(-2)[0];
       const body = await context.request.json();
       const amount = normalizeFamilyMoney(body.amount);
-      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM family_receivables WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
       if (!Number.isFinite(amount) || amount <= 0 || amount > Number(results[0].outstanding_amount || 0)) return jsonResponse({ code: 400, message: '回款金额无效' }, 400);
       const remaining = normalizeFamilyMoney(Number(results[0].outstanding_amount) - amount);
@@ -2550,7 +2683,7 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/family-finance\/receivables\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
-      const { results } = await env.DB.prepare('SELECT outstanding_amount FROM family_receivables WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT outstanding_amount FROM family_receivables WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '应收款不存在' }, 404);
       const outstanding = normalizeFamilyMoney(results[0].outstanding_amount);
       const statements = [env.DB.prepare("UPDATE family_receivables SET status = 'settled', outstanding_amount = 0, updated_at = unixepoch() WHERE id = ?").bind(id)];
@@ -2573,11 +2706,11 @@ export async function onRequest(context) {
       const id = generateId();
       await env.DB.prepare(`
         INSERT INTO family_liabilities (id, member_id, category_code, name, creditor_name, original_amount,
-          outstanding_principal, interest_rate, monthly_payment, due_date, status, remark)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          outstanding_principal, interest_rate, monthly_payment, due_date, status, remark, household_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(id, normalizeFamilyMemberId(body.member_id), body.category_code, name, String(body.creditor_name || '').trim(),
         amount, outstanding, Number(body.interest_rate || 0), normalizeFamilyMoney(body.monthly_payment),
-        body.due_date || null, outstanding === 0 ? 'settled' : 'normal', String(body.remark || '').trim()).run();
+        body.due_date || null, outstanding === 0 ? 'settled' : 'normal', String(body.remark || '').trim(), householdId).run();
       queueFamilySnapshot();
       return jsonResponse({ code: 0, data: { id } });
     }
@@ -2586,7 +2719,7 @@ export async function onRequest(context) {
       const id = path.split('/').slice(-2)[0];
       const body = await context.request.json();
       const amount = normalizeFamilyMoney(body.amount);
-      const { results } = await env.DB.prepare('SELECT * FROM family_liabilities WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM family_liabilities WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '负债不存在' }, 404);
       if (!Number.isFinite(amount) || amount <= 0 || amount > Number(results[0].outstanding_principal || 0)) return jsonResponse({ code: 400, message: '还款金额无效' }, 400);
       const remaining = normalizeFamilyMoney(Number(results[0].outstanding_principal) - amount);
@@ -2602,7 +2735,7 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/family-finance\/liabilities\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
-      await env.DB.prepare("UPDATE family_liabilities SET status = 'settled', outstanding_principal = 0, updated_at = unixepoch() WHERE id = ?").bind(id).run();
+      await env.DB.prepare("UPDATE family_liabilities SET status = 'settled', outstanding_principal = 0, updated_at = unixepoch() WHERE id = ? AND household_id = ?").bind(id, householdId).run();
       queueFamilySnapshot();
       return jsonResponse({ code: 0, message: '负债已结清' });
     }
@@ -2618,8 +2751,8 @@ export async function onRequest(context) {
     if (path === '/api/allocation-profiles' && method === 'GET') {
       const includeDeleted = url.searchParams.get('deleted') === 'true';
       const { results } = await env.DB.prepare(
-        `SELECT profile_json, version, deleted_at FROM allocation_profiles ${includeDeleted ? 'WHERE deleted_at IS NOT NULL' : 'WHERE deleted_at IS NULL'} ORDER BY updated_at DESC, created_at DESC`
-      ).all();
+        `SELECT profile_json, version, deleted_at FROM allocation_profiles WHERE household_id = ? AND ${includeDeleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL'} ORDER BY updated_at DESC, created_at DESC`
+      ).bind(householdId).all();
       const profiles = (results || []).map(row => {
         try { return { ...JSON.parse(row.profile_json), version: Number(row.version || 1), deletedAt: row.deleted_at || null }; } catch { return null; }
       }).filter(Boolean);
@@ -2638,13 +2771,13 @@ export async function onRequest(context) {
       let prunedPositionIds = [];
       if (fundIds.length) {
         const placeholders = fundIds.map(() => '?').join(',');
-        const { results: positionRows } = await env.DB.prepare(`SELECT id FROM positions WHERE id IN (${placeholders})`).bind(...fundIds).all();
+        const { results: positionRows } = await env.DB.prepare(`SELECT p.id FROM positions p JOIN accounts a ON a.id = p.account_id WHERE a.household_id = ? AND p.id IN (${placeholders})`).bind(householdId, ...fundIds).all();
         const existingPositionIds = new Set((positionRows || []).map(row => row.id));
         const pruned = pruneAllocationProfileFunds(profile, existingPositionIds);
         cleanedProfile = pruned.profile;
         prunedPositionIds = pruned.prunedPositionIds;
       }
-      const { results: existingRows } = await env.DB.prepare('SELECT version, deleted_at FROM allocation_profiles WHERE id = ?').bind(id).all();
+      const { results: existingRows } = await env.DB.prepare('SELECT version, deleted_at FROM allocation_profiles WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       const existing = existingRows[0] || null;
       const expectedVersion = Number(body?.expectedVersion ?? profile.version ?? 0);
       if (existing && Number(existing.version || 1) !== expectedVersion) {
@@ -2655,10 +2788,11 @@ export async function onRequest(context) {
       const payload = JSON.stringify(savedProfile);
       await env.DB.batch([
         env.DB.prepare(`
-          INSERT INTO allocation_profiles (id, profile_json, version, deleted_at, created_at, updated_at)
-          VALUES (?, ?, ?, NULL, unixepoch(), unixepoch())
+          INSERT INTO allocation_profiles (id, profile_json, version, deleted_at, household_id, created_at, updated_at)
+          VALUES (?, ?, ?, NULL, ?, unixepoch(), unixepoch())
           ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, version = excluded.version, deleted_at = NULL, updated_at = unixepoch()
-        `).bind(id, payload, nextVersion),
+          WHERE allocation_profiles.household_id = excluded.household_id
+        `).bind(id, payload, nextVersion, householdId),
         env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
           .bind(generateId(), id, existing ? 'update' : 'create', nextVersion, payload),
       ]);
@@ -2668,12 +2802,12 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/allocation-profiles\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
       const expectedVersion = Number(url.searchParams.get('version') || 0);
-      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND deleted_at IS NULL').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND household_id = ? AND deleted_at IS NULL').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '配置策略不存在' }, 404);
       const currentVersion = Number(results[0].version || 1);
       if (expectedVersion !== currentVersion) return jsonResponse({ code: 409, message: '策略已在其他设备更新，请刷新后重试' }, 409);
       await env.DB.batch([
-        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = unixepoch(), version = version + 1, updated_at = unixepoch() WHERE id = ?').bind(id),
+        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = unixepoch(), version = version + 1, updated_at = unixepoch() WHERE id = ? AND household_id = ?').bind(id, householdId),
         env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
           .bind(generateId(), id, 'delete', currentVersion + 1, results[0].profile_json),
       ]);
@@ -2682,11 +2816,11 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/allocation-profiles\/[\w-]+\/restore$/) && method === 'POST') {
       const id = path.split('/')[3];
-      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND deleted_at IS NOT NULL').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT profile_json, version FROM allocation_profiles WHERE id = ? AND household_id = ? AND deleted_at IS NOT NULL').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '已删除策略不存在' }, 404);
       const nextVersion = Number(results[0].version || 1) + 1;
       await env.DB.batch([
-        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = NULL, version = ?, updated_at = unixepoch() WHERE id = ?').bind(nextVersion, id),
+        env.DB.prepare('UPDATE allocation_profiles SET deleted_at = NULL, version = ?, updated_at = unixepoch() WHERE id = ? AND household_id = ?').bind(nextVersion, id, householdId),
         env.DB.prepare('INSERT INTO allocation_profile_audit_logs (id, profile_id, action, version, profile_json) VALUES (?, ?, ?, ?, ?)')
           .bind(generateId(), id, 'restore', nextVersion, results[0].profile_json),
       ]);
@@ -2703,8 +2837,8 @@ export async function onRequest(context) {
 
     if (path === '/api/profit-snapshots' && method === 'GET') {
       const { results } = await env.DB.prepare(
-        'SELECT snapshot_json FROM profit_snapshots ORDER BY snapshot_date DESC'
-      ).all();
+        'SELECT snapshot_json FROM household_profit_snapshots WHERE household_id = ? ORDER BY snapshot_date DESC'
+      ).bind(householdId).all();
       const snapshots = (results || []).map(row => {
         try { return JSON.parse(row.snapshot_json); } catch { return null; }
       }).filter(Boolean);
@@ -2728,14 +2862,14 @@ export async function onRequest(context) {
         return jsonResponse({ code: 400, message: '收益快照数据无效' }, 400);
       }
       await env.DB.prepare(`
-        INSERT INTO profit_snapshots (snapshot_date, snapshot_json, captured_at, created_at, updated_at)
-        VALUES (?, ?, ?, unixepoch(), unixepoch())
-        ON CONFLICT(snapshot_date) DO UPDATE SET
+        INSERT INTO household_profit_snapshots (snapshot_date, snapshot_json, captured_at, household_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+        ON CONFLICT(household_id, snapshot_date) DO UPDATE SET
           snapshot_json = excluded.snapshot_json,
           captured_at = excluded.captured_at,
           updated_at = unixepoch()
-        WHERE excluded.captured_at > profit_snapshots.captured_at
-      `).bind(snapshotDate, JSON.stringify(snapshot), Number(snapshot.captured_at || Date.now())).run();
+        WHERE excluded.captured_at > household_profit_snapshots.captured_at
+      `).bind(snapshotDate, JSON.stringify(snapshot), Number(snapshot.captured_at || Date.now()), householdId).run();
       return jsonResponse({ code: 0, data: { snapshot } });
     }
 
@@ -2745,18 +2879,18 @@ export async function onRequest(context) {
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') || 5)));
       const statements = group === 'all'
         ? [
-            env.DB.prepare("SELECT * FROM events WHERE status = 'pending' ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(limit),
-            env.DB.prepare("SELECT * FROM events WHERE status IN ('processed', 'ignored') ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(limit),
+            env.DB.prepare("SELECT * FROM events WHERE household_id = ? AND status = 'pending' ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(householdId, limit),
+            env.DB.prepare("SELECT * FROM events WHERE household_id = ? AND status IN ('processed', 'ignored') ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(householdId, limit),
           ]
         : [env.DB.prepare(
-            `SELECT * FROM events WHERE ${group === 'confirmed' ? "status IN ('processed', 'ignored')" : "status = 'pending'"} ORDER BY event_time DESC, created_at DESC LIMIT ?`
-          ).bind(limit)];
+            `SELECT * FROM events WHERE household_id = ? AND ${group === 'confirmed' ? "status IN ('processed', 'ignored')" : "status = 'pending'"} ORDER BY event_time DESC, created_at DESC LIMIT ?`
+          ).bind(householdId, limit)];
       statements.push(env.DB.prepare(`
           SELECT
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
             SUM(CASE WHEN status IN ('processed', 'ignored') THEN 1 ELSE 0 END) AS confirmed
-          FROM events
-        `));
+          FROM events WHERE household_id = ?
+        `).bind(householdId));
       const queryResults = await env.DB.batch(statements);
       const parseEvents = rows => (rows || []).map(row => ({
         ...row,
@@ -2783,7 +2917,7 @@ export async function onRequest(context) {
 
     if (path.match(/^\/api\/events\/[\w-]+$/) && method === 'GET') {
       const id = path.split('/').pop();
-      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? AND household_id = ? LIMIT 1').bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
       const event = results[0];
       try { event.detail = JSON.parse(event.detail_json || '{}'); } catch { event.detail = {}; }
@@ -2805,7 +2939,7 @@ export async function onRequest(context) {
         return jsonResponse({ code: 400, message: '无效的事件状态' }, 400);
       }
       const note = String(body.note || '').trim();
-      const { results: existingRows } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+      const { results: existingRows } = await env.DB.prepare('SELECT * FROM events WHERE id = ? AND household_id = ? LIMIT 1').bind(id, householdId).all();
       if (!existingRows.length) return jsonResponse({ code: 404, message: '事件不存在' }, 404);
       const existingEvent = existingRows[0];
       let bookingResult = null;
@@ -2817,9 +2951,9 @@ export async function onRequest(context) {
         }
       }
       await env.DB.prepare(`
-        UPDATE events SET status = ?, handle_note = ?, handled_at = ?, updated_at = unixepoch() WHERE id = ?
-      `).bind(status, note, status === 'pending' ? null : Math.floor(Date.now() / 1000), id).run();
-      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? LIMIT 1').bind(id).all();
+        UPDATE events SET status = ?, handle_note = ?, handled_at = ?, updated_at = unixepoch() WHERE id = ? AND household_id = ?
+      `).bind(status, note, status === 'pending' ? null : Math.floor(Date.now() / 1000), id, householdId).run();
+      const { results } = await env.DB.prepare('SELECT * FROM events WHERE id = ? AND household_id = ? LIMIT 1').bind(id, householdId).all();
       return jsonResponse({ code: 0, data: { ...results[0], booking_result: bookingResult } });
     }
 
@@ -2827,7 +2961,7 @@ export async function onRequest(context) {
 
     // 获取成员列表
     if (path === '/api/members' && method === 'GET') {
-      const { results } = await env.DB.prepare('SELECT * FROM members ORDER BY created_at DESC').all();
+      const { results } = await env.DB.prepare('SELECT * FROM members WHERE household_id = ? ORDER BY created_at DESC').bind(householdId).all();
       const members = results.map(r => ({
         id: r.id,
         name: r.name,
@@ -2846,8 +2980,8 @@ export async function onRequest(context) {
       const emoji = body.emoji || '👤';
 
       await env.DB.prepare(
-        'INSERT INTO members (id, name, emoji) VALUES (?, ?, ?)'
-      ).bind(id, name, emoji).run();
+        'INSERT INTO members (id, name, emoji, household_id) VALUES (?, ?, ?, ?)'
+      ).bind(id, name, emoji, householdId).run();
 
       return jsonResponse({ code: 0, data: { id, name, emoji } });
     }
@@ -2867,11 +3001,11 @@ export async function onRequest(context) {
       if (emoji !== undefined) { fields.push('emoji = ?'); values.push(emoji); }
 
       if (fields.length > 0) {
-        values.push(id);
-        await env.DB.prepare(`UPDATE members SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
+        values.push(id, householdId);
+        await env.DB.prepare(`UPDATE members SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ? AND household_id = ?`).bind(...values).run();
       }
 
-      const { results } = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM members WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Member not found' }, 404);
       }
@@ -2892,9 +3026,9 @@ export async function onRequest(context) {
         return jsonResponse({ code: 409, message: '该成员仍有家庭资产、应收款或负债，请先处理归属' }, 409);
       }
       // 先解除账户绑定
-      await env.DB.prepare('UPDATE accounts SET member_id = NULL WHERE member_id = ?').bind(id).run();
+      await env.DB.prepare('UPDATE accounts SET member_id = NULL WHERE member_id = ? AND household_id = ?').bind(id, householdId).run();
       // 删除成员
-      await env.DB.prepare('DELETE FROM members WHERE id = ?').bind(id).run();
+      await env.DB.prepare('DELETE FROM members WHERE id = ? AND household_id = ?').bind(id, householdId).run();
       return jsonResponse({ code: 0, message: 'Member deleted' });
     }
 
@@ -2903,13 +3037,13 @@ export async function onRequest(context) {
     // 获取账户列表
     if (path === '/api/accounts' && method === 'GET') {
       const memberId = url.searchParams.get('member_id');
-      let query = 'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id';
+      let query = 'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id WHERE a.household_id = ?';
       let stmt;
       if (memberId) {
-        query += ' WHERE a.member_id = ?';
-        stmt = env.DB.prepare(query + ' ORDER BY a.created_at DESC').bind(memberId);
+        query += ' AND a.member_id = ?';
+        stmt = env.DB.prepare(query + ' ORDER BY a.created_at DESC').bind(householdId, memberId);
       } else {
-        stmt = env.DB.prepare(query + ' ORDER BY a.created_at DESC');
+        stmt = env.DB.prepare(query + ' ORDER BY a.created_at DESC').bind(householdId);
       }
       const { results } = await stmt.all();
       const accounts = results.map(serializeAccountRow);
@@ -2926,10 +3060,13 @@ export async function onRequest(context) {
       const remark = body.remark || '';
       const member_id = body.member_id || null;
       const emoji = body.emoji || '';
+      if (!(await memberBelongsToHousehold(member_id))) {
+        return jsonResponse({ code: 400, message: '家庭成员不存在' }, 400);
+      }
 
       await env.DB.prepare(
-        'INSERT INTO accounts (id, name, channel, status, remark, member_id, emoji) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, name, channel, status, remark, member_id, emoji).run();
+        'INSERT INTO accounts (id, name, channel, status, remark, member_id, emoji, household_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, name, channel, status, remark, member_id, emoji, householdId).run();
 
       return jsonResponse({ code: 0, data: serializeAccountRow({
         id,
@@ -2948,8 +3085,8 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/accounts\/[\w-]+$/) && method === 'GET') {
       const id = path.split('/').pop();
       const { results } = await env.DB.prepare(
-        'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id WHERE a.id = ?'
-      ).bind(id).all();
+        'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id WHERE a.id = ? AND a.household_id = ?'
+      ).bind(id, householdId).all();
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Account not found' }, 404);
       }
@@ -2959,6 +3096,7 @@ export async function onRequest(context) {
     // 删除账户
     if (path.match(/^\/api\/accounts\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
+      if (!(await accountBelongsToHousehold(id))) return jsonResponse({ code: 404, message: 'Account not found' }, 404);
       await env.DB.prepare('DELETE FROM positions WHERE account_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM trades WHERE account_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id).run();
@@ -2975,6 +3113,8 @@ export async function onRequest(context) {
       const remark = body.remark;
       const member_id = body.member_id;
       const emoji = body.emoji;
+      if (!(await accountBelongsToHousehold(id))) return jsonResponse({ code: 404, message: 'Account not found' }, 404);
+      if (!(await memberBelongsToHousehold(member_id))) return jsonResponse({ code: 400, message: '家庭成员不存在' }, 400);
 
       const fields = [];
       const values = [];
@@ -2986,13 +3126,13 @@ export async function onRequest(context) {
       if (emoji !== undefined) { fields.push('emoji = ?'); values.push(emoji); }
 
       if (fields.length > 0) {
-        values.push(id);
-        await env.DB.prepare(`UPDATE accounts SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
+        values.push(id, householdId);
+        await env.DB.prepare(`UPDATE accounts SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ? AND household_id = ?`).bind(...values).run();
       }
 
       const { results } = await env.DB.prepare(
-        'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id WHERE a.id = ?'
-      ).bind(id).all();
+        'SELECT a.*, m.name as member_name FROM accounts a LEFT JOIN members m ON a.member_id = m.id WHERE a.id = ? AND a.household_id = ?'
+      ).bind(id, householdId).all();
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Account not found' }, 404);
       }
@@ -3019,8 +3159,8 @@ export async function onRequest(context) {
           LIMIT 1
         )
       `;
-      const conditions = [];
-      const params = [];
+      const conditions = ['p.household_id = ?'];
+      const params = [householdId];
       if (accountId && accountId !== 'all') {
         conditions.push('p.account_id = ?');
         params.push(accountId);
@@ -3075,9 +3215,11 @@ export async function onRequest(context) {
       const status = body.status || '正常';
       const include_in_investable_assets = Number(Boolean(body.include_in_investable_assets ?? true));
       const remark = body.remark || '';
+      if (account_id && !(await accountBelongsToHousehold(account_id))) return jsonResponse({ code: 404, message: '账户不存在' }, 404);
+      if (!(await memberBelongsToHousehold(member_id))) return jsonResponse({ code: 400, message: '家庭成员不存在' }, 400);
       await env.DB.prepare(
-        'INSERT INTO advisory_products (id, account_id, member_id, platform, product_name, status, include_in_investable_assets, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, account_id, member_id, platform, productName, status, include_in_investable_assets, remark).run();
+        'INSERT INTO advisory_products (id, account_id, member_id, platform, product_name, status, include_in_investable_assets, remark, household_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, account_id, member_id, platform, productName, status, include_in_investable_assets, remark, householdId).run();
       return jsonResponse({ code: 0, data: { id, product_name: productName, account_id, member_id, platform, status, include_in_investable_assets, remark } });
     }
 
@@ -3090,8 +3232,8 @@ export async function onRequest(context) {
         FROM advisory_products p
         LEFT JOIN accounts a ON p.account_id = a.id
         LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
-        WHERE p.id = ? LIMIT 1
-      `).bind(id).all();
+        WHERE p.id = ? AND p.household_id = ? LIMIT 1
+      `).bind(id, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
       const { results: snapshots } = await env.DB.prepare(`
         SELECT id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate, created_at, updated_at
@@ -3130,6 +3272,10 @@ export async function onRequest(context) {
       const status = body.status;
       const include_in_investable_assets = body.include_in_investable_assets;
       const remark = body.remark;
+      const { results: ownedProducts } = await env.DB.prepare('SELECT id FROM advisory_products WHERE id = ? AND household_id = ?').bind(id, householdId).all();
+      if (!ownedProducts.length) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
+      if (account_id && !(await accountBelongsToHousehold(account_id))) return jsonResponse({ code: 404, message: '账户不存在' }, 404);
+      if (!(await memberBelongsToHousehold(member_id))) return jsonResponse({ code: 400, message: '家庭成员不存在' }, 400);
       const fields = [];
       const values = [];
       if (product_name !== undefined) { fields.push('product_name = ?'); values.push(product_name); }
@@ -3140,10 +3286,10 @@ export async function onRequest(context) {
       if (include_in_investable_assets !== undefined) { fields.push('include_in_investable_assets = ?'); values.push(Number(Boolean(include_in_investable_assets))); }
       if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
       if (fields.length > 0) {
-        values.push(id);
-        await env.DB.prepare(`UPDATE advisory_products SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ?`).bind(...values).run();
+        values.push(id, householdId);
+        await env.DB.prepare(`UPDATE advisory_products SET ${fields.join(', ')}, updated_at = unixepoch() WHERE id = ? AND household_id = ?`).bind(...values).run();
       }
-      const { results } = await env.DB.prepare('SELECT * FROM advisory_products WHERE id = ?').bind(id).all();
+      const { results } = await env.DB.prepare('SELECT * FROM advisory_products WHERE id = ? AND household_id = ?').bind(id, householdId).all();
       if (results.length === 0) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
       return jsonResponse({ code: 0, data: results[0] });
     }
@@ -3151,8 +3297,10 @@ export async function onRequest(context) {
     if (path.match(/^\/api\/advisory-products\/[\w-]+$/) && method === 'DELETE') {
       await ensureAdvisorySchemaOnce();
       const id = path.split('/').pop();
+      const { results: ownedProducts } = await env.DB.prepare('SELECT id FROM advisory_products WHERE id = ? AND household_id = ?').bind(id, householdId).all();
+      if (!ownedProducts.length) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
       await env.DB.prepare('DELETE FROM advisory_product_snapshots WHERE product_id = ?').bind(id).run();
-      await env.DB.prepare('DELETE FROM advisory_products WHERE id = ?').bind(id).run();
+      await env.DB.prepare('DELETE FROM advisory_products WHERE id = ? AND household_id = ?').bind(id, householdId).run();
       return jsonResponse({ code: 0, message: 'Advisory product deleted' });
     }
 
@@ -3164,6 +3312,8 @@ export async function onRequest(context) {
       if (!product_id || !snapshot_date) {
         return jsonResponse({ code: 400, message: 'product_id 和 snapshot_date 必填' }, 400);
       }
+      const { results: ownedProducts } = await env.DB.prepare('SELECT id FROM advisory_products WHERE id = ? AND household_id = ?').bind(product_id, householdId).all();
+      if (!ownedProducts.length) return jsonResponse({ code: 404, message: 'Advisory product not found' }, 404);
       const total_amount = Number(body.total_amount ?? body.totalAmount ?? 0);
       const daily_profit = 0;
       const current_profit = Number(body.current_profit ?? body.currentProfit ?? 0);
@@ -3200,8 +3350,8 @@ export async function onRequest(context) {
                    LEFT JOIN members m ON a.member_id = m.id
                    LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
                    LEFT JOIN fund_sync_status fs ON p.fund_code = fs.fund_code`;
-      const conditions = [];
-      const params = [];
+      const conditions = ['a.household_id = ?'];
+      const params = [householdId];
       
       if (accountId && accountId !== 'all') {
         conditions.push('p.account_id = ?');
@@ -3240,8 +3390,8 @@ export async function onRequest(context) {
          LEFT JOIN accounts a ON p.account_id = a.id
          LEFT JOIN members m ON a.member_id = m.id
          LEFT JOIN market_snapshot s ON p.fund_code = s.fund_code
-         WHERE p.id = ?`
-      ).bind(id).all();
+         WHERE p.id = ? AND a.household_id = ?`
+      ).bind(id, householdId).all();
       if (results.length === 0) {
         return jsonResponse({ code: 404, message: 'Position not found' }, 404);
       }
@@ -3263,6 +3413,7 @@ export async function onRequest(context) {
       if (!account_id || !fund_code) {
         return jsonResponse({ code: 400, message: '账户和基金代码不能为空' }, 400);
       }
+      if (!(await accountBelongsToHousehold(account_id))) return jsonResponse({ code: 404, message: '账户不存在' }, 404);
 
       const existing = await fetchBasePositionByAccountFund(account_id, fund_code);
       if (existing) {
@@ -3288,6 +3439,7 @@ export async function onRequest(context) {
       if (!existing) {
         return jsonResponse({ code: 404, message: 'Position not found' }, 404);
       }
+      if (!(await accountBelongsToHousehold(existing.account_id))) return jsonResponse({ code: 404, message: 'Position not found' }, 404);
 
       const fund_name = body.fundName || body.fund_name;
       const shares = body.shares ?? body.quantity;
@@ -3377,6 +3529,7 @@ export async function onRequest(context) {
       if (!position) {
         return jsonResponse({ code: 404, message: 'Position not found' }, 404);
       }
+      if (!(await accountBelongsToHousehold(position.account_id))) return jsonResponse({ code: 404, message: 'Position not found' }, 404);
       await env.DB.prepare('DELETE FROM trades WHERE account_id = ? AND fund_code = ?').bind(position.account_id, position.fund_code).run();
       await env.DB.prepare('DELETE FROM positions WHERE id = ?').bind(id).run();
       return jsonResponse({ code: 0, message: 'Position deleted' });
@@ -3395,8 +3548,8 @@ export async function onRequest(context) {
         LEFT JOIN market_snapshot s ON t.fund_code = s.fund_code
         LEFT JOIN positions p ON p.account_id = t.account_id AND p.fund_code = t.fund_code
       `;
-      const conditions = [];
-      const values = [];
+      const conditions = ['a.household_id = ?'];
+      const values = [householdId];
       if (accountId) {
         conditions.push('t.account_id = ?');
         values.push(accountId);
@@ -3447,6 +3600,7 @@ export async function onRequest(context) {
       if (!accountId || !fromFundCode || !toFundCode) {
         return jsonResponse({ code: 400, message: '账户、转出基金和转入基金不能为空' }, 400);
       }
+      if (!(await accountBelongsToHousehold(accountId))) return jsonResponse({ code: 404, message: '账户不存在' }, 404);
       if (fromFundCode === toFundCode) {
         return jsonResponse({ code: 400, message: '转出基金和转入基金不能相同' }, 400);
       }
@@ -3503,6 +3657,7 @@ export async function onRequest(context) {
       if (!trade.account_id || !trade.fund_code || !trade.trade_type) {
         return jsonResponse({ code: 400, message: '账户、基金代码、交易类型不能为空' }, 400);
       }
+      if (!(await accountBelongsToHousehold(trade.account_id))) return jsonResponse({ code: 404, message: '账户不存在' }, 404);
 
       try {
         const basePosition = await ensurePositionBaseForTrade(trade);
@@ -3550,6 +3705,7 @@ export async function onRequest(context) {
       if (!trade) {
         return jsonResponse({ code: 404, message: 'Trade not found' }, 404);
       }
+      if (!(await accountBelongsToHousehold(trade.account_id))) return jsonResponse({ code: 404, message: 'Trade not found' }, 404);
       await env.DB.prepare('DELETE FROM trades WHERE id = ?').bind(id).run();
       const detail = await recomputeAndPersistPosition(trade.account_id, trade.fund_code);
       return jsonResponse({ code: 0, message: 'Trade deleted', data: { position: detail ? serializePositionRow(detail) : null } });
@@ -3589,12 +3745,12 @@ export async function onRequest(context) {
       const memberId = url.searchParams.get('member_id');
       await ensureAdvisorySchemaOnce();
 
-      const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY created_at DESC').all();
-      const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all();
-      const { results: positions } = await env.DB.prepare('SELECT * FROM positions').all();
+      const { results: members } = await env.DB.prepare('SELECT * FROM members WHERE household_id = ? ORDER BY created_at DESC').bind(householdId).all();
+      const { results: accounts } = await env.DB.prepare('SELECT * FROM accounts WHERE household_id = ? ORDER BY created_at DESC').bind(householdId).all();
+      const { results: positions } = await env.DB.prepare('SELECT p.* FROM positions p JOIN accounts a ON a.id = p.account_id WHERE a.household_id = ?').bind(householdId).all();
       const { results: snapshots } = await env.DB.prepare('SELECT * FROM market_snapshot').all();
-      const { results: advisoryProducts } = await env.DB.prepare('SELECT * FROM advisory_products').all();
-      const { results: advisorySnapshots } = await env.DB.prepare('SELECT * FROM advisory_product_snapshots').all();
+      const { results: advisoryProducts } = await env.DB.prepare('SELECT * FROM advisory_products WHERE household_id = ?').bind(householdId).all();
+      const { results: advisorySnapshots } = await env.DB.prepare('SELECT s.* FROM advisory_product_snapshots s JOIN advisory_products p ON p.id = s.product_id WHERE p.household_id = ?').bind(householdId).all();
 
       const snapshotMap = {};
       snapshots.forEach(m => {
