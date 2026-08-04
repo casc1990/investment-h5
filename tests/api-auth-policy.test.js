@@ -8,6 +8,8 @@ test('健康检查和认证入口保持公开', () => {
   assert.equal(requiresAuthentication('/api/auth/status', 'GET'), false)
   assert.equal(requiresAuthentication('/api/auth/setup', 'POST'), false)
   assert.equal(requiresAuthentication('/api/auth/login', 'POST'), false)
+  assert.equal(requiresAuthentication('/api/auth/register', 'POST'), false)
+  assert.equal(requiresAuthentication('/api/auth/invite/abc123', 'GET'), false)
   assert.equal(requiresAuthentication('/api/anything', 'OPTIONS'), false)
   assert.equal(requiresAuthentication('/', 'GET'), false)
   assert.equal(requiresAuthentication('/positions', 'GET'), false)

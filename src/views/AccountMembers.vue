@@ -4,7 +4,7 @@
       <div class="header-copy">
         <div class="header-eyebrow">资产归属管理</div>
         <div class="management-title">成员与账户</div>
-        <div class="management-subtitle">统一管理家庭成员及其名下投资账户</div>
+        <div class="management-subtitle">统一管理家庭用户、成员及其名下投资账户</div>
       </div>
       <div class="management-summary">
         <div><strong>{{ members.length }}</strong><span>成员</span></div>
@@ -22,10 +22,14 @@
         <van-icon name="contact-o" />成员
         <span>{{ members.length }}</span>
       </button>
+      <button :class="{ active: activeTab === 'users' }" role="tab" @click="switchTab('users')">
+        <van-icon name="manager-o" />用户
+      </button>
     </div>
 
     <Accounts v-if="activeTab === 'accounts'" @data-loaded="accounts = $event" />
-    <Members v-else @data-loaded="members = $event.members; accounts = $event.accounts" />
+    <Members v-else-if="activeTab === 'members'" @data-loaded="members = $event.members; accounts = $event.accounts" />
+    <HouseholdUsers v-else />
   </div>
 </template>
 
@@ -35,20 +39,21 @@ import { useRoute, useRouter } from 'vue-router'
 import apiClient, { accountApi, memberApi } from '../api'
 import Accounts from './Accounts.vue'
 import Members from './Members.vue'
+import HouseholdUsers from './HouseholdUsers.vue'
 
 const route = useRoute()
 const router = useRouter()
-const activeTab = ref(route.path === '/members' || route.query.tab === 'members' ? 'members' : 'accounts')
+const activeTab = ref(route.query.tab === 'users' ? 'users' : route.path === '/members' || route.query.tab === 'members' ? 'members' : 'accounts')
 const accounts = ref([])
 const members = ref([])
 
 const switchTab = (tab) => {
   activeTab.value = tab
-  router.replace({ path: '/accounts', query: tab === 'members' ? { tab: 'members' } : {} })
+  router.replace({ path: '/accounts', query: tab === 'accounts' ? {} : { tab } })
 }
 
 watch(() => [route.path, route.query.tab], ([path, tab]) => {
-  activeTab.value = path === '/members' || tab === 'members' ? 'members' : 'accounts'
+  activeTab.value = tab === 'users' ? 'users' : path === '/members' || tab === 'members' ? 'members' : 'accounts'
 })
 
 onMounted(async () => {
@@ -146,7 +151,7 @@ onMounted(async () => {
 
 .management-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin: 0 12px 2px;
   padding: 4px;

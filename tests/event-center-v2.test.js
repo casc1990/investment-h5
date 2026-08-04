@@ -72,7 +72,7 @@ test('红利再投事件显示新增份额且自动入账流水不会重复生�
   assert.match(homeSource, /新增分红份额/)
   assert.match(homeSource, /折算分红金额/)
   assert.match(homeSource, /isReinvestDividendEvent/)
-  assert.match(apiSource, /WHERE COALESCE\(t\.source_type, ''\) != 'dividend_event'/)
+  assert.match(apiSource, /WHERE a\.household_id = \? AND COALESCE\(t\.source_type, ''\) != 'dividend_event'/)
   assert.match(apiSource, /DELETE FROM events[\s\S]*source_type = 'dividend_event'/)
 })
 

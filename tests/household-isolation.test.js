@@ -42,3 +42,34 @@ test('家庭快照使用家庭和日期复合主键且保留旧快照迁移', ()
   assert.match(source, /INSERT OR IGNORE INTO household_family_snapshots/)
   assert.match(source, /ON CONFLICT\(household_id, snapshot_date\) DO UPDATE/)
 })
+
+test('第二阶段支持创建家庭或邀请码加入且用户只有一个家庭字段', () => {
+  assert.match(source, /path === '\/api\/auth\/register'/)
+  assert.match(source, /mode === 'join' \? 'join' : 'create'/)
+  assert.match(source, /INSERT INTO users \(id, username, password_hash, display_name, household_id, role/)
+  assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS household_users/)
+})
+
+test('邀请码只保存哈希并限制一次使用和有效期', () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS household_invites/)
+  assert.match(source, /code_hash TEXT UNIQUE NOT NULL/)
+  assert.match(source, /used_at IS NULL AND i\.revoked_at IS NULL[\s\S]+i\.expires_at > unixepoch\(\)/)
+  assert.match(source, /Number\(claim\?\.meta\?\.changes \|\| 0\) !== 1/)
+  assert.match(source, /7 \* 24 \* 3600/)
+})
+
+test('家庭所有者管理用户角色和停用会话', () => {
+  assert.match(source, /仅家庭所有者可以执行此操作/)
+  assert.match(source, /\['admin', 'viewer'\]\.includes\(nextRole\)/)
+  assert.match(source, /DELETE FROM auth_tokens WHERE user_id = \?/)
+  assert.match(source, /user\.status !== 'active'/)
+})
+
+test('定时快照和事件重建按家庭隔离执行', () => {
+  assert.match(source, /captureCurrentProfitSnapshot\(targetHouseholdId = householdId \|\| DEFAULT_HOUSEHOLD_ID\)/)
+  assert.match(source, /SELECT id FROM households WHERE status = 'active'/)
+  assert.match(source, /household_count: snapshots\.length/)
+  assert.match(source, /seedBusinessEvents\(targetHouseholdId = householdId \|\| DEFAULT_HOUSEHOLD_ID\)/)
+  assert.match(source, /WHERE a\.household_id = \? AND COALESCE\(t\.source_type/)
+  assert.match(source, /GROUP BY a\.household_id, p\.fund_code/)
+})

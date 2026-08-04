@@ -45,7 +45,10 @@ import { MAIN_TABS, resolveMainTabIndex } from './utils/navigation'
 
 const route = useRoute()
 const activeTab = ref(0)
-const isLoggedIn = computed(() => !!localStorage.getItem('auth_token'))
+const isLoggedIn = computed(() => {
+  route.path
+  return !!localStorage.getItem('auth_token')
+})
 const keepAliveInclude = KEEP_ALIVE_ROUTE_NAMES
 
 const tabs = MAIN_TABS

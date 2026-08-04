@@ -100,7 +100,8 @@ export function requiresAuthentication(path = '', method = 'GET') {
   if (!path.startsWith('/api/')) return false;
   if ((path === '/health' || path === '/api/health') && normalizedMethod === 'GET') return false;
   if (path === '/api/auth/status' && normalizedMethod === 'GET') return false;
-  if ((path === '/api/auth/setup' || path === '/api/auth/login') && normalizedMethod === 'POST') return false;
+  if ((path === '/api/auth/setup' || path === '/api/auth/login' || path === '/api/auth/register') && normalizedMethod === 'POST') return false;
+  if (/^\/api\/auth\/invite\/[A-Za-z0-9_-]+$/.test(path) && normalizedMethod === 'GET') return false;
   return true;
 }
 
@@ -1204,6 +1205,20 @@ export async function onRequest(context) {
       return results.length > 0 ? results[0] : null;
     }
 
+    async function derivePasswordHash(password, salt = crypto.randomUUID().replace(/-/g, '').substring(0, 16)) {
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+      const hashBuffer = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return `${salt}$${hashHex}`;
+    }
+
+    async function hashInviteCode(code) {
+      const bytes = new TextEncoder().encode(String(code || '').trim());
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
     async function ensureAdvisoryTables() {
       const productTableInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='advisory_products'").all();
       if (productTableInfo.results.length === 0) {
@@ -1373,9 +1388,9 @@ export async function onRequest(context) {
       };
     }
 
-    async function captureCurrentProfitSnapshot() {
+    async function captureCurrentProfitSnapshot(targetHouseholdId = householdId || DEFAULT_HOUSEHOLD_ID) {
       await ensureAdvisorySchemaOnce();
-      const snapshotHouseholdId = householdId || DEFAULT_HOUSEHOLD_ID;
+      const snapshotHouseholdId = targetHouseholdId;
       const { results: positionRows } = await env.DB.prepare(`
         SELECT p.*, a.name as account_name, a.channel as account_channel, a.member_id,
                m.name as member_name, m.emoji as member_emoji,
@@ -1675,7 +1690,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-04-household-isolation-v1';
+          const runtimeSchemaVersion = '2026-08-04-household-users-v2';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1724,6 +1739,7 @@ export async function onRequest(context) {
           await ensureColumn('users', 'role', "role TEXT NOT NULL DEFAULT 'owner'");
           await ensureColumn('users', 'status', "status TEXT NOT NULL DEFAULT 'active'");
           await ensureColumn('users', 'updated_at', 'updated_at INTEGER');
+          await ensureColumn('users', 'linked_member_id', 'linked_member_id TEXT');
           await ensureColumn('auth_tokens', 'user_id', 'user_id TEXT');
 
           const householdTables = [
@@ -1857,6 +1873,21 @@ export async function onRequest(context) {
             )
           `).run();
           await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS household_invites (
+              id TEXT PRIMARY KEY,
+              household_id TEXT NOT NULL,
+              code_hash TEXT UNIQUE NOT NULL,
+              role TEXT NOT NULL DEFAULT 'viewer',
+              created_by TEXT NOT NULL,
+              used_by TEXT,
+              expires_at INTEGER NOT NULL,
+              used_at INTEGER,
+              revoked_at INTEGER,
+              created_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_household_invites_household ON household_invites(household_id, created_at DESC)').run();
+          await env.DB.prepare(`
             INSERT OR IGNORE INTO household_profit_snapshots
               (household_id, snapshot_date, snapshot_json, captured_at, created_at, updated_at)
             SELECT COALESCE(household_id, ?), snapshot_date, snapshot_json, captured_at, created_at, updated_at
@@ -1899,25 +1930,32 @@ export async function onRequest(context) {
       return advisorySchemaInitPromise;
     }
 
-    async function seedBusinessEvents() {
+    async function seedBusinessEvents(targetHouseholdId = householdId || DEFAULT_HOUSEHOLD_ID) {
       // 分红公告自动入账生成的交易是原事件的处理结果，不应再次产生待处理事件。
       await env.DB.prepare(`
         DELETE FROM events
-        WHERE source_type = 'trade'
-          AND source_id IN (SELECT id FROM trades WHERE source_type = 'dividend_event')
-      `).run();
+        WHERE household_id = ? AND source_type = 'trade'
+          AND source_id IN (
+            SELECT t.id FROM trades t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.source_type = 'dividend_event' AND a.household_id = ?
+          )
+      `).bind(targetHouseholdId, targetHouseholdId).run();
 
       const now = new Date();
       await env.DB.prepare(`
         DELETE FROM events
-        WHERE event_type = 'nav_update' AND status = 'pending' AND source_type = 'fund_nav'
-      `).run();
+        WHERE household_id = ? AND event_type = 'nav_update' AND status = 'pending' AND source_type = 'fund_nav'
+      `).bind(targetHouseholdId).run();
       if (!isChinaTradingDay(now)) {
         // 周末和休市日不比较净值。
       } else {
-        const { results: navPositions } = await env.DB.prepare(
-          'SELECT DISTINCT fund_code, fund_name FROM positions WHERE fund_code IS NOT NULL AND fund_code != ""'
-        ).all();
+        const { results: navPositions } = await env.DB.prepare(`
+          SELECT DISTINCT p.fund_code, p.fund_name
+          FROM positions p
+          JOIN accounts a ON a.id = p.account_id
+          WHERE a.household_id = ? AND p.fund_code IS NOT NULL AND p.fund_code != ''
+        `).bind(targetHouseholdId).all();
         const { results: navSnapshots } = await env.DB.prepare(
           'SELECT fund_code, jzrq FROM market_snapshot'
         ).all();
@@ -1941,7 +1979,9 @@ export async function onRequest(context) {
           `).bind(
             generateId(), `${fund.fund_name || fund.fund_code}净值待更新`,
             `最新净值仍停留在 ${fund.current_jzrq || '未知日期'}，可能影响今日收益统计。`,
-            fund.fund_code, fund.fund_name || '', `${fund.fund_code}:${fund.expected_jzrq}`, detail, DEFAULT_HOUSEHOLD_ID,
+            fund.fund_code, fund.fund_name || '',
+            `${targetHouseholdId === DEFAULT_HOUSEHOLD_ID ? '' : `${targetHouseholdId}:`}${fund.fund_code}:${fund.expected_jzrq}`,
+            detail, targetHouseholdId,
           ).run();
         }
       }
@@ -1949,9 +1989,9 @@ export async function onRequest(context) {
       const { results: trades } = await env.DB.prepare(`
         SELECT t.*, a.name AS account_name, a.household_id
         FROM trades t LEFT JOIN accounts a ON a.id = t.account_id
-        WHERE COALESCE(t.source_type, '') != 'dividend_event'
+        WHERE a.household_id = ? AND COALESCE(t.source_type, '') != 'dividend_event'
         ORDER BY t.created_at ASC
-      `).all();
+      `).bind(targetHouseholdId).all();
       for (const trade of trades || []) {
         const tradeType = normalizeTradeType(trade.trade_type);
         const isDividend = ['现金分红', '分红再投', '红利再投'].includes(tradeType);
@@ -1991,10 +2031,11 @@ export async function onRequest(context) {
       `).bind(scanKey).run();
       if (Number(scanLock?.meta?.changes || 0) > 0) {
         const { results: positions } = await env.DB.prepare(`
-          SELECT p.fund_code, MAX(p.fund_name) AS fund_name, SUM(p.quantity) AS quantity
+          SELECT a.household_id, p.fund_code, MAX(p.fund_name) AS fund_name, SUM(p.quantity) AS quantity
           FROM positions p
+          JOIN accounts a ON a.id = p.account_id
           WHERE p.quantity > 0 AND p.fund_code IS NOT NULL AND p.fund_code != ''
-          GROUP BY p.fund_code
+          GROUP BY a.household_id, p.fund_code
         `).all();
         const headers = { 'User-Agent': 'Mozilla/5.0 (compatible; InvestmentEventCenter/1.0)' };
         for (let index = 0; index < (positions || []).length; index += 5) {
@@ -2020,9 +2061,9 @@ export async function onRequest(context) {
                   generateId(), eventTime, `${position.fund_name || position.fund_code}即将分红`,
                   `每份派现金 ${dividend.dividend_per_share.toFixed(4)} 元，预计分红 ${estimatedAmount.toFixed(2)} 元。`,
                   position.fund_code, position.fund_name || '',
-                  `${position.fund_code}:${dividend.record_date}:${dividend.dividend_per_share}`,
+                  `${position.household_id === DEFAULT_HOUSEHOLD_ID ? '' : `${position.household_id}:`}${position.fund_code}:${dividend.record_date}:${dividend.dividend_per_share}`,
                   JSON.stringify({ ...dividend, estimated_amount: estimatedAmount, shares: Number(position.quantity || 0) }),
-                  DEFAULT_HOUSEHOLD_ID,
+                  position.household_id,
                 ).run();
               }
             } catch (error) {
@@ -2322,6 +2363,9 @@ export async function onRequest(context) {
         return jsonResponse({ code: 401, message: '用户名或密码错误' }, 401);
       }
       const user = results[0];
+      if (user.status !== 'active') {
+        return jsonResponse({ code: 403, message: '该用户已被停用，请联系家庭管理员' }, 403);
+      }
       const [salt, storedHash] = (user.password_hash || '').split('$');
       if (!salt || !storedHash) {
         return jsonResponse({ code: 401, message: '用户名或密码错误' }, 401);
@@ -2338,6 +2382,90 @@ export async function onRequest(context) {
       const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
       await env.DB.prepare('INSERT INTO auth_tokens (id, token, user_id, expires_at) VALUES (?, ?, ?, ?)').bind(tokenId, token, user.id, expiresAt).run();
       return jsonResponse({ code: 0, data: { token, username: user.username, expires_at: expiresAt } });
+    }
+
+    if (path.match(/^\/api\/auth\/invite\/[A-Za-z0-9_-]+$/) && method === 'GET') {
+      const code = decodeURIComponent(path.split('/').pop());
+      const codeHash = await hashInviteCode(code);
+      const { results } = await env.DB.prepare(`
+        SELECT i.role, i.expires_at, h.name AS household_name
+        FROM household_invites i JOIN households h ON h.id = i.household_id
+        WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
+          AND i.expires_at > unixepoch() AND h.status = 'active'
+        LIMIT 1
+      `).bind(codeHash).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '邀请码无效或已过期' }, 404);
+      return jsonResponse({ code: 0, data: results[0] });
+    }
+
+    if (path === '/api/auth/register' && method === 'POST') {
+      const body = await context.request.json();
+      const mode = body.mode === 'join' ? 'join' : 'create';
+      const username = String(body.username || '').trim();
+      const displayName = String(body.display_name || body.displayName || username).trim();
+      const password = String(body.password || '');
+      if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
+      if (!displayName || displayName.length > 30) return jsonResponse({ code: 400, message: '显示名称不能为空且不能超过30位' }, 400);
+      if (password.length < 8) return jsonResponse({ code: 400, message: '密码长度至少8位' }, 400);
+      const { results: duplicateUsers } = await env.DB.prepare('SELECT id FROM users WHERE username = ? LIMIT 1').bind(username).all();
+      if (duplicateUsers.length) return jsonResponse({ code: 409, message: '用户名已被使用' }, 409);
+
+      const userId = generateId();
+      const passwordHash = await derivePasswordHash(password);
+      let householdId;
+      let householdName;
+      let role = 'owner';
+      let invite = null;
+      if (mode === 'join') {
+        const codeHash = await hashInviteCode(body.invite_code || body.inviteCode);
+        const { results } = await env.DB.prepare(`
+          SELECT i.*, h.name AS household_name FROM household_invites i
+          JOIN households h ON h.id = i.household_id
+          WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
+            AND i.expires_at > unixepoch() AND h.status = 'active'
+          LIMIT 1
+        `).bind(codeHash).all();
+        if (!results.length) return jsonResponse({ code: 400, message: '邀请码无效或已过期' }, 400);
+        invite = results[0];
+        householdId = invite.household_id;
+        householdName = invite.household_name;
+        role = ['admin', 'viewer'].includes(invite.role) ? invite.role : 'viewer';
+      } else {
+        householdName = String(body.household_name || body.householdName || '').trim();
+        if (!householdName || householdName.length > 30) return jsonResponse({ code: 400, message: '家庭名称不能为空且不能超过30位' }, 400);
+        householdId = generateId();
+      }
+
+      const token = crypto.randomUUID().replace(/-/g, '');
+      const tokenId = generateId();
+      const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+      if (invite) {
+        const claim = await env.DB.prepare(`
+          UPDATE household_invites SET used_by = ?, used_at = unixepoch()
+          WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > unixepoch()
+        `).bind(userId, invite.id).run();
+        if (Number(claim?.meta?.changes || 0) !== 1) {
+          return jsonResponse({ code: 409, message: '邀请码已被使用，请向家庭管理员获取新邀请码' }, 409);
+        }
+      }
+      const statements = [];
+      if (mode === 'create') {
+        statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
+      }
+      statements.push(env.DB.prepare(`
+        INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', unixepoch())
+      `).bind(userId, username, passwordHash, displayName, householdId, role));
+      statements.push(env.DB.prepare('INSERT INTO auth_tokens (id, token, user_id, expires_at) VALUES (?, ?, ?, ?)').bind(tokenId, token, userId, expiresAt));
+      try {
+        await env.DB.batch(statements);
+      } catch (error) {
+        if (invite) {
+          await env.DB.prepare('UPDATE household_invites SET used_by = NULL, used_at = NULL WHERE id = ? AND used_by = ?').bind(invite.id, userId).run();
+        }
+        throw error;
+      }
+      return jsonResponse({ code: 0, data: { token, username, display_name: displayName, household_id: householdId, household_name: householdName, role, expires_at: expiresAt } });
     }
 
     // 登出
@@ -2383,6 +2511,85 @@ export async function onRequest(context) {
         household_name: authUser.household_name,
         role: authUser.role,
       } });
+    }
+
+    const requireHouseholdOwner = () => authUser?.role === 'owner'
+      ? null
+      : jsonResponse({ code: 403, message: '仅家庭所有者可以执行此操作' }, 403);
+
+    if (path === '/api/household' && method === 'GET') {
+      const { results } = await env.DB.prepare('SELECT id, name, owner_user_id, status, created_at FROM households WHERE id = ? LIMIT 1').bind(householdId).all();
+      return jsonResponse({ code: 0, data: { household: results[0] || null } });
+    }
+
+    if (path === '/api/household/users' && method === 'GET') {
+      const { results } = await env.DB.prepare(`
+        SELECT u.id, u.username, u.display_name, u.role, u.status, u.linked_member_id, u.created_at,
+               m.name AS linked_member_name, m.emoji AS linked_member_emoji
+        FROM users u LEFT JOIN members m ON m.id = u.linked_member_id AND m.household_id = u.household_id
+        WHERE u.household_id = ? ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.created_at
+      `).bind(householdId).all();
+      return jsonResponse({ code: 0, data: { users: results || [] } });
+    }
+
+    if (path.match(/^\/api\/household\/users\/[\w-]+$/) && method === 'PATCH') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const targetId = path.split('/').pop();
+      const body = await context.request.json();
+      const { results } = await env.DB.prepare('SELECT id, role, status, linked_member_id FROM users WHERE id = ? AND household_id = ? LIMIT 1').bind(targetId, householdId).all();
+      if (!results.length) return jsonResponse({ code: 404, message: '家庭用户不存在' }, 404);
+      if (results[0].role === 'owner') return jsonResponse({ code: 400, message: '家庭所有者不能在这里修改' }, 400);
+      const nextRole = body.role === undefined ? results[0].role : String(body.role);
+      const nextStatus = body.status === undefined ? results[0].status : String(body.status);
+      const linkedMemberId = body.linked_member_id === undefined ? results[0].linked_member_id : (String(body.linked_member_id || '').trim() || null);
+      if (!['admin', 'viewer'].includes(nextRole)) return jsonResponse({ code: 400, message: '用户角色无效' }, 400);
+      if (!['active', 'disabled'].includes(nextStatus)) return jsonResponse({ code: 400, message: '用户状态无效' }, 400);
+      if (linkedMemberId && !(await memberBelongsToHousehold(linkedMemberId))) return jsonResponse({ code: 400, message: '关联成员不存在' }, 400);
+      await env.DB.prepare(`
+        UPDATE users SET role = ?, status = ?, linked_member_id = ?, updated_at = unixepoch()
+        WHERE id = ? AND household_id = ?
+      `).bind(nextRole, nextStatus, linkedMemberId, targetId, householdId).run();
+      if (nextStatus === 'disabled') await env.DB.prepare('DELETE FROM auth_tokens WHERE user_id = ?').bind(targetId).run();
+      return jsonResponse({ code: 0, message: nextStatus === 'disabled' ? '用户已停用' : '用户权限已更新' });
+    }
+
+    if (path === '/api/household/invites' && method === 'GET') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const { results } = await env.DB.prepare(`
+        SELECT i.id, i.role, i.expires_at, i.used_at, i.revoked_at, i.created_at,
+               creator.display_name AS created_by_name, used.display_name AS used_by_name
+        FROM household_invites i
+        LEFT JOIN users creator ON creator.id = i.created_by
+        LEFT JOIN users used ON used.id = i.used_by
+        WHERE i.household_id = ? ORDER BY i.created_at DESC LIMIT 50
+      `).bind(householdId).all();
+      return jsonResponse({ code: 0, data: { invites: results || [] } });
+    }
+
+    if (path === '/api/household/invites' && method === 'POST') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const body = await context.request.json().catch(() => ({}));
+      const role = body.role === 'admin' ? 'admin' : 'viewer';
+      const inviteCode = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+      const codeHash = await hashInviteCode(inviteCode);
+      const id = generateId();
+      const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
+      await env.DB.prepare(`
+        INSERT INTO household_invites (id, household_id, code_hash, role, created_by, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(id, householdId, codeHash, role, authUser.user_id, expiresAt).run();
+      return jsonResponse({ code: 0, data: { id, invite_code: inviteCode, role, expires_at: expiresAt } });
+    }
+
+    if (path.match(/^\/api\/household\/invites\/[\w-]+$/) && method === 'DELETE') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const id = path.split('/').pop();
+      await env.DB.prepare('UPDATE household_invites SET revoked_at = unixepoch() WHERE id = ? AND household_id = ? AND used_at IS NULL').bind(id, householdId).run();
+      return jsonResponse({ code: 0, message: '邀请码已撤销' });
     }
 
     // ========== 家庭财务记账 API ==========
@@ -2847,8 +3054,20 @@ export async function onRequest(context) {
 
     if (path === '/api/profit-snapshots/capture' && method === 'POST') {
       try {
-        const snapshot = await captureCurrentProfitSnapshot();
-        return jsonResponse({ code: 0, message: '收益快照已生成', data: { snapshot } });
+        if (isCronAuthorized) {
+          const { results: households } = await env.DB.prepare("SELECT id FROM households WHERE status = 'active' ORDER BY created_at ASC").all();
+          const snapshots = [];
+          for (const item of households || []) {
+            snapshots.push(await captureCurrentProfitSnapshot(item.id));
+          }
+          return jsonResponse({
+            code: 0,
+            message: '收益快照已生成',
+            data: { snapshot: snapshots[0] || null, snapshots, household_count: snapshots.length },
+          });
+        }
+        const snapshot = await captureCurrentProfitSnapshot(householdId);
+        return jsonResponse({ code: 0, message: '收益快照已生成', data: { snapshot, snapshots: [snapshot], household_count: 1 } });
       } catch (error) {
         return jsonResponse({ code: 500, message: error.message || '收益快照生成失败' }, 500);
       }
@@ -2911,7 +3130,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/events/reconcile' && method === 'POST') {
-      await seedBusinessEvents();
+      await seedBusinessEvents(householdId);
       return jsonResponse({ code: 0, message: '事件已更新' });
     }
 

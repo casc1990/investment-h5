@@ -83,9 +83,21 @@ apiClient.interceptors.response.use(
 
 export const authApi = {
   status: () => apiClient.get('/auth/status'),
+  me: () => apiClient.get('/auth/me'),
   login: (data) => apiClient.post('/auth/login', data),
+  register: (data) => apiClient.post('/auth/register', data),
+  inviteInfo: (code) => apiClient.get(`/auth/invite/${encodeURIComponent(code)}`),
   setup: (data) => apiClient.post('/auth/setup', data),
   logout: () => apiClient.post('/auth/logout'),
+}
+
+export const householdApi = {
+  get: () => apiClient.get('/household'),
+  users: () => apiClient.get('/household/users'),
+  updateUser: (id, data) => apiClient.patch(`/household/users/${id}`, data),
+  invites: () => apiClient.get('/household/invites'),
+  createInvite: (data) => apiClient.post('/household/invites', data),
+  revokeInvite: (id) => apiClient.delete(`/household/invites/${id}`),
 }
 
 // ============ 账户 API ============

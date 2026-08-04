@@ -39,6 +39,7 @@
       </van-form>
 
       <div v-if="error" class="error-msg">{{ error }}</div>
+      <button v-if="!isSetup" type="button" class="register-link" @click="router.push('/register')">没有账户？注册或加入家庭</button>
     </div>
   </div>
 </template>
@@ -133,6 +134,15 @@ onMounted(() => {
   width: 100%;
   max-width: 380px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.register-link {
+  display: block;
+  margin: 18px auto 0;
+  border: 0;
+  background: transparent;
+  color: #1e80ff;
+  font-size: 14px;
 }
 
 .logo {
