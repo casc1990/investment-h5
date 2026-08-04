@@ -48,9 +48,19 @@ test('家庭快照使用家庭和日期复合主键且保留旧快照迁移', ()
 test('注册用户通过白名单绑定唯一家庭', () => {
   assert.match(source, /path === '\/api\/auth\/register'/)
   assert.match(source, /FROM registration_whitelist w/)
-  assert.match(source, /const householdId = whitelist\.household_id/)
+  assert.match(source, /const householdId = generateId\(\)/)
+  assert.match(source, /const householdName = `\$\{displayName\}的家庭`/)
+  assert.match(source, /const role = 'owner'/)
+  assert.match(source, /INSERT INTO households \(id, name, owner_user_id\)/)
   assert.match(source, /INSERT INTO users \(id, username, password_hash, display_name, household_id, role/)
   assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS household_users/)
+})
+
+test('旧白名单用户会从共享家庭迁移到独立家庭', () => {
+  assert.match(source, /JOIN registration_whitelist w ON w\.used_by = u\.id/)
+  assert.match(source, /u\.household_id = w\.household_id AND u\.role != 'super_admin'/)
+  assert.match(source, /independentHouseholdName/)
+  assert.match(source, /UPDATE users SET household_id = \?, role = 'owner'/)
 })
 
 test('注册白名单按用户名唯一并在注册时原子占用', () => {

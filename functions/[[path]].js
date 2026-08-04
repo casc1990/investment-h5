@@ -1690,7 +1690,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-04-super-admin-v4';
+          const runtimeSchemaVersion = '2026-08-04-independent-user-household-v5';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1902,6 +1902,22 @@ export async function onRequest(context) {
             )
           `).run();
           await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_registration_whitelist_household ON registration_whitelist(household_id, created_at DESC)').run();
+          const { results: sharedWhitelistUsers } = await env.DB.prepare(`
+            SELECT u.id, u.username, u.display_name
+            FROM users u
+            JOIN registration_whitelist w ON w.used_by = u.id
+            WHERE u.household_id = w.household_id AND u.role != 'super_admin'
+          `).all();
+          for (const user of sharedWhitelistUsers || []) {
+            const independentHouseholdId = generateId();
+            const independentHouseholdName = `${user.display_name || user.username}的家庭`;
+            await env.DB.batch([
+              env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)')
+                .bind(independentHouseholdId, independentHouseholdName, user.id),
+              env.DB.prepare("UPDATE users SET household_id = ?, role = 'owner', updated_at = unixepoch() WHERE id = ?")
+                .bind(independentHouseholdId, user.id),
+            ]);
+          }
           await env.DB.prepare(`
             INSERT OR IGNORE INTO household_profit_snapshots
               (household_id, snapshot_date, snapshot_json, captured_at, created_at, updated_at)
@@ -2442,9 +2458,9 @@ export async function onRequest(context) {
       const whitelist = whitelistRows[0];
       const userId = generateId();
       const passwordHash = await derivePasswordHash(password);
-      const householdId = whitelist.household_id;
-      const householdName = whitelist.household_name;
-      const role = ['admin', 'viewer'].includes(whitelist.role) ? whitelist.role : 'viewer';
+      const householdId = generateId();
+      const householdName = `${displayName}的家庭`;
+      const role = 'owner';
 
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
@@ -2457,6 +2473,7 @@ export async function onRequest(context) {
         return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系超级管理员' }, 409);
       }
       const statements = [];
+      statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
       statements.push(env.DB.prepare(`
         INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'active', unixepoch())
@@ -2583,7 +2600,7 @@ export async function onRequest(context) {
       if (denied) return denied;
       const body = await context.request.json().catch(() => ({}));
       const username = String(body.username || '').trim();
-      const role = body.role === 'admin' ? 'admin' : 'viewer';
+      const role = 'owner';
       if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) {
         return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
       }

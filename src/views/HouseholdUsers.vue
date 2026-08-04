@@ -23,7 +23,7 @@
     </div>
 
     <div v-if="isSuperAdmin" class="section-card">
-      <div class="section-title"><strong>注册白名单</strong><span>只有预先登记的用户名可以注册并加入当前家庭</span></div>
+      <div class="section-title"><strong>注册白名单</strong><span>白名单用户注册后会创建自己的独立家庭</span></div>
       <div v-if="!whitelist.length" class="empty">暂无待注册用户</div>
       <div v-for="entry in whitelist" :key="entry.id" class="invite-row">
         <div><strong>@{{ entry.username }}</strong><span>{{ roleLabel(entry.role) }} · {{ entry.status === 'used' ? `已由 ${entry.used_by_name || entry.username} 注册` : '等待注册' }}</span></div>
@@ -34,12 +34,9 @@
     <van-popup v-model:show="showWhitelistEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup">
       <div class="popup-body">
         <h3>添加注册白名单</h3>
-        <p>登记用户名和权限后，对方才能使用该用户名完成注册。</p>
+        <p>登记后对方可以注册，系统会为其创建独立家庭，不会看到你的数据。</p>
         <van-field v-model="whitelistUsername" label="用户名" placeholder="4至30位字符" maxlength="30" clearable />
-        <div class="role-options">
-          <button type="button" :class="{ active: whitelistRole === 'viewer' }" @click="whitelistRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
-          <button type="button" :class="{ active: whitelistRole === 'admin' }" @click="whitelistRole = 'admin'"><strong>管理员</strong><span>可以维护财务数据</span></button>
-        </div>
+        <div class="independent-note"><van-icon name="shield-o" /><span><strong>独立家庭所有者</strong>注册后拥有自己的空白家庭空间</span></div>
         <van-button block round type="primary" :loading="saving" @click="addWhitelist">确认添加</van-button>
       </div>
     </van-popup>
@@ -71,7 +68,6 @@ const users = ref([])
 const whitelist = ref([])
 const showWhitelistEditor = ref(false)
 const showUserEditor = ref(false)
-const whitelistRole = ref('viewer')
 const whitelistUsername = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
@@ -95,11 +91,10 @@ async function addWhitelist() {
   if (!username) return showToast('请输入用户名')
   saving.value = true
   try {
-    await householdApi.addWhitelist({ username, role: whitelistRole.value })
+    await householdApi.addWhitelist({ username })
     showToast('已加入注册白名单')
     showWhitelistEditor.value = false
     whitelistUsername.value = ''
-    whitelistRole.value = 'viewer'
     await load()
   } catch (error) { showToast(error?.response?.data?.message || '添加失败') }
   finally { saving.value = false }
@@ -147,6 +142,7 @@ onMounted(() => load().catch(error => showToast(error?.response?.data?.message |
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
+.independent-note { display:flex; align-items:center; gap:9px; margin:0 0 8px; padding:13px; border-radius:13px; background:#eef7ff; color:#2580df; font-size:18px; }.independent-note span { display:flex; flex-direction:column; color:#7d8a9d; font-size:12px; }.independent-note strong { margin-bottom:2px; color:#33445d; font-size:14px; }
 .popup-body :deep(.van-field) { margin-bottom:14px; padding:13px 14px; border:1px solid #e1e7ef; border-radius:13px; background:#f8fafc; }
 :deep(.van-button) { margin-top:10px; }
 </style>

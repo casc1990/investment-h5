@@ -5,11 +5,11 @@
       <div class="brand-mark"><van-icon name="shield-o" /></div>
       <div class="eyebrow">家庭账户 · 安全注册</div>
       <h1>创建你的登录账户</h1>
-      <p class="intro">仅超级管理员预先加入白名单的用户名可以注册。注册后会自动进入对应家庭。</p>
+      <p class="intro">仅超级管理员预先加入白名单的用户名可以注册。注册后会自动创建独立家庭空间。</p>
 
       <div class="whitelist-note">
         <van-icon name="passed" />
-        <div><strong>白名单校验</strong><span>请使用超级管理员为你登记的用户名，字母大小写不敏感。</span></div>
+        <div><strong>白名单校验</strong><span>请使用超级管理员登记的用户名，你的数据与其他家庭完全隔离。</span></div>
       </div>
 
       <van-form @submit="submit">
