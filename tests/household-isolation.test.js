@@ -43,19 +43,21 @@ test('家庭快照使用家庭和日期复合主键且保留旧快照迁移', ()
   assert.match(source, /ON CONFLICT\(household_id, snapshot_date\) DO UPDATE/)
 })
 
-test('第二阶段支持创建家庭或邀请码加入且用户只有一个家庭字段', () => {
+test('注册用户通过白名单绑定唯一家庭', () => {
   assert.match(source, /path === '\/api\/auth\/register'/)
-  assert.match(source, /mode === 'join' \? 'join' : 'create'/)
+  assert.match(source, /FROM registration_whitelist w/)
+  assert.match(source, /const householdId = whitelist\.household_id/)
   assert.match(source, /INSERT INTO users \(id, username, password_hash, display_name, household_id, role/)
   assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS household_users/)
 })
 
-test('邀请码只保存哈希并限制一次使用和有效期', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS household_invites/)
-  assert.match(source, /code_hash TEXT UNIQUE NOT NULL/)
-  assert.match(source, /used_at IS NULL AND i\.revoked_at IS NULL[\s\S]+i\.expires_at > unixepoch\(\)/)
+test('注册白名单按用户名唯一并在注册时原子占用', () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS registration_whitelist/)
+  assert.match(source, /username TEXT NOT NULL COLLATE NOCASE UNIQUE/)
+  assert.match(source, /UPDATE registration_whitelist SET used_by = \?, used_at = unixepoch\(\), status = 'used'/)
   assert.match(source, /Number\(claim\?\.meta\?\.changes \|\| 0\) !== 1/)
-  assert.match(source, /7 \* 24 \* 3600/)
+  assert.match(source, /该用户名不在注册白名单中/)
+  assert.match(source, /仅可移除尚未注册的白名单用户/)
 })
 
 test('家庭所有者管理用户角色和停用会话', () => {

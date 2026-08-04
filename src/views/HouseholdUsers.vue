@@ -6,7 +6,7 @@
         <strong>{{ me.household_name || '我的家庭' }}</strong>
         <small>{{ roleLabel(me.role) }} · {{ users.length }} 位用户</small>
       </div>
-      <van-button v-if="isOwner" size="small" type="primary" round @click="showInvite = true">邀请用户</van-button>
+      <van-button v-if="isOwner" size="small" type="primary" round @click="showWhitelistEditor = true">添加白名单</van-button>
     </div>
 
     <div class="section-card">
@@ -23,25 +23,24 @@
     </div>
 
     <div v-if="isOwner" class="section-card">
-      <div class="section-title"><strong>邀请记录</strong><span>邀请码7天有效且只能使用一次</span></div>
-      <div v-if="!invites.length" class="empty">暂无邀请记录</div>
-      <div v-for="invite in invites" :key="invite.id" class="invite-row">
-        <div><strong>{{ roleLabel(invite.role) }}</strong><span>{{ inviteStatus(invite) }}</span></div>
-        <button v-if="inviteStatus(invite) === '待使用'" type="button" @click="revokeInvite(invite)">撤销</button>
+      <div class="section-title"><strong>注册白名单</strong><span>只有预先登记的用户名可以注册并加入当前家庭</span></div>
+      <div v-if="!whitelist.length" class="empty">暂无待注册用户</div>
+      <div v-for="entry in whitelist" :key="entry.id" class="invite-row">
+        <div><strong>@{{ entry.username }}</strong><span>{{ roleLabel(entry.role) }} · {{ entry.status === 'used' ? `已由 ${entry.used_by_name || entry.username} 注册` : '等待注册' }}</span></div>
+        <button v-if="entry.status === 'pending'" type="button" @click="removeWhitelist(entry)">移除</button>
       </div>
     </div>
 
-    <van-popup v-model:show="showInvite" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup">
+    <van-popup v-model:show="showWhitelistEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup">
       <div class="popup-body">
-        <h3>邀请家庭用户</h3>
-        <p>选择加入后的权限。邀请码只会完整显示这一次。</p>
+        <h3>添加注册白名单</h3>
+        <p>登记用户名和权限后，对方才能使用该用户名完成注册。</p>
+        <van-field v-model="whitelistUsername" label="用户名" placeholder="4至30位字符" maxlength="30" clearable />
         <div class="role-options">
-          <button type="button" :class="{ active: inviteRole === 'viewer' }" @click="inviteRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
-          <button type="button" :class="{ active: inviteRole === 'admin' }" @click="inviteRole = 'admin'"><strong>管理员</strong><span>可以维护财务数据</span></button>
+          <button type="button" :class="{ active: whitelistRole === 'viewer' }" @click="whitelistRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
+          <button type="button" :class="{ active: whitelistRole === 'admin' }" @click="whitelistRole = 'admin'"><strong>管理员</strong><span>可以维护财务数据</span></button>
         </div>
-        <div v-if="createdCode" class="code-box"><span>邀请码</span><strong>{{ createdCode }}</strong><button type="button" @click="copyCode">复制</button></div>
-        <van-button v-if="!createdCode" block round type="primary" :loading="saving" @click="createInvite">生成邀请码</van-button>
-        <van-button v-else block round type="primary" @click="closeInvite">完成</van-button>
+        <van-button block round type="primary" :loading="saving" @click="addWhitelist">确认添加</van-button>
       </div>
     </van-popup>
 
@@ -69,50 +68,41 @@ import { authApi, householdApi } from '../api'
 
 const me = ref({})
 const users = ref([])
-const invites = ref([])
-const showInvite = ref(false)
+const whitelist = ref([])
+const showWhitelistEditor = ref(false)
 const showUserEditor = ref(false)
-const inviteRole = ref('viewer')
-const createdCode = ref('')
+const whitelistRole = ref('viewer')
+const whitelistUsername = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
 const saving = ref(false)
 const isOwner = computed(() => me.value.role === 'owner')
 const roleLabel = role => ({ owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
 
-function inviteStatus(invite) {
-  if (invite.used_at) return `已由 ${invite.used_by_name || '家庭用户'} 使用`
-  if (invite.revoked_at) return '已撤销'
-  if (Number(invite.expires_at || 0) * 1000 <= Date.now()) return '已过期'
-  return '待使用'
-}
-
 async function load() {
   me.value = await authApi.me()
   const userData = await householdApi.users()
   users.value = userData.users || []
   if (me.value.role === 'owner') {
-    const inviteData = await householdApi.invites()
-    invites.value = inviteData.invites || []
+    const whitelistData = await householdApi.whitelist()
+    whitelist.value = whitelistData.whitelist || []
   }
 }
 
-async function createInvite() {
+async function addWhitelist() {
+  const username = whitelistUsername.value.trim()
+  if (!username) return showToast('请输入用户名')
   saving.value = true
   try {
-    const data = await householdApi.createInvite({ role: inviteRole.value })
-    createdCode.value = data.invite_code
+    await householdApi.addWhitelist({ username, role: whitelistRole.value })
+    showToast('已加入注册白名单')
+    showWhitelistEditor.value = false
+    whitelistUsername.value = ''
+    whitelistRole.value = 'viewer'
     await load()
-  } catch (error) { showToast(error?.response?.data?.message || '生成失败') }
+  } catch (error) { showToast(error?.response?.data?.message || '添加失败') }
   finally { saving.value = false }
 }
-
-async function copyCode() {
-  await navigator.clipboard.writeText(createdCode.value)
-  showToast('邀请码已复制')
-}
-
-function closeInvite() { showInvite.value = false; createdCode.value = ''; inviteRole.value = 'viewer' }
 function editUser(user) { editingUser.value = user; editRole.value = user.role; showUserEditor.value = true }
 
 async function saveUser() {
@@ -131,10 +121,10 @@ async function toggleUser() {
   finally { saving.value = false }
 }
 
-async function revokeInvite(invite) {
-  await showConfirmDialog({ title: '撤销邀请', message: '撤销后该邀请码立即失效。' })
-  await householdApi.revokeInvite(invite.id)
-  showToast('邀请码已撤销')
+async function removeWhitelist(entry) {
+  await showConfirmDialog({ title: '移出白名单', message: `移除 @${entry.username} 后，该用户名将无法注册。` })
+  await householdApi.removeWhitelist(entry.id)
+  showToast('已移出白名单')
   await load()
 }
 
@@ -156,6 +146,6 @@ onMounted(() => load().catch(error => showToast(error?.response?.data?.message |
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
-.code-box { display:grid; grid-template-columns:1fr auto; gap:6px; margin-bottom:16px; padding:14px; border-radius:13px; background:#f2f7ff; }.code-box span { grid-column:1/-1; color:#8490a3; font-size:11px; }.code-box strong { overflow-wrap:anywhere; color:#1d5f9e; }.code-box button { border:0; background:transparent; color:#1e80ff; }
+.popup-body :deep(.van-field) { margin-bottom:14px; padding:13px 14px; border:1px solid #e1e7ef; border-radius:13px; background:#f8fafc; }
 :deep(.van-button) { margin-top:10px; }
 </style>

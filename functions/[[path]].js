@@ -1690,7 +1690,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-04-household-users-v2';
+          const runtimeSchemaVersion = '2026-08-04-registration-whitelist-v3';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1887,6 +1887,20 @@ export async function onRequest(context) {
             )
           `).run();
           await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_household_invites_household ON household_invites(household_id, created_at DESC)').run();
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS registration_whitelist (
+              id TEXT PRIMARY KEY,
+              household_id TEXT NOT NULL,
+              username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+              role TEXT NOT NULL DEFAULT 'viewer',
+              status TEXT NOT NULL DEFAULT 'pending',
+              created_by TEXT NOT NULL,
+              used_by TEXT,
+              used_at INTEGER,
+              created_at INTEGER DEFAULT (unixepoch())
+            )
+          `).run();
+          await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_registration_whitelist_household ON registration_whitelist(household_id, created_at DESC)').run();
           await env.DB.prepare(`
             INSERT OR IGNORE INTO household_profit_snapshots
               (household_id, snapshot_date, snapshot_json, captured_at, created_at, updated_at)
@@ -2400,58 +2414,45 @@ export async function onRequest(context) {
 
     if (path === '/api/auth/register' && method === 'POST') {
       const body = await context.request.json();
-      const mode = body.mode === 'join' ? 'join' : 'create';
       const username = String(body.username || '').trim();
       const displayName = String(body.display_name || body.displayName || username).trim();
       const password = String(body.password || '');
       if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
       if (!displayName || displayName.length > 30) return jsonResponse({ code: 400, message: '显示名称不能为空且不能超过30位' }, 400);
       if (password.length < 8) return jsonResponse({ code: 400, message: '密码长度至少8位' }, 400);
-      const { results: duplicateUsers } = await env.DB.prepare('SELECT id FROM users WHERE username = ? LIMIT 1').bind(username).all();
+      const { results: duplicateUsers } = await env.DB.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE LIMIT 1').bind(username).all();
       if (duplicateUsers.length) return jsonResponse({ code: 409, message: '用户名已被使用' }, 409);
 
+      const { results: whitelistRows } = await env.DB.prepare(`
+        SELECT w.*, h.name AS household_name
+        FROM registration_whitelist w
+        JOIN households h ON h.id = w.household_id
+        WHERE w.username = ? COLLATE NOCASE AND w.status = 'pending' AND w.used_at IS NULL
+          AND h.status = 'active'
+        LIMIT 1
+      `).bind(username).all();
+      if (!whitelistRows.length) {
+        return jsonResponse({ code: 403, message: '该用户名不在注册白名单中，请联系家庭所有者添加' }, 403);
+      }
+
+      const whitelist = whitelistRows[0];
       const userId = generateId();
       const passwordHash = await derivePasswordHash(password);
-      let householdId;
-      let householdName;
-      let role = 'owner';
-      let invite = null;
-      if (mode === 'join') {
-        const codeHash = await hashInviteCode(body.invite_code || body.inviteCode);
-        const { results } = await env.DB.prepare(`
-          SELECT i.*, h.name AS household_name FROM household_invites i
-          JOIN households h ON h.id = i.household_id
-          WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
-            AND i.expires_at > unixepoch() AND h.status = 'active'
-          LIMIT 1
-        `).bind(codeHash).all();
-        if (!results.length) return jsonResponse({ code: 400, message: '邀请码无效或已过期' }, 400);
-        invite = results[0];
-        householdId = invite.household_id;
-        householdName = invite.household_name;
-        role = ['admin', 'viewer'].includes(invite.role) ? invite.role : 'viewer';
-      } else {
-        householdName = String(body.household_name || body.householdName || '').trim();
-        if (!householdName || householdName.length > 30) return jsonResponse({ code: 400, message: '家庭名称不能为空且不能超过30位' }, 400);
-        householdId = generateId();
-      }
+      const householdId = whitelist.household_id;
+      const householdName = whitelist.household_name;
+      const role = ['admin', 'viewer'].includes(whitelist.role) ? whitelist.role : 'viewer';
 
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
       const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
-      if (invite) {
-        const claim = await env.DB.prepare(`
-          UPDATE household_invites SET used_by = ?, used_at = unixepoch()
-          WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > unixepoch()
-        `).bind(userId, invite.id).run();
-        if (Number(claim?.meta?.changes || 0) !== 1) {
-          return jsonResponse({ code: 409, message: '邀请码已被使用，请向家庭管理员获取新邀请码' }, 409);
-        }
+      const claim = await env.DB.prepare(`
+        UPDATE registration_whitelist SET used_by = ?, used_at = unixepoch(), status = 'used'
+        WHERE id = ? AND status = 'pending' AND used_at IS NULL
+      `).bind(userId, whitelist.id).run();
+      if (Number(claim?.meta?.changes || 0) !== 1) {
+        return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系家庭所有者' }, 409);
       }
       const statements = [];
-      if (mode === 'create') {
-        statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
-      }
       statements.push(env.DB.prepare(`
         INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'active', unixepoch())
@@ -2460,9 +2461,10 @@ export async function onRequest(context) {
       try {
         await env.DB.batch(statements);
       } catch (error) {
-        if (invite) {
-          await env.DB.prepare('UPDATE household_invites SET used_by = NULL, used_at = NULL WHERE id = ? AND used_by = ?').bind(invite.id, userId).run();
-        }
+        await env.DB.prepare(`
+          UPDATE registration_whitelist SET used_by = NULL, used_at = NULL, status = 'pending'
+          WHERE id = ? AND used_by = ?
+        `).bind(whitelist.id, userId).run();
         throw error;
       }
       return jsonResponse({ code: 0, data: { token, username, display_name: displayName, household_id: householdId, household_name: householdName, role, expires_at: expiresAt } });
@@ -2552,6 +2554,54 @@ export async function onRequest(context) {
       `).bind(nextRole, nextStatus, linkedMemberId, targetId, householdId).run();
       if (nextStatus === 'disabled') await env.DB.prepare('DELETE FROM auth_tokens WHERE user_id = ?').bind(targetId).run();
       return jsonResponse({ code: 0, message: nextStatus === 'disabled' ? '用户已停用' : '用户权限已更新' });
+    }
+
+    if (path === '/api/household/registration-whitelist' && method === 'GET') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const { results } = await env.DB.prepare(`
+        SELECT w.id, w.username, w.role, w.status, w.used_at, w.created_at,
+               used.display_name AS used_by_name
+        FROM registration_whitelist w
+        LEFT JOIN users used ON used.id = w.used_by
+        WHERE w.household_id = ?
+        ORDER BY CASE w.status WHEN 'pending' THEN 0 ELSE 1 END, w.created_at DESC
+        LIMIT 100
+      `).bind(householdId).all();
+      return jsonResponse({ code: 0, data: { whitelist: results || [] } });
+    }
+
+    if (path === '/api/household/registration-whitelist' && method === 'POST') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const body = await context.request.json().catch(() => ({}));
+      const username = String(body.username || '').trim();
+      const role = body.role === 'admin' ? 'admin' : 'viewer';
+      if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) {
+        return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
+      }
+      const { results: existingUsers } = await env.DB.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE LIMIT 1').bind(username).all();
+      if (existingUsers.length) return jsonResponse({ code: 409, message: '该用户名已经注册' }, 409);
+      const { results: existingEntries } = await env.DB.prepare('SELECT id, status FROM registration_whitelist WHERE username = ? COLLATE NOCASE LIMIT 1').bind(username).all();
+      if (existingEntries.length) return jsonResponse({ code: 409, message: '该用户名已在白名单中' }, 409);
+      const id = generateId();
+      await env.DB.prepare(`
+        INSERT INTO registration_whitelist (id, household_id, username, role, created_by)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(id, householdId, username, role, authUser.user_id).run();
+      return jsonResponse({ code: 0, data: { id, username, role, status: 'pending' } });
+    }
+
+    if (path.match(/^\/api\/household\/registration-whitelist\/[\w-]+$/) && method === 'DELETE') {
+      const denied = requireHouseholdOwner();
+      if (denied) return denied;
+      const id = path.split('/').pop();
+      const result = await env.DB.prepare(`
+        DELETE FROM registration_whitelist
+        WHERE id = ? AND household_id = ? AND status = 'pending' AND used_at IS NULL
+      `).bind(id, householdId).run();
+      if (Number(result?.meta?.changes || 0) !== 1) return jsonResponse({ code: 400, message: '仅可移除尚未注册的白名单用户' }, 400);
+      return jsonResponse({ code: 0, message: '已移出注册白名单' });
     }
 
     if (path === '/api/household/invites' && method === 'GET') {
