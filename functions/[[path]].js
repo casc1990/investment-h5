@@ -292,6 +292,12 @@ export function calculateOverviewPositionDailyProfit(position = {}, snapshot = n
   });
 }
 
+export function calculateOverviewPositionDailyProfitForDate(position = {}, snapshot = null, profitDate = '') {
+  const navDate = String(snapshot?.jzrq ?? position.nav_jzrq ?? '').slice(0, 10);
+  if (!profitDate || navDate !== String(profitDate).slice(0, 10)) return 0;
+  return calculateOverviewPositionDailyProfit(position, snapshot);
+}
+
 export function parsePingzhongdataNetWorth(text = '') {
   const navMatch = String(text).match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
   if (!navMatch) return null;
@@ -3603,6 +3609,10 @@ export async function onRequest(context) {
         }
       });
 
+      const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
+      const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
+      const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;
+
       const accountStatsMap = {};
       let totalInvested = 0;
       let totalMarketValue = 0;
@@ -3639,7 +3649,7 @@ export async function onRequest(context) {
         accountStats.marketValue += marketValue;
         totalInvested += cost;
         totalMarketValue += marketValue;
-        const positionDailyProfit = calculateOverviewPositionDailyProfit(pos, snap);
+        const positionDailyProfit = calculateOverviewPositionDailyProfitForDate(pos, snap, dailyProfitDate);
         accountStats.dailyProfit += positionDailyProfit;
         totalPositionYesterdayProfit += positionDailyProfit;
       });
@@ -3709,15 +3719,12 @@ export async function onRequest(context) {
       const totalHoldingProfit = totalProfit;
       totalCumulativeProfit = totalProfit + positions.reduce((sum, position) => sum + Number(position.realized_profit || 0), 0);
       const dailyProfitSummary = summarizeOverviewDailyProfits(totalPositionYesterdayProfit, 0);
-      const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
-      const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
-      const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;
       const navFreshness = summarizeFundNavFreshness({ positions, snapshotMap, now: new Date() });
       const contributionMap = new Map();
       positions.forEach(position => {
         if (Number(position.quantity || 0) <= 0) return;
         const account = accountStatsMap[position.account_id];
-        const dailyProfit = calculateOverviewPositionDailyProfit(position, snapshotMap[position.fund_code]);
+        const dailyProfit = calculateOverviewPositionDailyProfitForDate(position, snapshotMap[position.fund_code], dailyProfitDate);
         const key = `${position.account_id}:${position.fund_code}`;
         const current = contributionMap.get(key) || {
           positionId: position.id,

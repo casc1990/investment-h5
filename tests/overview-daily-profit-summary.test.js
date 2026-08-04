@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   calculateOverviewPositionDailyProfit,
+  calculateOverviewPositionDailyProfitForDate,
   summarizeOverviewDailyProfits,
 } from '../functions/[[path]].js'
 
@@ -34,4 +35,20 @@ test('首页/统计页的持仓日收益计算应与持仓页保持一致，优�
   })
 
   assert.equal(result, 0)
+})
+
+test('顶部指定收益日期时不混入延迟更新基金的其他日期收益', () => {
+  const regular = calculateOverviewPositionDailyProfitForDate(
+    { quantity: 100 },
+    { jzrq: '2026-08-03', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
+    '2026-08-03',
+  )
+  const delayed = calculateOverviewPositionDailyProfitForDate(
+    { quantity: 100 },
+    { jzrq: '2026-07-31', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
+    '2026-08-03',
+  )
+
+  assert.equal(regular, 10)
+  assert.equal(delayed, 0)
 })
