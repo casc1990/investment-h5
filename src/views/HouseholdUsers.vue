@@ -6,7 +6,19 @@
         <strong>{{ me.household_name || '我的家庭' }}</strong>
         <small>{{ roleLabel(me.role) }} · {{ users.length }} 位用户</small>
       </div>
-      <van-button v-if="isSuperAdmin" size="small" type="primary" round @click="showWhitelistEditor = true">添加白名单</van-button>
+      <div class="header-actions">
+        <van-button v-if="isOwner" size="small" type="primary" round @click="showInviteEditor = true">邀请家人</van-button>
+        <van-button v-if="isSuperAdmin" size="small" plain type="primary" round @click="showWhitelistEditor = true">添加白名单</van-button>
+      </div>
+    </div>
+
+    <div v-if="isOwner" class="section-card">
+      <div class="section-title"><strong>家庭邀请</strong><span>最多邀请10位家人，受邀用户无需注册白名单</span></div>
+      <div v-if="!invites.length" class="empty">暂无邀请记录</div>
+      <div v-for="invite in invites" :key="invite.id" class="invite-row">
+        <div><strong>{{ roleLabel(invite.role) }}</strong><span>{{ inviteStatus(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
+        <button v-if="inviteStatus(invite) === '等待加入'" type="button" @click="revokeInvite(invite)">撤销</button>
+      </div>
     </div>
 
     <div class="section-card">
@@ -41,6 +53,24 @@
       </div>
     </van-popup>
 
+    <van-popup v-model:show="showInviteEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup" @closed="createdInviteLink = ''">
+      <div class="popup-body">
+        <h3>邀请家人加入</h3>
+        <p>邀请码7天内有效且只能使用一次。家庭最多可邀请加入10位用户。</p>
+        <template v-if="!createdInviteLink">
+          <div class="role-options">
+            <button type="button" :class="{ active: inviteRole === 'viewer' }" @click="inviteRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
+            <button type="button" :class="{ active: inviteRole === 'admin' }" @click="inviteRole = 'admin'"><strong>家庭管理员</strong><span>可以维护家庭数据</span></button>
+          </div>
+          <van-button block round type="primary" :loading="saving" @click="createInvite">生成邀请链接</van-button>
+        </template>
+        <template v-else>
+          <div class="invite-link"><van-icon name="passed" /><div><strong>邀请链接已生成</strong><span>{{ createdInviteLink }}</span></div></div>
+          <van-button block round type="primary" @click="copyInvite">复制邀请链接</van-button>
+        </template>
+      </div>
+    </van-popup>
+
     <van-popup v-model:show="showUserEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup">
       <div class="popup-body">
         <h3>管理 {{ editingUser?.display_name }}</h3>
@@ -66,12 +96,16 @@ import { authApi, householdApi } from '../api'
 const me = ref({})
 const users = ref([])
 const whitelist = ref([])
+const invites = ref([])
 const showWhitelistEditor = ref(false)
+const showInviteEditor = ref(false)
 const showUserEditor = ref(false)
 const whitelistUsername = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
 const saving = ref(false)
+const inviteRole = ref('viewer')
+const createdInviteLink = ref('')
 const isOwner = computed(() => ['super_admin', 'owner'].includes(me.value.role))
 const isSuperAdmin = computed(() => me.value.role === 'super_admin' && String(me.value.username || '').toLowerCase() === 'admin')
 const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
@@ -80,10 +114,39 @@ async function load() {
   me.value = await authApi.me()
   const userData = await householdApi.users()
   users.value = userData.users || []
+  if (isOwner.value) {
+    const inviteData = await householdApi.invites()
+    invites.value = inviteData.invites || []
+  }
   if (isSuperAdmin.value) {
     const whitelistData = await householdApi.whitelist()
     whitelist.value = whitelistData.whitelist || []
   }
+}
+
+async function createInvite() {
+  saving.value = true
+  try {
+    const data = await householdApi.createInvite({ role: inviteRole.value })
+    createdInviteLink.value = `${window.location.origin}/register?invite=${encodeURIComponent(data.invite_code)}`
+    await load()
+  } catch (error) { showToast(error?.response?.data?.message || '生成邀请失败') }
+  finally { saving.value = false }
+}
+
+async function copyInvite() {
+  try { await navigator.clipboard.writeText(createdInviteLink.value); showToast('邀请链接已复制') }
+  catch { showToast('复制失败，请长按链接复制') }
+}
+
+const inviteStatus = invite => invite.used_at ? `已由${invite.used_by_name || '家庭成员'}加入` : invite.revoked_at ? '已撤销' : Number(invite.expires_at || 0) <= Date.now() / 1000 ? '已过期' : '等待加入'
+const formatDate = value => value ? new Date(Number(value) * 1000).toLocaleDateString('zh-CN') : ''
+
+async function revokeInvite(invite) {
+  await showConfirmDialog({ title: '撤销邀请', message: '撤销后该邀请链接将立即失效。' })
+  await householdApi.revokeInvite(invite.id)
+  showToast('邀请已撤销')
+  await load()
 }
 
 async function addWhitelist() {
@@ -133,6 +196,7 @@ onMounted(() => load().catch(error => showToast(error?.response?.data?.message |
 .household-card { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .household-card div,.section-title,.user-info,.invite-row div { display:flex; flex-direction:column; min-width:0; }
 .household-card span,.section-title span,.user-info span,.user-info small,.invite-row span { color:#8a96a8; font-size:12px; }
+.header-actions { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .household-card strong { margin:3px 0; color:#172033; font-size:20px; }
 .section-title { margin-bottom:8px; }.section-title strong { color:#263247; font-size:17px; }.section-title span { margin-top:3px; }
 .user-row { display:flex; align-items:center; gap:11px; padding:13px 0; border-top:1px solid #edf0f5; }
@@ -143,6 +207,7 @@ onMounted(() => load().catch(error => showToast(error?.response?.data?.message |
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
 .independent-note { display:flex; align-items:center; gap:9px; margin:0 0 8px; padding:13px; border-radius:13px; background:#eef7ff; color:#2580df; font-size:18px; }.independent-note span { display:flex; flex-direction:column; color:#7d8a9d; font-size:12px; }.independent-note strong { margin-bottom:2px; color:#33445d; font-size:14px; }
+.invite-link { display:flex; gap:10px; padding:14px; border-radius:13px; background:#eff8f3; color:#20a66a; }.invite-link>.van-icon { margin-top:2px; font-size:20px; }.invite-link div { display:flex; flex-direction:column; min-width:0; gap:4px; }.invite-link strong { color:#304559; }.invite-link span { overflow-wrap:anywhere; color:#6f8192; font-size:12px; line-height:1.5; }
 .popup-body :deep(.van-field) { margin-bottom:14px; padding:13px 14px; border:1px solid #e1e7ef; border-radius:13px; background:#f8fafc; }
 :deep(.van-button) { margin-top:10px; }
 </style>

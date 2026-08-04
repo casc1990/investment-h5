@@ -2437,43 +2437,75 @@ export async function onRequest(context) {
       const username = String(body.username || '').trim();
       const displayName = String(body.display_name || body.displayName || username).trim();
       const password = String(body.password || '');
+      const inviteCode = String(body.invite_code || body.inviteCode || '').trim();
       if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
       if (!displayName || displayName.length > 30) return jsonResponse({ code: 400, message: '显示名称不能为空且不能超过30位' }, 400);
       if (password.length < 8) return jsonResponse({ code: 400, message: '密码长度至少8位' }, 400);
       const { results: duplicateUsers } = await env.DB.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE LIMIT 1').bind(username).all();
       if (duplicateUsers.length) return jsonResponse({ code: 409, message: '用户名已被使用' }, 409);
 
-      const { results: whitelistRows } = await env.DB.prepare(`
-        SELECT w.*, h.name AS household_name
-        FROM registration_whitelist w
-        JOIN households h ON h.id = w.household_id
-        WHERE w.username = ? COLLATE NOCASE AND w.status = 'pending' AND w.used_at IS NULL
-          AND h.status = 'active'
-        LIMIT 1
-      `).bind(username).all();
-      if (!whitelistRows.length) {
-        return jsonResponse({ code: 403, message: '该用户名不在注册白名单中，请联系超级管理员添加' }, 403);
+      let invite = null;
+      let whitelist = null;
+      if (inviteCode) {
+        const codeHash = await hashInviteCode(inviteCode);
+        const { results: inviteRows } = await env.DB.prepare(`
+          SELECT i.*, h.name AS household_name
+          FROM household_invites i
+          JOIN households h ON h.id = i.household_id
+          WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
+            AND i.expires_at > unixepoch() AND h.status = 'active'
+          LIMIT 1
+        `).bind(codeHash).all();
+        if (!inviteRows.length) return jsonResponse({ code: 400, message: '邀请码无效或已过期' }, 400);
+        invite = inviteRows[0];
+        const { results: householdUsers } = await env.DB.prepare(`
+          SELECT COUNT(*) AS total FROM users
+          WHERE household_id = ? AND role NOT IN ('owner', 'super_admin')
+        `).bind(invite.household_id).all();
+        if (Number(householdUsers[0]?.total || 0) >= 10) {
+          return jsonResponse({ code: 409, message: '该家庭邀请成员已达10人上限' }, 409);
+        }
+      } else {
+        const { results: whitelistRows } = await env.DB.prepare(`
+          SELECT w.* FROM registration_whitelist w
+          WHERE w.username = ? COLLATE NOCASE AND w.status = 'pending' AND w.used_at IS NULL
+          LIMIT 1
+        `).bind(username).all();
+        if (!whitelistRows.length) {
+          return jsonResponse({ code: 403, message: '该用户名不在注册白名单中，请联系超级管理员添加，或使用家庭邀请码注册' }, 403);
+        }
+        whitelist = whitelistRows[0];
       }
 
-      const whitelist = whitelistRows[0];
       const userId = generateId();
       const passwordHash = await derivePasswordHash(password);
-      const householdId = generateId();
-      const householdName = `${displayName}的家庭`;
-      const role = 'owner';
+      const householdId = invite ? invite.household_id : generateId();
+      const householdName = invite ? invite.household_name : `${displayName}的家庭`;
+      const role = invite ? (invite.role === 'admin' ? 'admin' : 'viewer') : 'owner';
 
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
       const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
-      const claim = await env.DB.prepare(`
-        UPDATE registration_whitelist SET used_by = ?, used_at = unixepoch(), status = 'used'
-        WHERE id = ? AND status = 'pending' AND used_at IS NULL
-      `).bind(userId, whitelist.id).run();
-      if (Number(claim?.meta?.changes || 0) !== 1) {
-        return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系超级管理员' }, 409);
+      if (invite) {
+        const claim = await env.DB.prepare(`
+          UPDATE household_invites SET used_by = ?, used_at = unixepoch()
+          WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > unixepoch()
+            AND (SELECT COUNT(*) FROM users WHERE household_id = ? AND role NOT IN ('owner', 'super_admin')) < 10
+        `).bind(userId, invite.id, householdId).run();
+        if (Number(claim?.meta?.changes || 0) !== 1) {
+          return jsonResponse({ code: 409, message: '邀请码已被使用或家庭成员已达上限' }, 409);
+        }
+      } else {
+        const claim = await env.DB.prepare(`
+          UPDATE registration_whitelist SET used_by = ?, used_at = unixepoch(), status = 'used'
+          WHERE id = ? AND status = 'pending' AND used_at IS NULL
+        `).bind(userId, whitelist.id).run();
+        if (Number(claim?.meta?.changes || 0) !== 1) {
+          return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系超级管理员' }, 409);
+        }
       }
       const statements = [];
-      statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
+      if (!invite) statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
       statements.push(env.DB.prepare(`
         INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'active', unixepoch())
@@ -2482,10 +2514,14 @@ export async function onRequest(context) {
       try {
         await env.DB.batch(statements);
       } catch (error) {
-        await env.DB.prepare(`
-          UPDATE registration_whitelist SET used_by = NULL, used_at = NULL, status = 'pending'
-          WHERE id = ? AND used_by = ?
-        `).bind(whitelist.id, userId).run();
+        if (invite) {
+          await env.DB.prepare('UPDATE household_invites SET used_by = NULL, used_at = NULL WHERE id = ? AND used_by = ?').bind(invite.id, userId).run();
+        } else {
+          await env.DB.prepare(`
+            UPDATE registration_whitelist SET used_by = NULL, used_at = NULL, status = 'pending'
+            WHERE id = ? AND used_by = ?
+          `).bind(whitelist.id, userId).run();
+        }
         throw error;
       }
       return jsonResponse({ code: 0, data: { token, username, display_name: displayName, household_id: householdId, household_name: householdName, role, expires_at: expiresAt } });
@@ -2647,6 +2683,13 @@ export async function onRequest(context) {
       if (denied) return denied;
       const body = await context.request.json().catch(() => ({}));
       const role = body.role === 'admin' ? 'admin' : 'viewer';
+      const { results: householdUsers } = await env.DB.prepare(`
+        SELECT COUNT(*) AS total FROM users
+        WHERE household_id = ? AND role NOT IN ('owner', 'super_admin')
+      `).bind(householdId).all();
+      if (Number(householdUsers[0]?.total || 0) >= 10) {
+        return jsonResponse({ code: 409, message: '该家庭邀请成员已达10人上限' }, 409);
+      }
       const inviteCode = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
       const codeHash = await hashInviteCode(inviteCode);
       const id = generateId();

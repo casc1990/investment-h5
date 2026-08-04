@@ -45,15 +45,23 @@ test('家庭快照使用家庭和日期复合主键且保留旧快照迁移', ()
   assert.match(source, /ON CONFLICT\(household_id, snapshot_date\) DO UPDATE/)
 })
 
-test('注册用户通过白名单绑定唯一家庭', () => {
+test('白名单用户创建独立家庭，受邀用户加入指定家庭', () => {
   assert.match(source, /path === '\/api\/auth\/register'/)
   assert.match(source, /FROM registration_whitelist w/)
-  assert.match(source, /const householdId = generateId\(\)/)
-  assert.match(source, /const householdName = `\$\{displayName\}的家庭`/)
-  assert.match(source, /const role = 'owner'/)
+  assert.match(source, /const householdId = invite \? invite\.household_id : generateId\(\)/)
+  assert.match(source, /const householdName = invite \? invite\.household_name : `\$\{displayName\}的家庭`/)
+  assert.match(source, /const role = invite \? \(invite\.role === 'admin' \? 'admin' : 'viewer'\) : 'owner'/)
+  assert.match(source, /UPDATE household_invites SET used_by = \?, used_at = unixepoch\(\)/)
   assert.match(source, /INSERT INTO households \(id, name, owner_user_id\)/)
   assert.match(source, /INSERT INTO users \(id, username, password_hash, display_name, household_id, role/)
   assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS household_users/)
+})
+
+test('家庭邀请不依赖白名单且限制最多10位受邀用户', () => {
+  assert.match(source, /if \(inviteCode\)/)
+  assert.match(source, /role NOT IN \('owner', 'super_admin'\)/)
+  assert.match(source, /该家庭邀请成员已达10人上限/)
+  assert.match(source, /受邀用户无需注册白名单|邀请码无效或已过期/)
 })
 
 test('旧白名单用户会从共享家庭迁移到独立家庭', () => {
