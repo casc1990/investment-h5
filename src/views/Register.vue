@@ -19,13 +19,24 @@
         </div>
         <div class="field-group">
           <label>家庭邀请码 <span>选填</span></label>
-          <van-field v-model="form.inviteCode" name="inviteCode" placeholder="加入家庭时填写" clearable @blur="checkInvite" />
-          <div v-if="inviteInfo" class="invite-result valid">将加入“{{ inviteInfo.household_name }}” · {{ roleLabel(inviteInfo.role) }}</div>
+          <van-field v-model="form.inviteCode" name="inviteCode" placeholder="加入家庭时填写" :readonly="Boolean(route.query.invite)" :clearable="!route.query.invite" @blur="checkInvite" />
+          <div v-if="inviteInfo" class="invite-result valid">将加入“{{ inviteInfo.household_name }}” · {{ roleLabel(inviteInfo.role) }} · {{ inviteMemberText }}</div>
           <div v-else-if="inviteChecked && form.inviteCode" class="invite-result invalid">邀请码无效或已过期</div>
         </div>
-        <div class="field-group">
-          <label>显示名称</label>
-          <van-field v-model="form.displayName" name="displayName" placeholder="家庭中显示的称呼" :rules="[{ required: true, message: '请输入显示名称' }]" />
+        <div v-if="inviteInfo?.member_mode === 'existing'" class="bound-member">
+          <span>{{ inviteInfo.member_emoji || '👤' }}</span><div><strong>{{ inviteInfo.member_name }}</strong><small>{{ inviteInfo.member_relation || '家庭成员' }} · 注册后自动关联</small></div>
+        </div>
+        <div v-else class="field-group">
+          <label>{{ inviteInfo ? '资产成员姓名' : '显示名称' }}</label>
+          <van-field v-model="form.displayName" name="displayName" :placeholder="inviteInfo ? '请输入成员姓名' : '家庭中显示的称呼'" :rules="[{ required: true, message: '请输入名称' }]" />
+        </div>
+        <div v-if="!inviteInfo || inviteInfo.member_mode === 'create'" class="field-group">
+          <label>头像</label>
+          <div class="emoji-picker"><button v-for="emoji in emojiList" :key="emoji" type="button" :class="{ active: form.memberEmoji === emoji }" @click="form.memberEmoji = emoji">{{ emoji }}</button></div>
+        </div>
+        <div v-if="inviteInfo?.member_mode === 'create'" class="field-group">
+          <label>家庭称谓</label>
+          <van-field v-model="form.memberRelation" name="memberRelation" placeholder="例如：配偶、父母、子女" />
         </div>
         <div class="field-group">
           <label>设置密码</label>
@@ -43,7 +54,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { authApi } from '../api'
@@ -52,10 +63,12 @@ import { clearPageCaches } from '../utils/pageCache'
 const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
-const form = ref({ username: '', displayName: '', password: '', confirmPassword: '', inviteCode: '' })
+const form = ref({ username: '', displayName: '', password: '', confirmPassword: '', inviteCode: '', memberEmoji: '👤', memberRelation: '' })
 const inviteInfo = ref(null)
 const inviteChecked = ref(false)
+const emojiList = ['👤', '🧑', '👨', '👩', '👴', '👵', '👦', '👧', '👨‍💼', '👩‍💼', '🧔', '👱‍♀️']
 const roleLabel = role => role === 'admin' ? '家庭管理员' : '只读成员'
+const inviteMemberText = computed(() => inviteInfo.value?.member_mode === 'existing' ? `关联${inviteInfo.value.member_name}` : '注册时创建成员')
 
 async function checkInvite() {
   const code = form.value.inviteCode.trim()
@@ -78,6 +91,9 @@ async function submit() {
       display_name: form.value.displayName.trim(),
       password: form.value.password,
       invite_code: form.value.inviteCode.trim() || undefined,
+      member_name: form.value.displayName.trim(),
+      member_emoji: form.value.memberEmoji,
+      member_relation: form.value.memberRelation.trim(),
     })
     clearPageCaches()
     localStorage.setItem('auth_token', data.token)
@@ -106,5 +122,6 @@ onMounted(() => {
 h1 { margin:6px 0 0; color:#172033; font-size:28px; line-height:1.25; }.intro { margin:10px 0 20px; color:#7d899c; font-size:14px; line-height:1.7; }
 .whitelist-note { display:flex; gap:11px; margin-bottom:18px; padding:14px; border:1px solid #dceafe; border-radius:15px; background:rgba(255,255,255,.78); color:#2780e5; }.whitelist-note>.van-icon { margin-top:2px; font-size:20px; }.whitelist-note div { display:flex; flex-direction:column; gap:3px; }.whitelist-note strong { color:#31415a; font-size:14px; }.whitelist-note span { color:#8793a5; font-size:12px; line-height:1.5; }
 form { padding:20px 16px; border:1px solid rgba(220,229,240,.9); border-radius:22px; background:rgba(255,255,255,.94); box-shadow:0 18px 48px rgba(52,78,117,.1); }.field-group { margin-bottom:14px; }.field-group label { display:block; margin:0 3px 7px; color:#59677c; font-size:13px; font-weight:600; }.field-group label span { color:#9aa6b6; font-size:11px; font-weight:400; }.field-group :deep(.van-field) { padding:13px 14px; border:1px solid #e2e8f0; border-radius:13px; background:#f8fafc; }.field-group :deep(.van-field:focus-within) { border-color:#6ba9f4; background:#fff; box-shadow:0 0 0 3px rgba(58,139,238,.09); }.invite-result { margin:6px 3px 0; font-size:12px; }.invite-result.valid { color:#20a66a; }.invite-result.invalid { color:#e45858; }
+.bound-member { display:flex; align-items:center; gap:12px; margin-bottom:14px; padding:14px; border:1px solid #d9e9fb; border-radius:14px; background:#f3f8ff; }.bound-member>span { font-size:28px; }.bound-member div { display:flex; flex-direction:column; }.bound-member strong { color:#29364a; }.bound-member small { margin-top:3px; color:#8290a4; }.emoji-picker { display:flex; flex-wrap:wrap; gap:8px; }.emoji-picker button { display:grid; place-items:center; width:42px; height:42px; border:1px solid #e1e7ef; border-radius:12px; background:#f8fafc; font-size:22px; }.emoji-picker button.active { border-color:#2583ef; background:#eaf4ff; box-shadow:0 0 0 2px rgba(37,131,239,.1); }
 :deep(.van-button) { height:49px; margin-top:8px; border:0; background:linear-gradient(100deg,#1684ff,#6658ef); box-shadow:0 10px 22px rgba(52,108,226,.2); font-size:16px; font-weight:600; }.privacy { display:flex; justify-content:center; align-items:center; gap:5px; margin-top:17px; color:#98a3b3; font-size:11px; }
 </style>

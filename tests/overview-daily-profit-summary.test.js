@@ -42,11 +42,13 @@ test('顶部指定收益日期时不混入延迟更新基金的其他日期收�
     { quantity: 100 },
     { jzrq: '2026-08-03', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
     '2026-08-03',
+    new Date('2026-08-03T12:00:00+08:00'),
   )
   const delayed = calculateOverviewPositionDailyProfitForDate(
     { quantity: 100 },
     { jzrq: '2026-07-31', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
     '2026-08-03',
+    new Date('2026-08-03T12:00:00+08:00'),
   )
 
   assert.equal(regular, 10)

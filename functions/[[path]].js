@@ -282,7 +282,7 @@ export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryD
   };
 }
 
-export function calculateOverviewPositionDailyProfit(position = {}, snapshot = null) {
+export function calculateOverviewPositionDailyProfit(position = {}, snapshot = null, now = new Date()) {
   const quantity = Number(position.quantity || position.shares || 0);
   const confirmedNav = Number(snapshot?.dwjz || snapshot?.gsz || position.nav_dwjz || position.nav_gsz || 0);
   const prevNav = Number(snapshot?.prev_nav || position.prev_nav || 0);
@@ -296,13 +296,14 @@ export function calculateOverviewPositionDailyProfit(position = {}, snapshot = n
     storedChangeRate,
     navDate,
     fundName: position.fund_name || snapshot?.name || '',
+    now,
   });
 }
 
-export function calculateOverviewPositionDailyProfitForDate(position = {}, snapshot = null, profitDate = '') {
+export function calculateOverviewPositionDailyProfitForDate(position = {}, snapshot = null, profitDate = '', now = new Date()) {
   const navDate = String(snapshot?.jzrq ?? position.nav_jzrq ?? '').slice(0, 10);
   if (!profitDate || navDate !== String(profitDate).slice(0, 10)) return 0;
-  return calculateOverviewPositionDailyProfit(position, snapshot);
+  return calculateOverviewPositionDailyProfit(position, snapshot, now);
 }
 
 export function parsePingzhongdataNetWorth(text = '') {
@@ -1268,6 +1269,9 @@ export async function onRequest(context) {
       if (!columns.has('remark')) {
         await env.DB.prepare("ALTER TABLE members ADD COLUMN remark TEXT DEFAULT ''").run();
       }
+      if (!columns.has('relation')) {
+        await env.DB.prepare("ALTER TABLE members ADD COLUMN relation TEXT DEFAULT ''").run();
+      }
     }
 
     function serializeAccountRow(r) {
@@ -1690,7 +1694,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-04-independent-user-household-v5';
+          const runtimeSchemaVersion = '2026-08-05-invite-member-link-v6';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1887,7 +1891,15 @@ export async function onRequest(context) {
               created_at INTEGER DEFAULT (unixepoch())
             )
           `).run();
+          await ensureColumn('household_invites', 'member_mode', "member_mode TEXT NOT NULL DEFAULT 'create'");
+          await ensureColumn('household_invites', 'member_id', 'member_id TEXT');
           await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_household_invites_household ON household_invites(household_id, created_at DESC)').run();
+          await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_member_unique ON users(linked_member_id) WHERE linked_member_id IS NOT NULL').run();
+          await env.DB.prepare(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_invites_pending_member_unique
+            ON household_invites(member_id)
+            WHERE member_id IS NOT NULL AND used_at IS NULL AND revoked_at IS NULL
+          `).run();
           await env.DB.prepare(`
             CREATE TABLE IF NOT EXISTS registration_whitelist (
               id TEXT PRIMARY KEY,
@@ -2422,8 +2434,10 @@ export async function onRequest(context) {
       const code = decodeURIComponent(path.split('/').pop());
       const codeHash = await hashInviteCode(code);
       const { results } = await env.DB.prepare(`
-        SELECT i.role, i.expires_at, h.name AS household_name
+        SELECT i.role, i.expires_at, i.member_mode, i.member_id,
+               h.name AS household_name, m.name AS member_name, m.emoji AS member_emoji, m.relation AS member_relation
         FROM household_invites i JOIN households h ON h.id = i.household_id
+        LEFT JOIN members m ON m.id = i.member_id AND m.household_id = i.household_id
         WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
           AND i.expires_at > unixepoch() AND h.status = 'active'
         LIMIT 1
@@ -2438,6 +2452,9 @@ export async function onRequest(context) {
       const displayName = String(body.display_name || body.displayName || username).trim();
       const password = String(body.password || '');
       const inviteCode = String(body.invite_code || body.inviteCode || '').trim();
+      const requestedMemberName = String(body.member_name || '').trim();
+      const requestedMemberEmoji = String(body.member_emoji || '👤').trim() || '👤';
+      const requestedMemberRelation = String(body.member_relation || '').trim();
       if (!/^[\p{L}\p{N}_]{4,30}$/u.test(username)) return jsonResponse({ code: 400, message: '用户名需为4至30位中文、英文、数字或下划线' }, 400);
       if (!displayName || displayName.length > 30) return jsonResponse({ code: 400, message: '显示名称不能为空且不能超过30位' }, 400);
       if (password.length < 8) return jsonResponse({ code: 400, message: '密码长度至少8位' }, 400);
@@ -2449,9 +2466,10 @@ export async function onRequest(context) {
       if (inviteCode) {
         const codeHash = await hashInviteCode(inviteCode);
         const { results: inviteRows } = await env.DB.prepare(`
-          SELECT i.*, h.name AS household_name
+          SELECT i.*, h.name AS household_name, m.name AS member_name, m.emoji AS member_emoji, m.relation AS member_relation
           FROM household_invites i
           JOIN households h ON h.id = i.household_id
+          LEFT JOIN members m ON m.id = i.member_id AND m.household_id = i.household_id
           WHERE i.code_hash = ? AND i.used_at IS NULL AND i.revoked_at IS NULL
             AND i.expires_at > unixepoch() AND h.status = 'active'
           LIMIT 1
@@ -2464,6 +2482,13 @@ export async function onRequest(context) {
         `).bind(invite.household_id).all();
         if (Number(householdUsers[0]?.total || 0) >= 10) {
           return jsonResponse({ code: 409, message: '该家庭邀请成员已达10人上限' }, 409);
+        }
+        if (invite.member_mode === 'existing') {
+          if (!invite.member_id || !invite.member_name) return jsonResponse({ code: 409, message: '邀请关联的资产成员不存在' }, 409);
+          const { results: memberBindings } = await env.DB.prepare('SELECT id FROM users WHERE linked_member_id = ? LIMIT 1').bind(invite.member_id).all();
+          if (memberBindings.length) return jsonResponse({ code: 409, message: '邀请关联的资产成员已绑定其他账号' }, 409);
+        } else if (!requestedMemberName) {
+          return jsonResponse({ code: 400, message: '请填写资产成员姓名' }, 400);
         }
       } else {
         const { results: whitelistRows } = await env.DB.prepare(`
@@ -2478,6 +2503,8 @@ export async function onRequest(context) {
       }
 
       const userId = generateId();
+      const memberId = invite?.member_mode === 'existing' ? invite.member_id : generateId();
+      const effectiveDisplayName = invite?.member_mode === 'existing' ? invite.member_name : displayName;
       const passwordHash = await derivePasswordHash(password);
       const householdId = invite ? invite.household_id : generateId();
       const householdName = invite ? invite.household_name : `${displayName}的家庭`;
@@ -2506,10 +2533,22 @@ export async function onRequest(context) {
       }
       const statements = [];
       if (!invite) statements.push(env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, householdName, userId));
+      if (!invite || invite.member_mode !== 'existing') {
+        statements.push(env.DB.prepare(`
+          INSERT INTO members (id, name, emoji, relation, household_id)
+          VALUES (?, ?, ?, ?, ?)
+        `).bind(
+          memberId,
+          invite ? requestedMemberName : displayName,
+          requestedMemberEmoji,
+          invite ? requestedMemberRelation : '本人',
+          householdId,
+        ));
+      }
       statements.push(env.DB.prepare(`
-        INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'active', unixepoch())
-      `).bind(userId, username, passwordHash, displayName, householdId, role));
+        INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, linked_member_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', ?, unixepoch())
+      `).bind(userId, username, passwordHash, effectiveDisplayName, householdId, role, memberId));
       statements.push(env.DB.prepare('INSERT INTO auth_tokens (id, token, user_id, expires_at) VALUES (?, ?, ?, ?)').bind(tokenId, token, userId, expiresAt));
       try {
         await env.DB.batch(statements);
@@ -2524,7 +2563,7 @@ export async function onRequest(context) {
         }
         throw error;
       }
-      return jsonResponse({ code: 0, data: { token, username, display_name: displayName, household_id: householdId, household_name: householdName, role, expires_at: expiresAt } });
+      return jsonResponse({ code: 0, data: { token, username, display_name: effectiveDisplayName, household_id: householdId, household_name: householdName, role, linked_member_id: memberId, expires_at: expiresAt } });
     }
 
     // 登出
@@ -2601,13 +2640,20 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const { results } = await env.DB.prepare('SELECT id, role, status, linked_member_id FROM users WHERE id = ? AND household_id = ? LIMIT 1').bind(targetId, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '家庭用户不存在' }, 404);
-      if (['super_admin', 'owner'].includes(results[0].role)) return jsonResponse({ code: 400, message: '超级管理员或家庭所有者不能在这里修改' }, 400);
+      const protectedOwner = ['super_admin', 'owner'].includes(results[0].role);
+      if (protectedOwner && (body.role !== undefined || body.status !== undefined)) {
+        return jsonResponse({ code: 400, message: '超级管理员或家庭所有者只能修改成员关联' }, 400);
+      }
       const nextRole = body.role === undefined ? results[0].role : String(body.role);
       const nextStatus = body.status === undefined ? results[0].status : String(body.status);
       const linkedMemberId = body.linked_member_id === undefined ? results[0].linked_member_id : (String(body.linked_member_id || '').trim() || null);
       if (!['admin', 'viewer'].includes(nextRole)) return jsonResponse({ code: 400, message: '用户角色无效' }, 400);
       if (!['active', 'disabled'].includes(nextStatus)) return jsonResponse({ code: 400, message: '用户状态无效' }, 400);
       if (linkedMemberId && !(await memberBelongsToHousehold(linkedMemberId))) return jsonResponse({ code: 400, message: '关联成员不存在' }, 400);
+      if (linkedMemberId) {
+        const { results: bindings } = await env.DB.prepare('SELECT id FROM users WHERE linked_member_id = ? AND id != ? LIMIT 1').bind(linkedMemberId, targetId).all();
+        if (bindings.length) return jsonResponse({ code: 409, message: '该资产成员已绑定其他登录用户' }, 409);
+      }
       await env.DB.prepare(`
         UPDATE users SET role = ?, status = ?, linked_member_id = ?, updated_at = unixepoch()
         WHERE id = ? AND household_id = ?
@@ -2667,15 +2713,32 @@ export async function onRequest(context) {
     if (path === '/api/household/invites' && method === 'GET') {
       const denied = requireHouseholdOwner();
       if (denied) return denied;
+      await env.DB.prepare(`
+        UPDATE household_invites SET revoked_at = unixepoch()
+        WHERE household_id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at <= unixepoch()
+      `).bind(householdId).run();
       const { results } = await env.DB.prepare(`
-        SELECT i.id, i.role, i.expires_at, i.used_at, i.revoked_at, i.created_at,
-               creator.display_name AS created_by_name, used.display_name AS used_by_name
+        SELECT i.id, i.role, i.member_mode, i.member_id, i.expires_at, i.used_at, i.revoked_at, i.created_at,
+               creator.display_name AS created_by_name, used.display_name AS used_by_name,
+               m.name AS member_name, m.emoji AS member_emoji, m.relation AS member_relation
         FROM household_invites i
         LEFT JOIN users creator ON creator.id = i.created_by
         LEFT JOIN users used ON used.id = i.used_by
+        LEFT JOIN members m ON m.id = i.member_id AND m.household_id = i.household_id
         WHERE i.household_id = ? ORDER BY i.created_at DESC LIMIT 50
       `).bind(householdId).all();
-      return jsonResponse({ code: 0, data: { invites: results || [] } });
+      const { results: memberRows } = await env.DB.prepare(`
+        SELECT m.id, m.name, m.emoji, m.relation,
+               u.username AS linked_username,
+               CASE WHEN pending.id IS NULL THEN 0 ELSE 1 END AS has_pending_invite
+        FROM members m
+        LEFT JOIN users u ON u.linked_member_id = m.id
+        LEFT JOIN household_invites pending ON pending.member_id = m.id
+          AND pending.used_at IS NULL AND pending.revoked_at IS NULL AND pending.expires_at > unixepoch()
+        WHERE m.household_id = ?
+        ORDER BY m.created_at ASC
+      `).bind(householdId).all();
+      return jsonResponse({ code: 0, data: { invites: results || [], members: memberRows || [] } });
     }
 
     if (path === '/api/household/invites' && method === 'POST') {
@@ -2683,6 +2746,8 @@ export async function onRequest(context) {
       if (denied) return denied;
       const body = await context.request.json().catch(() => ({}));
       const role = body.role === 'admin' ? 'admin' : 'viewer';
+      const memberMode = body.member_mode === 'existing' ? 'existing' : 'create';
+      const memberId = memberMode === 'existing' ? String(body.member_id || '').trim() : null;
       const { results: householdUsers } = await env.DB.prepare(`
         SELECT COUNT(*) AS total FROM users
         WHERE household_id = ? AND role NOT IN ('owner', 'super_admin')
@@ -2690,15 +2755,32 @@ export async function onRequest(context) {
       if (Number(householdUsers[0]?.total || 0) >= 10) {
         return jsonResponse({ code: 409, message: '该家庭邀请成员已达10人上限' }, 409);
       }
+      if (memberMode === 'existing') {
+        if (!memberId) return jsonResponse({ code: 400, message: '请选择要关联的资产成员' }, 400);
+        await env.DB.prepare(`
+          UPDATE household_invites SET revoked_at = unixepoch()
+          WHERE household_id = ? AND member_id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at <= unixepoch()
+        `).bind(householdId, memberId).run();
+        const { results: memberRows } = await env.DB.prepare(`
+          SELECT m.id,
+                 (SELECT COUNT(*) FROM users u WHERE u.linked_member_id = m.id) AS linked_count,
+                 (SELECT COUNT(*) FROM household_invites i WHERE i.member_id = m.id AND i.used_at IS NULL
+                    AND i.revoked_at IS NULL AND i.expires_at > unixepoch()) AS pending_count
+          FROM members m WHERE m.id = ? AND m.household_id = ? LIMIT 1
+        `).bind(memberId, householdId).all();
+        if (!memberRows.length) return jsonResponse({ code: 404, message: '资产成员不存在' }, 404);
+        if (Number(memberRows[0].linked_count || 0) > 0) return jsonResponse({ code: 409, message: '该资产成员已经绑定登录账号' }, 409);
+        if (Number(memberRows[0].pending_count || 0) > 0) return jsonResponse({ code: 409, message: '该资产成员已有待使用邀请' }, 409);
+      }
       const inviteCode = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
       const codeHash = await hashInviteCode(inviteCode);
       const id = generateId();
       const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
       await env.DB.prepare(`
-        INSERT INTO household_invites (id, household_id, code_hash, role, created_by, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).bind(id, householdId, codeHash, role, authUser.user_id, expiresAt).run();
-      return jsonResponse({ code: 0, data: { id, invite_code: inviteCode, role, expires_at: expiresAt } });
+        INSERT INTO household_invites (id, household_id, code_hash, role, member_mode, member_id, created_by, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(id, householdId, codeHash, role, memberMode, memberId, authUser.user_id, expiresAt).run();
+      return jsonResponse({ code: 0, data: { id, invite_code: inviteCode, role, member_mode: memberMode, member_id: memberId, expires_at: expiresAt } });
     }
 
     if (path.match(/^\/api\/household\/invites\/[\w-]+$/) && method === 'DELETE') {
@@ -3302,6 +3384,7 @@ export async function onRequest(context) {
         id: r.id,
         name: r.name,
         emoji: r.emoji || '👤',
+        relation: r.relation || '',
         remark: r.remark || '',
         created_at: r.created_at,
       }));
@@ -3314,12 +3397,13 @@ export async function onRequest(context) {
       const id = generateId();
       const name = body.name || '未命名';
       const emoji = body.emoji || '👤';
+      const relation = String(body.relation || '').trim();
 
       await env.DB.prepare(
-        'INSERT INTO members (id, name, emoji, household_id) VALUES (?, ?, ?, ?)'
-      ).bind(id, name, emoji, householdId).run();
+        'INSERT INTO members (id, name, emoji, relation, household_id) VALUES (?, ?, ?, ?, ?)'
+      ).bind(id, name, emoji, relation, householdId).run();
 
-      return jsonResponse({ code: 0, data: { id, name, emoji } });
+      return jsonResponse({ code: 0, data: { id, name, emoji, relation } });
     }
 
     // 更新成员
@@ -3329,12 +3413,14 @@ export async function onRequest(context) {
       const name = body.name;
       const remark = body.remark;
       const emoji = body.emoji;
+      const relation = body.relation;
 
       const fields = [];
       const values = [];
       if (name !== undefined) { fields.push('name = ?'); values.push(name); }
       if (remark !== undefined) { fields.push('remark = ?'); values.push(remark); }
       if (emoji !== undefined) { fields.push('emoji = ?'); values.push(emoji); }
+      if (relation !== undefined) { fields.push('relation = ?'); values.push(relation); }
 
       if (fields.length > 0) {
         values.push(id, householdId);
@@ -3346,12 +3432,19 @@ export async function onRequest(context) {
         return jsonResponse({ code: 404, message: 'Member not found' }, 404);
       }
       const r = results[0];
-      return jsonResponse({ code: 0, data: { id: r.id, name: r.name, emoji: r.emoji || '👤', remark: r.remark || '' } });
+      return jsonResponse({ code: 0, data: { id: r.id, name: r.name, emoji: r.emoji || '👤', relation: r.relation || '', remark: r.remark || '' } });
     }
 
     // 删除成员
     if (path.match(/^\/api\/members\/[\w-]+$/) && method === 'DELETE') {
       const id = path.split('/').pop();
+      const { results: linkedUsers } = await env.DB.prepare('SELECT username FROM users WHERE linked_member_id = ? AND household_id = ? LIMIT 1').bind(id, householdId).all();
+      if (linkedUsers.length) return jsonResponse({ code: 409, message: `该成员已绑定登录用户 @${linkedUsers[0].username}，请先解除关联` }, 409);
+      const { results: pendingInvites } = await env.DB.prepare(`
+        SELECT id FROM household_invites WHERE member_id = ? AND household_id = ?
+          AND used_at IS NULL AND revoked_at IS NULL AND expires_at > unixepoch() LIMIT 1
+      `).bind(id, householdId).all();
+      if (pendingInvites.length) return jsonResponse({ code: 409, message: '该成员存在待使用邀请，请先撤销邀请' }, 409);
       const { results: familyRows } = await env.DB.prepare(`
         SELECT
           (SELECT COUNT(1) FROM family_assets WHERE member_id = ? AND status != 'archived') +

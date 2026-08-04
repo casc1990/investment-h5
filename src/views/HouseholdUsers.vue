@@ -16,7 +16,7 @@
       <div class="section-title"><strong>家庭邀请</strong><span>最多邀请10位家人，受邀用户无需注册白名单</span></div>
       <div v-if="!invites.length" class="empty">暂无邀请记录</div>
       <div v-for="invite in invites" :key="invite.id" class="invite-row">
-        <div><strong>{{ roleLabel(invite.role) }}</strong><span>{{ inviteStatus(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
+        <div><strong>{{ invite.member_mode === 'existing' ? `${invite.member_emoji || '👤'} ${invite.member_name}` : '注册时创建成员' }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteStatus(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
         <button v-if="inviteStatus(invite) === '等待加入'" type="button" @click="revokeInvite(invite)">撤销</button>
       </div>
     </div>
@@ -30,7 +30,7 @@
           <span>@{{ user.username }} · {{ roleLabel(user.role) }}</span>
           <small>{{ user.status === 'disabled' ? '已停用' : user.linked_member_name ? `关联成员：${user.linked_member_name}` : '未关联资产成员' }}</small>
         </div>
-        <van-button v-if="isOwner && !['super_admin', 'owner'].includes(user.role)" size="mini" plain type="primary" @click="editUser(user)">管理</van-button>
+        <van-button v-if="isOwner && (user.id === me.id || !['super_admin', 'owner'].includes(user.role))" size="mini" plain type="primary" @click="editUser(user)">{{ user.id === me.id ? '关联' : '管理' }}</van-button>
       </div>
     </div>
 
@@ -62,6 +62,17 @@
             <button type="button" :class="{ active: inviteRole === 'viewer' }" @click="inviteRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
             <button type="button" :class="{ active: inviteRole === 'admin' }" @click="inviteRole = 'admin'"><strong>家庭管理员</strong><span>可以维护家庭数据</span></button>
           </div>
+          <div class="field-label">资产成员</div>
+          <div class="role-options member-mode-options">
+            <button type="button" :class="{ active: inviteMemberMode === 'existing' }" @click="inviteMemberMode = 'existing'"><strong>关联已有成员</strong><span>由家庭所有者指定</span></button>
+            <button type="button" :class="{ active: inviteMemberMode === 'create' }" @click="inviteMemberMode = 'create'"><strong>创建新成员</strong><span>注册时填写资料</span></button>
+          </div>
+          <div v-if="inviteMemberMode === 'existing'" class="member-options">
+            <button v-for="member in members" :key="member.id" type="button" :disabled="!memberAvailable(member)" :class="{ active: inviteMemberId === member.id }" @click="memberAvailable(member) && (inviteMemberId = member.id)">
+              <span>{{ member.emoji || '👤' }}</span><div><strong>{{ member.name }}</strong><small>{{ member.linked_username ? `已绑定 @${member.linked_username}` : member.has_pending_invite ? '邀请中' : member.relation || '未绑定' }}</small></div>
+            </button>
+            <div v-if="!members.length" class="empty">暂无资产成员，请选择注册时创建</div>
+          </div>
           <van-button block round type="primary" :loading="saving" @click="createInvite">生成邀请链接</van-button>
         </template>
         <template v-else>
@@ -75,9 +86,14 @@
       <div class="popup-body">
         <h3>管理 {{ editingUser?.display_name }}</h3>
         <p>停用后该用户所有登录会话会立即失效。</p>
-        <div class="role-options">
+        <div v-if="!['super_admin', 'owner'].includes(editingUser?.role)" class="role-options">
           <button type="button" :class="{ active: editRole === 'viewer' }" @click="editRole = 'viewer'"><strong>只读成员</strong><span>只能查看</span></button>
           <button type="button" :class="{ active: editRole === 'admin' }" @click="editRole = 'admin'"><strong>管理员</strong><span>可以维护数据</span></button>
+        </div>
+        <div class="field-label">关联资产成员</div>
+        <div class="member-options compact">
+          <button type="button" :class="{ active: editMemberId === '' }" @click="editMemberId = ''"><span>👤</span><div><strong>暂不关联</strong><small>稍后处理</small></div></button>
+          <button v-for="member in linkableMembers" :key="member.id" type="button" :class="{ active: editMemberId === member.id }" @click="editMemberId = member.id"><span>{{ member.emoji || '👤' }}</span><div><strong>{{ member.name }}</strong><small>{{ member.relation || '家庭成员' }}</small></div></button>
         </div>
         <van-button block round type="primary" :loading="saving" @click="saveUser">保存权限</van-button>
         <van-button block round :type="editingUser?.status === 'disabled' ? 'success' : 'danger'" plain :loading="saving" @click="toggleUser">
@@ -97,6 +113,7 @@ const me = ref({})
 const users = ref([])
 const whitelist = ref([])
 const invites = ref([])
+const members = ref([])
 const showWhitelistEditor = ref(false)
 const showInviteEditor = ref(false)
 const showUserEditor = ref(false)
@@ -105,7 +122,10 @@ const editingUser = ref(null)
 const editRole = ref('viewer')
 const saving = ref(false)
 const inviteRole = ref('viewer')
+const inviteMemberMode = ref('create')
+const inviteMemberId = ref('')
 const createdInviteLink = ref('')
+const editMemberId = ref('')
 const isOwner = computed(() => ['super_admin', 'owner'].includes(me.value.role))
 const isSuperAdmin = computed(() => me.value.role === 'super_admin' && String(me.value.username || '').toLowerCase() === 'admin')
 const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
@@ -119,6 +139,7 @@ async function load() {
   if (isOwner.value) {
     const inviteData = await householdApi.invites()
     invites.value = inviteData.invites || []
+    members.value = inviteData.members || []
   }
   if (isSuperAdmin.value) {
     const whitelistData = await householdApi.whitelist()
@@ -127,9 +148,10 @@ async function load() {
 }
 
 async function createInvite() {
+  if (inviteMemberMode.value === 'existing' && !inviteMemberId.value) return showToast('请选择要关联的资产成员')
   saving.value = true
   try {
-    const data = await householdApi.createInvite({ role: inviteRole.value })
+    const data = await householdApi.createInvite({ role: inviteRole.value, member_mode: inviteMemberMode.value, member_id: inviteMemberId.value || undefined })
     createdInviteLink.value = `${window.location.origin}/register?invite=${encodeURIComponent(data.invite_code)}`
     await load()
   } catch (error) { showToast(error?.response?.data?.message || '生成邀请失败') }
@@ -143,6 +165,8 @@ async function copyInvite() {
 
 const inviteStatus = invite => invite.used_at ? `已由${invite.used_by_name || '家庭成员'}加入` : invite.revoked_at ? '已撤销' : Number(invite.expires_at || 0) <= Date.now() / 1000 ? '已过期' : '等待加入'
 const formatDate = value => value ? new Date(Number(value) * 1000).toLocaleDateString('zh-CN') : ''
+const memberAvailable = member => !member.linked_username && !Number(member.has_pending_invite || 0)
+const linkableMembers = computed(() => members.value.filter(member => memberAvailable(member) || member.id === editingUser.value?.linked_member_id))
 
 async function revokeInvite(invite) {
   await showConfirmDialog({ title: '撤销邀请', message: '撤销后该邀请链接将立即失效。' })
@@ -164,11 +188,15 @@ async function addWhitelist() {
   } catch (error) { showToast(error?.response?.data?.message || '添加失败') }
   finally { saving.value = false }
 }
-function editUser(user) { editingUser.value = user; editRole.value = user.role; showUserEditor.value = true }
+function editUser(user) { editingUser.value = user; editRole.value = user.role; editMemberId.value = user.linked_member_id || ''; showUserEditor.value = true }
 
 async function saveUser() {
   saving.value = true
-  try { await householdApi.updateUser(editingUser.value.id, { role: editRole.value }); showToast('权限已更新'); showUserEditor.value = false; await load() }
+  try {
+    const payload = { linked_member_id: editMemberId.value || null }
+    if (!['super_admin', 'owner'].includes(editingUser.value.role)) payload.role = editRole.value
+    await householdApi.updateUser(editingUser.value.id, payload); showToast('用户资料已更新'); showUserEditor.value = false; await load()
+  }
   catch (error) { showToast(error?.response?.data?.message || '保存失败') }
   finally { saving.value = false }
 }
@@ -212,6 +240,7 @@ onActivated(() => {
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
+.field-label { margin:2px 2px 9px; color:#59677c; font-size:13px; font-weight:600; }.member-mode-options { margin-bottom:10px; }.member-options { display:grid; gap:8px; max-height:210px; margin-bottom:14px; overflow:auto; }.member-options button { display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid #e1e7ef; border-radius:12px; background:#fff; color:#29364a; text-align:left; }.member-options button>span { font-size:22px; }.member-options button div { display:flex; flex-direction:column; }.member-options button small { margin-top:2px; color:#909bad; }.member-options button.active { border-color:#1e80ff; background:#edf6ff; }.member-options button:disabled { opacity:.48; background:#f5f6f8; }.member-options.compact { grid-template-columns:1fr 1fr; max-height:180px; }
 .independent-note { display:flex; align-items:center; gap:9px; margin:0 0 8px; padding:13px; border-radius:13px; background:#eef7ff; color:#2580df; font-size:18px; }.independent-note span { display:flex; flex-direction:column; color:#7d8a9d; font-size:12px; }.independent-note strong { margin-bottom:2px; color:#33445d; font-size:14px; }
 .invite-link { display:flex; gap:10px; padding:14px; border-radius:13px; background:#eff8f3; color:#20a66a; }.invite-link>.van-icon { margin-top:2px; font-size:20px; }.invite-link div { display:flex; flex-direction:column; min-width:0; gap:4px; }.invite-link strong { color:#304559; }.invite-link span { overflow-wrap:anywhere; color:#6f8192; font-size:12px; line-height:1.5; }
 .popup-body :deep(.van-field) { margin-bottom:14px; padding:13px 14px; border:1px solid #e1e7ef; border-radius:13px; background:#f8fafc; }

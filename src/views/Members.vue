@@ -51,6 +51,7 @@
               placeholder="如：媳妇、本人"
               :rules="[{ required: true, message: '请输入成员名称' }]"
             />
+            <van-field v-model="formData.relation" label="家庭称谓" placeholder="如：本人、配偶、子女" />
             <van-cell title="选择头像">
               <template #value>
                 <div class="emoji-picker">
@@ -96,6 +97,7 @@ const editingMember = ref(null)
 const formData = ref({
   name: '',
   emoji: '👤',
+  relation: '',
 })
 
 const emojiList = ['👤', '🧑', '👨', '👩', '👴', '👵', '👦', '👧', '👨‍💼', '👩‍💼', '👨‍🎓', '👩‍🎓', '🧔', '👱‍♀️', '🦸', '🧚', '🐱', '🐶', '🦊', '🐼']
@@ -144,7 +146,7 @@ const ensureFreshData = async ({ force = false } = {}) => {
 
 const openAddModal = () => {
   editingMember.value = null
-  formData.value = { name: '', emoji: '👤' }
+  formData.value = { name: '', emoji: '👤', relation: '' }
   showModal.value = true
 }
 
@@ -153,6 +155,7 @@ const handleEdit = (member) => {
   formData.value = {
     name: member.name,
     emoji: member.emoji || '👤',
+    relation: member.relation || '',
   }
   showModal.value = true
 }
@@ -174,7 +177,7 @@ const handleDelete = async (member) => {
     fetchMembers()
   } catch (error) {
     if (error !== 'cancel') {
-      showToast('删除失败')
+      showToast(error?.response?.data?.message || '删除失败')
     }
   }
 }
@@ -190,12 +193,14 @@ const handleSubmit = async () => {
       await memberApi.update(editingMember.value.id, {
         name: formData.value.name.trim(),
         emoji: formData.value.emoji,
+        relation: formData.value.relation.trim(),
       })
       showSuccessToast('更新成功')
     } else {
       await memberApi.create({
         name: formData.value.name.trim(),
         emoji: formData.value.emoji,
+        relation: formData.value.relation.trim(),
       })
       showSuccessToast('添加成功')
     }
@@ -210,7 +215,7 @@ const handleSubmit = async () => {
 const closeModal = () => {
   showModal.value = false
   editingMember.value = null
-  formData.value = { name: '', emoji: '👤' }
+  formData.value = { name: '', emoji: '👤', relation: '' }
 }
 
 onMounted(() => {

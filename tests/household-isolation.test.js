@@ -64,6 +64,17 @@ test('家庭邀请不依赖白名单且限制最多10位受邀用户', () => {
   assert.match(source, /受邀用户无需注册白名单|邀请码无效或已过期/)
 })
 
+test('邀请成员由服务端指定且用户与资产成员保持一对一', () => {
+  assert.match(source, /ensureColumn\('household_invites', 'member_mode'/)
+  assert.match(source, /ensureColumn\('household_invites', 'member_id'/)
+  assert.match(source, /idx_users_linked_member_unique/)
+  assert.match(source, /idx_invites_pending_member_unique/)
+  assert.match(source, /该资产成员已经绑定登录账号/)
+  assert.match(source, /该资产成员已有待使用邀请/)
+  assert.match(source, /INSERT INTO members \(id, name, emoji, relation, household_id\)/)
+  assert.match(source, /linked_member_id, updated_at/)
+})
+
 test('旧白名单用户会从共享家庭迁移到独立家庭', () => {
   assert.match(source, /JOIN registration_whitelist w ON w\.used_by = u\.id/)
   assert.match(source, /u\.household_id = w\.household_id AND u\.role != 'super_admin'/)
