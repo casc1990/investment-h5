@@ -87,7 +87,7 @@ async function onSubmit() {
     localStorage.setItem('auth_token', data.data.token)
     localStorage.setItem('auth_username', data.data.username)
     showToast(isSetup.value ? '管理员账户已创建' : '登录成功')
-    router.replace('/')
+    window.location.replace('/')
   } catch { error.value = '网络异常，请稍后重试' }
   finally { loading.value = false }
 }

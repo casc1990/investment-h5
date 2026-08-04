@@ -83,7 +83,7 @@ async function submit() {
     localStorage.setItem('auth_token', data.token)
     localStorage.setItem('auth_username', data.username)
     showToast(`已加入${data.household_name || '家庭'}`)
-    router.replace('/')
+    window.location.replace('/')
   } catch (error) {
     showToast(error?.response?.data?.message || error?.message || '注册失败')
   } finally {

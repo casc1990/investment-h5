@@ -19,6 +19,8 @@ test('登录页使用家庭资产品牌视觉且注册支持白名单或家庭�
   assert.match(register, /authApi\.register/)
   assert.match(login, /clearPageCaches\(\)/)
   assert.match(register, /clearPageCaches\(\)/)
+  assert.match(login, /window\.location\.replace\('\/'\)/)
+  assert.match(register, /window\.location\.replace\('\/'\)/)
 })
 
 test('我的页面整合家庭用户管理', () => {
@@ -33,6 +35,8 @@ test('我的页面整合家庭用户管理', () => {
   assert.match(users, /最多邀请10位家人/)
   assert.match(users, /受邀用户无需注册白名单/)
   assert.match(users, /householdApi\.createInvite/)
+  assert.match(users, /onActivated\(\(\) =>/)
+  assert.match(users, /家庭用户刷新失败/)
   assert.match(users, /isSuperAdmin/)
   assert.match(users, /super_admin: '超级管理员'/)
   assert.match(users, /只读成员/)

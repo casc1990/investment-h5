@@ -89,7 +89,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { authApi, householdApi } from '../api'
 
@@ -109,8 +109,10 @@ const createdInviteLink = ref('')
 const isOwner = computed(() => ['super_admin', 'owner'].includes(me.value.role))
 const isSuperAdmin = computed(() => me.value.role === 'super_admin' && String(me.value.username || '').toLowerCase() === 'admin')
 const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
+let lastLoadStartedAt = 0
 
 async function load() {
+  lastLoadStartedAt = Date.now()
   me.value = await authApi.me()
   const userData = await householdApi.users()
   users.value = userData.users || []
@@ -188,6 +190,10 @@ async function removeWhitelist(entry) {
 }
 
 onMounted(() => load().catch(error => showToast(error?.response?.data?.message || '家庭用户加载失败')))
+onActivated(() => {
+  if (Date.now() - lastLoadStartedAt < 1000) return
+  load().catch(error => showToast(error?.response?.data?.message || '家庭用户刷新失败'))
+})
 </script>
 
 <style scoped>

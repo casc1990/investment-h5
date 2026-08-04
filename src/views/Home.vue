@@ -511,7 +511,7 @@ const handleLogout = async () => {
   localStorage.removeItem('auth_token')
   localStorage.removeItem('auth_username')
   clearPageCaches()
-  router.push('/login')
+  window.location.replace('/login')
 }
 
 onMounted(() => {
