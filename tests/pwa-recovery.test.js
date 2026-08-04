@@ -4,6 +4,8 @@ import assert from 'node:assert/strict'
 import { isStaleAssetLoadError, recoverFromStalePwaAssets } from '../src/utils/pwaRecovery.js'
 import { readFileSync } from 'node:fs'
 
+const viteConfig = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8')
+
 const mainSource = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 
 test('PWA 自愈只识别分片、模块和样式资源加载错误', () => {
@@ -42,4 +44,9 @@ test('新 Service Worker 接管后自动刷新当前页面', () => {
   assert.match(mainSource, /serviceWorker\.addEventListener\('controllerchange'/)
   assert.match(mainSource, /reloadingForServiceWorker = true\s*window\.location\.reload\(\)/)
   assert.match(mainSource, /onRegisteredSW\(_swUrl, registration\)[\s\S]*?registration\.update\(\)/)
+})
+
+test('PWA 不接管页面导航，避免 Safari 长期使用旧页面壳', () => {
+  assert.match(viteConfig, /navigateFallbackDenylist:\s*\[\/\.\*\/\]/)
+  assert.match(viteConfig, /handler:\s*'NetworkOnly'/)
 })

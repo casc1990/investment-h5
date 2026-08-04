@@ -61,6 +61,9 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         navigateFallback: '/index.html',
+        // Cloudflare Pages 已负责 SPA 路由回退。禁止 Service Worker 接管页面导航，
+        // 避免 iOS Safari 长期返回旧 index.html 并继续加载过期页面分片。
+        navigateFallbackDenylist: [/.*/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/investment-h5\.pages\.dev\/api\/.*$/,
