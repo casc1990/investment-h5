@@ -53,6 +53,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import { clearPageCaches } from '../utils/pageCache'
 
 const router = useRouter()
 const loading = ref(false)
@@ -82,6 +83,7 @@ async function onSubmit() {
     })
     const data = await res.json()
     if (data.code !== 0) return (error.value = data.message || '操作失败')
+    clearPageCaches()
     localStorage.setItem('auth_token', data.data.token)
     localStorage.setItem('auth_username', data.data.username)
     showToast(isSetup.value ? '管理员账户已创建' : '登录成功')

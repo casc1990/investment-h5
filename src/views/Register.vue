@@ -41,6 +41,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { authApi } from '../api'
+import { clearPageCaches } from '../utils/pageCache'
 
 const router = useRouter()
 const loading = ref(false)
@@ -57,6 +58,7 @@ async function submit() {
       display_name: form.value.displayName.trim(),
       password: form.value.password,
     })
+    clearPageCaches()
     localStorage.setItem('auth_token', data.token)
     localStorage.setItem('auth_username', data.username)
     showToast(`已加入${data.household_name || '家庭'}`)

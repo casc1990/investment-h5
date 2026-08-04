@@ -16,6 +16,8 @@ test('登录页使用家庭资产品牌视觉且注册入口明确为白名单',
   assert.match(register, /自动创建独立家庭空间/)
   assert.match(register, /白名单用户名/)
   assert.match(register, /authApi\.register/)
+  assert.match(login, /clearPageCaches\(\)/)
+  assert.match(register, /clearPageCaches\(\)/)
 })
 
 test('我的页面整合家庭用户管理', () => {
