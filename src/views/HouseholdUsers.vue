@@ -15,21 +15,35 @@
     <div v-if="isOwner" class="section-card">
       <div class="section-title"><strong>家庭邀请</strong><span>已加入 {{ invitedUserCount }}/10 位家人 · 受邀用户无需注册白名单</span></div>
       <div v-if="!currentInvites.length" class="empty">暂无等待或已加入的邀请</div>
-      <div v-for="invite in currentInvites" :key="invite.id" class="invite-row">
-        <div><strong>{{ inviteTitle(invite) }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteMemberDescription(invite) }} · {{ formatDate(invite.used_at || invite.created_at) }}</span></div>
-        <div class="row-actions">
-          <button v-if="inviteStatus(invite) === '等待加入'" type="button" class="danger-action" @click="revokeInvite(invite)">撤销</button>
-          <button v-else type="button" @click="viewInvite(invite)">查看关联用户</button>
+      <div v-if="currentInvites.length" class="invite-table-wrap">
+        <div class="invite-table">
+          <div class="invite-table-row invite-table-head">
+            <span>时间</span><span>权限</span><span>受邀用户</span><span>资产成员</span><span>状态</span><span>操作</span>
+          </div>
+          <div v-for="invite in currentInvites" :key="invite.id" class="invite-table-row">
+            <span>{{ formatShortDate(invite.created_at) }}</span>
+            <span>{{ shortRoleLabel(invite.role) }}</span>
+            <strong>{{ invite.used_by_name || '待注册' }}</strong>
+            <span>{{ inviteMemberLabel(invite) }}</span>
+            <em :class="`status-${inviteStatusCode(invite)}`">{{ inviteStatusLabel(invite) }}</em>
+            <button v-if="inviteStatusCode(invite) === 'waiting'" type="button" class="danger-action" @click="revokeInvite(invite)">撤销</button>
+            <button v-else type="button" @click="viewInvite(invite)">查看</button>
+          </div>
+          <template v-if="showInviteHistory">
+            <div v-for="invite in historicalInvites" :key="invite.id" class="invite-table-row historical">
+              <span>{{ formatShortDate(invite.created_at) }}</span>
+              <span>{{ shortRoleLabel(invite.role) }}</span>
+              <strong>{{ invite.used_by_name || '-' }}</strong>
+              <span>{{ inviteMemberLabel(invite) }}</span>
+              <em :class="`status-${inviteStatusCode(invite)}`">{{ inviteStatusLabel(invite) }}</em>
+              <span>-</span>
+            </div>
+          </template>
         </div>
       </div>
       <button v-if="historicalInvites.length" type="button" class="history-toggle" @click="showInviteHistory = !showInviteHistory">
         <span>历史邀请 {{ historicalInvites.length }} 条</span><van-icon :name="showInviteHistory ? 'arrow-up' : 'arrow-down'" />
       </button>
-      <template v-if="showInviteHistory">
-        <div v-for="invite in historicalInvites" :key="invite.id" class="invite-row historical">
-          <div><strong>{{ inviteTitle(invite) }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteMemberDescription(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
-        </div>
-      </template>
     </div>
 
     <div class="section-card">
@@ -180,17 +194,17 @@ async function copyInvite() {
 }
 
 const inviteStatus = invite => invite.used_at ? `已由${invite.used_by_name || '家庭成员'}加入` : invite.revoked_at ? '已撤销' : Number(invite.expires_at || 0) <= Date.now() / 1000 ? '已过期' : '等待加入'
+const inviteStatusCode = invite => invite.used_at ? 'joined' : invite.revoked_at ? 'revoked' : Number(invite.expires_at || 0) <= Date.now() / 1000 ? 'expired' : 'waiting'
+const inviteStatusLabel = invite => ({ joined: '已加入', revoked: '已撤销', expired: '已过期', waiting: '等待中' }[inviteStatusCode(invite)])
 const currentInvites = computed(() => invites.value.filter(invite => invite.used_at || inviteStatus(invite) === '等待加入'))
 const historicalInvites = computed(() => invites.value.filter(invite => !invite.used_at && inviteStatus(invite) !== '等待加入'))
-const inviteTitle = invite => invite.used_at
-  ? `${invite.used_by_name || '家庭成员'}已加入`
-  : inviteStatus(invite) === '等待加入'
-    ? (invite.member_mode === 'existing' ? `邀请 ${invite.member_emoji || '👤'} ${invite.member_name}` : '等待新成员注册')
-    : `邀请${inviteStatus(invite).replace('已', '已')}`
+const shortRoleLabel = role => role === 'admin' ? '管理员' : '只读'
+const inviteMemberLabel = invite => invite.member_name ? `${invite.member_emoji || '👤'} ${invite.member_name}` : '注册时创建'
 const inviteMemberDescription = invite => invite.member_mode === 'existing'
   ? `关联成员：${invite.member_name || '未知成员'}`
   : invite.used_at ? '注册时已创建并关联资产成员' : '注册时创建资产成员'
 const formatDate = value => value ? new Date(Number(value) * 1000).toLocaleDateString('zh-CN') : ''
+const formatShortDate = value => value ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(Number(value) * 1000)) : '-'
 const memberAvailable = member => !member.linked_username && !Number(member.has_pending_invite || 0)
 const linkableMembers = computed(() => members.value.filter(member => memberAvailable(member) || member.id === editingUser.value?.linked_member_id))
 
@@ -278,6 +292,7 @@ onActivated(() => {
 .user-info { flex:1; gap:2px; }.user-info strong { color:#253044; font-size:15px; }.user-info em { margin-left:6px; padding:2px 5px; border-radius:6px; background:#e8f3ff; color:#1e80ff; font-size:9px; font-style:normal; }
 .invite-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-top:1px solid #edf0f5; }.invite-row>div:first-child { flex:1; }.invite-row button { padding:4px 0 4px 9px; border:0; background:transparent; color:#2580df; white-space:nowrap; }.invite-row button.danger-action { color:#ee5d5d; }.invite-row.historical { opacity:.72; }
 .row-actions { display:flex; flex-direction:row !important; align-items:center; flex:none; }.history-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; padding:11px 0 2px; border:0; border-top:1px solid #edf0f5; background:transparent; color:#7c899c; font-size:13px; }
+.invite-table-wrap { margin-top:10px; overflow-x:auto; border:1px solid #e8edf4; border-radius:12px; }.invite-table { min-width:460px; }.invite-table-row { display:grid; grid-template-columns:58px 54px minmax(74px,1fr) minmax(88px,1.2fr) 58px 42px; align-items:center; min-height:43px; border-top:1px solid #edf1f6; color:#647187; font-size:11px; }.invite-table-row:first-child { border-top:0; }.invite-table-row>* { min-width:0; padding:7px 5px; overflow:hidden; text-align:left; text-overflow:ellipsis; white-space:nowrap; }.invite-table-row strong { color:#28364b; font-size:12px; }.invite-table-row em { font-style:normal; }.invite-table-row button { border:0; background:transparent; color:#2580df; font-size:11px; }.invite-table-row button.danger-action { color:#ee5d5d; }.invite-table-head { min-height:34px; background:#f6f8fb; color:#8a96a8; font-weight:600; }.invite-table-row.historical { opacity:.7; }.invite-table-row .status-joined { color:#24a36a; }.invite-table-row .status-waiting { color:#e79a22; }.invite-table-row .status-revoked,.invite-table-row .status-expired { color:#9aa4b2; }
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }

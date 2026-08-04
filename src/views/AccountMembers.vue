@@ -3,27 +3,27 @@
     <div class="management-header">
       <div class="header-copy">
         <div class="header-eyebrow">资产归属管理</div>
-        <div class="management-title">成员与账户</div>
-        <div class="management-subtitle">统一管理家庭用户、成员及其名下投资账户</div>
+        <div class="management-title">资产成员与账户</div>
+        <div class="management-subtitle">统一管理资产成员、资产账户及受邀用户</div>
       </div>
       <div class="management-summary">
-        <div><strong>{{ members.length }}</strong><span>成员</span></div>
+        <div><strong>{{ members.length }}</strong><span>资产成员</span></div>
         <i></i>
-        <div><strong>{{ accounts.length }}</strong><span>账户</span></div>
+        <div><strong>{{ accounts.length }}</strong><span>资产账户</span></div>
       </div>
     </div>
 
-    <div class="management-tabs" role="tablist" aria-label="成员与账户管理">
-      <button :class="{ active: activeTab === 'accounts' }" role="tab" @click="switchTab('accounts')">
-        <van-icon name="friends-o" />账户
-        <span>{{ accounts.length }}</span>
-      </button>
+    <div class="management-tabs" role="tablist" aria-label="资产归属管理">
       <button :class="{ active: activeTab === 'members' }" role="tab" @click="switchTab('members')">
-        <van-icon name="contact-o" />成员
+        <van-icon name="contact-o" />资产成员
         <span>{{ members.length }}</span>
       </button>
+      <button :class="{ active: activeTab === 'accounts' }" role="tab" @click="switchTab('accounts')">
+        <van-icon name="friends-o" />资产账户
+        <span>{{ accounts.length }}</span>
+      </button>
       <button :class="{ active: activeTab === 'users' }" role="tab" @click="switchTab('users')">
-        <van-icon name="manager-o" />用户
+        <van-icon name="manager-o" />受邀用户
       </button>
     </div>
 
