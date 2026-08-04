@@ -9,6 +9,32 @@ export const getPositionMarketValue = (position = {}) => {
   return toFiniteNumber(position.cost) + toFiniteNumber(position.current_profit)
 }
 
+export const buildPositionSummary = (positions = []) => {
+  const activePositions = (positions || []).filter(position => toFiniteNumber(position.quantity ?? position.shares) > 0)
+  if (!activePositions.length) return null
+  const dailyProfitDate = activePositions
+    .map(position => String(position.nav_jzrq || '').slice(0, 10))
+    .filter(Boolean)
+    .sort()
+    .at(-1) || ''
+  const totals = activePositions.reduce((summary, position) => {
+    summary.totalCost += toFiniteNumber(position.cost)
+    summary.totalMarketValue += getPositionMarketValue(position)
+    summary.totalHoldingProfit += toFiniteNumber(position.current_profit)
+    if (String(position.nav_jzrq || '').slice(0, 10) === dailyProfitDate) {
+      summary.totalYesterdayProfit += toFiniteNumber(position.yesterday_profit ?? position.daily_profit)
+    }
+    return summary
+  }, { totalCost: 0, totalMarketValue: 0, totalHoldingProfit: 0, totalYesterdayProfit: 0 })
+  const totalProfitRate = totals.totalCost > 0 ? (totals.totalHoldingProfit / totals.totalCost) * 100 : 0
+
+  return {
+    ...Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number(value.toFixed(2))])),
+    totalProfitRate: Number(totalProfitRate.toFixed(2)),
+    dailyProfitDate,
+  }
+}
+
 export const getPositionNavStatus = (position = {}) => {
   if (position.nav_update_status === 'error' || position.sync_state === 'error') {
     return { key: 'error', label: '同步异常', tone: 'danger' }

@@ -25,7 +25,7 @@
       </div>
       <div class="summary-profit-row">
         <div class="summary-profit-item">
-          <div class="sp-label">日收益</div>
+          <div class="sp-label">{{ summary.dailyProfitDate ? `${summary.dailyProfitDate.slice(5).replace('-', '/')}收益` : '日收益' }}</div>
           <div class="sp-value" :class="{ positive: summary.totalYesterdayProfit >= 0, negative: summary.totalYesterdayProfit < 0 }">
             {{ summary.totalYesterdayProfit >= 0 ? '+' : '' }}{{ formatAmount(summary.totalYesterdayProfit) }}
           </div>
@@ -349,7 +349,7 @@ import { showConfirmDialog, showToast } from 'vant'
 import { positionApi, accountApi, memberApi, marketApi, fundApi } from '../api'
 import { setAppTabbarVisible } from '../utils/appShell'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
-import { filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../utils/positionList'
+import { buildPositionSummary, filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../utils/positionList'
 import { ALLOCATION_FUND_STATUSES, buildPositionAllocationStatusMap } from '../utils/allocation'
 import {
   ALLOCATION_PROFILES_UPDATED_EVENT,
@@ -519,35 +519,7 @@ const onAccountChange = () => {
   fetchPositions()
 }
 
-const summary = computed(() => {
-  if (!positions.value.length) {
-    return null
-  }
-  let totalMarketValue = 0
-  let totalYesterdayProfit = 0
-  let totalHoldingProfit = 0
-  let totalCost = 0
-
-  positions.value.forEach(pos => {
-    const cost = parseFloat(pos.cost) || 0
-    const currentProfit = parseFloat(pos.current_profit) || 0
-    const yesterdayProfit = parseFloat(pos.yesterday_profit) || 0
-    totalCost += cost
-    totalMarketValue += getPositionMarketValue(pos)
-    totalYesterdayProfit += yesterdayProfit
-    totalHoldingProfit += currentProfit
-  })
-
-  const totalProfitRate = totalCost > 0 ? (totalHoldingProfit / totalCost * 100) : 0
-
-  return {
-    totalMarketValue: Number(totalMarketValue.toFixed(2)),
-    totalYesterdayProfit: Number(totalYesterdayProfit.toFixed(2)),
-    totalHoldingProfit: Number(totalHoldingProfit.toFixed(2)),
-    totalProfitRate: Number(totalProfitRate.toFixed(2)),
-    totalCost: Number(totalCost.toFixed(2)),
-  }
-})
+const summary = computed(() => buildPositionSummary(positions.value))
 
 const fetchMembers = async () => {
   try {

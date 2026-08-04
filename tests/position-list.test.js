@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../src/utils/positionList.js'
+import { buildPositionSummary, filterAndSortPositions, getPositionMarketValue, getPositionNavStatus } from '../src/utils/positionList.js'
 
 const positions = [
   { id: '1', fund_name: '债券A', fund_code: '000001', current_market_value: 120, current_profit: 20, daily_profit: 1, profit_rate: 20, nav_update_status: 'updated' },
@@ -24,4 +24,15 @@ test('持仓支持市值和日收益排序并生成净值状态', () => {
   assert.equal(getPositionNavStatus(positions[1]).label, '净值待更新')
   assert.equal(getPositionNavStatus({ sync_state: 'error' }).key, 'error')
   assert.equal(getPositionNavStatus({ nav_update_status: 'idle' }).key, 'updated')
+})
+
+test('持仓汇总只统计标题日期对应的日收益', () => {
+  const summary = buildPositionSummary([
+    { quantity: 100, cost: 100, current_market_value: 110, current_profit: 10, yesterday_profit: -20, nav_jzrq: '2026-08-03' },
+    { quantity: 100, cost: 100, current_market_value: 120, current_profit: 20, yesterday_profit: 8, nav_jzrq: '2026-07-31' },
+  ])
+
+  assert.equal(summary.dailyProfitDate, '2026-08-03')
+  assert.equal(summary.totalYesterdayProfit, -20)
+  assert.equal(summary.totalMarketValue, 230)
 })
