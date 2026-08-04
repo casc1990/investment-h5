@@ -2667,9 +2667,12 @@ export async function onRequest(context) {
       if (denied) return denied;
       const { results } = await env.DB.prepare(`
         SELECT w.id, w.username, w.role, w.status, w.used_at, w.created_at,
-               used.display_name AS used_by_name
+               used.username AS registered_username, used.display_name AS used_by_name,
+               used.role AS registered_role, used.status AS registered_status,
+               registered_household.name AS registered_household_name
         FROM registration_whitelist w
         LEFT JOIN users used ON used.id = w.used_by
+        LEFT JOIN households registered_household ON registered_household.id = used.household_id
         WHERE w.household_id = ?
         ORDER BY CASE w.status WHEN 'pending' THEN 0 ELSE 1 END, w.created_at DESC
         LIMIT 100

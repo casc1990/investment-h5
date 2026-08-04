@@ -91,6 +91,8 @@ test('注册白名单按用户名唯一并在注册时原子占用', () => {
   assert.match(source, /仅可移除尚未注册的白名单用户/)
   assert.match(source, /仅超级管理员 admin 可以管理注册白名单/)
   assert.match(source, /authUser\?\.role === 'super_admin'/)
+  assert.match(source, /registered_household\.name AS registered_household_name/)
+  assert.match(source, /used\.status AS registered_status/)
 })
 
 test('家庭所有者管理用户角色和停用会话', () => {

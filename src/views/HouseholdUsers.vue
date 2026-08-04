@@ -13,12 +13,23 @@
     </div>
 
     <div v-if="isOwner" class="section-card">
-      <div class="section-title"><strong>家庭邀请</strong><span>最多邀请10位家人，受邀用户无需注册白名单</span></div>
-      <div v-if="!invites.length" class="empty">暂无邀请记录</div>
-      <div v-for="invite in invites" :key="invite.id" class="invite-row">
-        <div><strong>{{ invite.member_mode === 'existing' ? `${invite.member_emoji || '👤'} ${invite.member_name}` : '注册时创建成员' }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteStatus(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
-        <button v-if="inviteStatus(invite) === '等待加入'" type="button" @click="revokeInvite(invite)">撤销</button>
+      <div class="section-title"><strong>家庭邀请</strong><span>已加入 {{ invitedUserCount }}/10 位家人 · 受邀用户无需注册白名单</span></div>
+      <div v-if="!currentInvites.length" class="empty">暂无等待或已加入的邀请</div>
+      <div v-for="invite in currentInvites" :key="invite.id" class="invite-row">
+        <div><strong>{{ inviteTitle(invite) }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteMemberDescription(invite) }} · {{ formatDate(invite.used_at || invite.created_at) }}</span></div>
+        <div class="row-actions">
+          <button v-if="inviteStatus(invite) === '等待加入'" type="button" class="danger-action" @click="revokeInvite(invite)">撤销</button>
+          <button v-else type="button" @click="viewInvite(invite)">查看关联用户</button>
+        </div>
       </div>
+      <button v-if="historicalInvites.length" type="button" class="history-toggle" @click="showInviteHistory = !showInviteHistory">
+        <span>历史邀请 {{ historicalInvites.length }} 条</span><van-icon :name="showInviteHistory ? 'arrow-up' : 'arrow-down'" />
+      </button>
+      <template v-if="showInviteHistory">
+        <div v-for="invite in historicalInvites" :key="invite.id" class="invite-row historical">
+          <div><strong>{{ inviteTitle(invite) }}</strong><span>{{ roleLabel(invite.role) }} · {{ inviteMemberDescription(invite) }} · {{ formatDate(invite.created_at) }}</span></div>
+        </div>
+      </template>
     </div>
 
     <div class="section-card">
@@ -38,8 +49,11 @@
       <div class="section-title"><strong>注册白名单</strong><span>白名单用户注册后会创建自己的独立家庭</span></div>
       <div v-if="!whitelist.length" class="empty">暂无待注册用户</div>
       <div v-for="entry in whitelist" :key="entry.id" class="invite-row">
-        <div><strong>@{{ entry.username }}</strong><span>{{ roleLabel(entry.role) }} · {{ entry.status === 'used' ? `已由 ${entry.used_by_name || entry.username} 注册` : '等待注册' }}</span></div>
-        <button v-if="entry.status === 'pending'" type="button" @click="removeWhitelist(entry)">移除</button>
+        <div><strong>@{{ entry.username }}</strong><span>{{ entry.status === 'used' ? `已注册独立家庭 · ${formatDate(entry.used_at)}` : `等待注册 · ${formatDate(entry.created_at)}` }}</span></div>
+        <div class="row-actions">
+          <button type="button" @click="viewWhitelist(entry)">查看</button>
+          <button v-if="entry.status === 'pending'" type="button" class="danger-action" @click="removeWhitelist(entry)">撤销</button>
+        </div>
       </div>
     </div>
 
@@ -56,7 +70,7 @@
     <van-popup v-model:show="showInviteEditor" position="bottom" round teleport="body" safe-area-inset-bottom class="editor-popup" @closed="createdInviteLink = ''">
       <div class="popup-body">
         <h3>邀请家人加入</h3>
-        <p>邀请码7天内有效且只能使用一次。家庭最多可邀请加入10位用户。</p>
+        <p>邀请码7天内有效且只能使用一次。家庭最多邀请10位家人。</p>
         <template v-if="!createdInviteLink">
           <div class="role-options">
             <button type="button" :class="{ active: inviteRole === 'viewer' }" @click="inviteRole = 'viewer'"><strong>只读成员</strong><span>只能查看家庭数据</span></button>
@@ -106,7 +120,7 @@
 
 <script setup>
 import { computed, onActivated, onMounted, ref } from 'vue'
-import { showConfirmDialog, showToast } from 'vant'
+import { showConfirmDialog, showDialog, showToast } from 'vant'
 import { authApi, householdApi } from '../api'
 
 const me = ref({})
@@ -117,6 +131,7 @@ const members = ref([])
 const showWhitelistEditor = ref(false)
 const showInviteEditor = ref(false)
 const showUserEditor = ref(false)
+const showInviteHistory = ref(false)
 const whitelistUsername = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
@@ -128,6 +143,7 @@ const createdInviteLink = ref('')
 const editMemberId = ref('')
 const isOwner = computed(() => ['super_admin', 'owner'].includes(me.value.role))
 const isSuperAdmin = computed(() => me.value.role === 'super_admin' && String(me.value.username || '').toLowerCase() === 'admin')
+const invitedUserCount = computed(() => users.value.filter(user => !['super_admin', 'owner'].includes(user.role)).length)
 const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
 let lastLoadStartedAt = 0
 
@@ -164,6 +180,16 @@ async function copyInvite() {
 }
 
 const inviteStatus = invite => invite.used_at ? `已由${invite.used_by_name || '家庭成员'}加入` : invite.revoked_at ? '已撤销' : Number(invite.expires_at || 0) <= Date.now() / 1000 ? '已过期' : '等待加入'
+const currentInvites = computed(() => invites.value.filter(invite => invite.used_at || inviteStatus(invite) === '等待加入'))
+const historicalInvites = computed(() => invites.value.filter(invite => !invite.used_at && inviteStatus(invite) !== '等待加入'))
+const inviteTitle = invite => invite.used_at
+  ? `${invite.used_by_name || '家庭成员'}已加入`
+  : inviteStatus(invite) === '等待加入'
+    ? (invite.member_mode === 'existing' ? `邀请 ${invite.member_emoji || '👤'} ${invite.member_name}` : '等待新成员注册')
+    : `邀请${inviteStatus(invite).replace('已', '已')}`
+const inviteMemberDescription = invite => invite.member_mode === 'existing'
+  ? `关联成员：${invite.member_name || '未知成员'}`
+  : invite.used_at ? '注册时已创建并关联资产成员' : '注册时创建资产成员'
 const formatDate = value => value ? new Date(Number(value) * 1000).toLocaleDateString('zh-CN') : ''
 const memberAvailable = member => !member.linked_username && !Number(member.has_pending_invite || 0)
 const linkableMembers = computed(() => members.value.filter(member => memberAvailable(member) || member.id === editingUser.value?.linked_member_id))
@@ -173,6 +199,20 @@ async function revokeInvite(invite) {
   await householdApi.revokeInvite(invite.id)
   showToast('邀请已撤销')
   await load()
+}
+
+function viewInvite(invite) {
+  showDialog({
+    title: '邀请详情',
+    message: `关联用户：${invite.used_by_name || '家庭成员'}\n家庭权限：${roleLabel(invite.role)}\n${inviteMemberDescription(invite)}\n加入日期：${formatDate(invite.used_at)}`
+  })
+}
+
+function viewWhitelist(entry) {
+  const message = entry.status === 'used'
+    ? `白名单用户：@${entry.username}\n注册账号：@${entry.registered_username || entry.username}\n显示名称：${entry.used_by_name || '-'}\n独立家庭：${entry.registered_household_name || '-'}\n账号状态：${entry.registered_status === 'disabled' ? '已停用' : '正常'}\n注册日期：${formatDate(entry.used_at)}`
+    : `白名单用户：@${entry.username}\n状态：等待注册\n添加日期：${formatDate(entry.created_at)}\n注册后将创建独立家庭`
+  showDialog({ title: '白名单详情', message })
 }
 
 async function addWhitelist() {
@@ -211,9 +251,9 @@ async function toggleUser() {
 }
 
 async function removeWhitelist(entry) {
-  await showConfirmDialog({ title: '移出白名单', message: `移除 @${entry.username} 后，该用户名将无法注册。` })
+  await showConfirmDialog({ title: '撤销白名单', message: `撤销 @${entry.username} 后，该用户名将无法注册。` })
   await householdApi.removeWhitelist(entry.id)
-  showToast('已移出白名单')
+  showToast('白名单已撤销')
   await load()
 }
 
@@ -236,7 +276,8 @@ onActivated(() => {
 .user-row { display:flex; align-items:center; gap:11px; padding:13px 0; border-top:1px solid #edf0f5; }
 .avatar { display:grid; place-items:center; width:42px; height:42px; flex:none; border-radius:13px; background:#f1f6ff; font-size:22px; }
 .user-info { flex:1; gap:2px; }.user-info strong { color:#253044; font-size:15px; }.user-info em { margin-left:6px; padding:2px 5px; border-radius:6px; background:#e8f3ff; color:#1e80ff; font-size:9px; font-style:normal; }
-.invite-row { display:flex; justify-content:space-between; padding:12px 0; border-top:1px solid #edf0f5; }.invite-row button { border:0; background:transparent; color:#ee5d5d; }
+.invite-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-top:1px solid #edf0f5; }.invite-row>div:first-child { flex:1; }.invite-row button { padding:4px 0 4px 9px; border:0; background:transparent; color:#2580df; white-space:nowrap; }.invite-row button.danger-action { color:#ee5d5d; }.invite-row.historical { opacity:.72; }
+.row-actions { display:flex; flex-direction:row !important; align-items:center; flex:none; }.history-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; padding:11px 0 2px; border:0; border-top:1px solid #edf0f5; background:transparent; color:#7c899c; font-size:13px; }
 .empty { padding:18px 0 4px; text-align:center; color:#a0a9b8; font-size:13px; }
 .editor-popup { max-height:82vh; }.popup-body { padding:24px 20px calc(24px + env(safe-area-inset-bottom)); }.popup-body h3 { font-size:22px; }.popup-body p { margin:5px 0 18px; color:#8b96a8; font-size:13px; }
 .role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }.role-options button { display:flex; flex-direction:column; gap:4px; padding:14px; border:1px solid #e1e7ef; border-radius:13px; background:#fff; color:#334057; text-align:left; }.role-options button span { color:#919cad; font-size:11px; }.role-options button.active { border-color:#1e80ff; background:#edf6ff; color:#1e80ff; }
