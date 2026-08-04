@@ -108,7 +108,7 @@ export function requiresAuthentication(path = '', method = 'GET') {
 export const DEFAULT_HOUSEHOLD_ID = 'default-household';
 
 export function canWriteHouseholdData(role = '') {
-  return role === 'owner' || role === 'admin';
+  return role === 'super_admin' || role === 'owner' || role === 'admin';
 }
 
 function safeEqualStrings(left = '', right = '') {
@@ -1690,7 +1690,7 @@ export async function onRequest(context) {
     async function ensureRuntimeSchemaOnce() {
       if (!runtimeSchemaInitPromise) {
         runtimeSchemaInitPromise = (async () => {
-          const runtimeSchemaVersion = '2026-08-04-registration-whitelist-v3';
+          const runtimeSchemaVersion = '2026-08-04-super-admin-v4';
           try {
             const { results: schemaVersions } = await env.DB.prepare(
               "SELECT meta_value FROM app_meta WHERE meta_key = 'runtime_schema_version' LIMIT 1"
@@ -1845,6 +1845,7 @@ export async function onRequest(context) {
               `UPDATE users SET household_id = COALESCE(household_id, ?), role = COALESCE(NULLIF(role, ''), 'owner'),
                       display_name = COALESCE(NULLIF(display_name, ''), username), status = COALESCE(NULLIF(status, ''), 'active')`
             ).bind(DEFAULT_HOUSEHOLD_ID).run();
+            await env.DB.prepare("UPDATE users SET role = 'super_admin', updated_at = unixepoch() WHERE username = 'admin' COLLATE NOCASE").run();
             await env.DB.prepare('UPDATE auth_tokens SET user_id = COALESCE(user_id, ?)').bind(legacyUser.id).run();
             for (const tableName of householdTables) {
               await env.DB.prepare(`UPDATE ${tableName} SET household_id = COALESCE(household_id, ?)`).bind(DEFAULT_HOUSEHOLD_ID).run();
@@ -2337,6 +2338,9 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const username = (body.username || 'admin').trim();
       const password = body.password;
+      if (username.toLowerCase() !== 'admin') {
+        return jsonResponse({ code: 400, message: '超级管理员用户名固定为 admin' }, 400);
+      }
       if (!password || password.length < 6) {
         return jsonResponse({ code: 400, message: '密码长度至少6位' }, 400);
       }
@@ -2355,7 +2359,7 @@ export async function onRequest(context) {
       await env.DB.prepare('INSERT INTO households (id, name, owner_user_id) VALUES (?, ?, ?)').bind(householdId, '我的家庭', id).run();
       await env.DB.prepare(
         `INSERT INTO users (id, username, password_hash, display_name, household_id, role, status, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'owner', 'active', unixepoch())`
+         VALUES (?, ?, ?, ?, ?, 'super_admin', 'active', unixepoch())`
       ).bind(id, username, passwordHash, username, householdId).run();
       const token = crypto.randomUUID().replace(/-/g, '');
       const tokenId = generateId();
@@ -2432,7 +2436,7 @@ export async function onRequest(context) {
         LIMIT 1
       `).bind(username).all();
       if (!whitelistRows.length) {
-        return jsonResponse({ code: 403, message: '该用户名不在注册白名单中，请联系家庭所有者添加' }, 403);
+        return jsonResponse({ code: 403, message: '该用户名不在注册白名单中，请联系超级管理员添加' }, 403);
       }
 
       const whitelist = whitelistRows[0];
@@ -2450,7 +2454,7 @@ export async function onRequest(context) {
         WHERE id = ? AND status = 'pending' AND used_at IS NULL
       `).bind(userId, whitelist.id).run();
       if (Number(claim?.meta?.changes || 0) !== 1) {
-        return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系家庭所有者' }, 409);
+        return jsonResponse({ code: 409, message: '该白名单名额已被使用，请联系超级管理员' }, 409);
       }
       const statements = [];
       statements.push(env.DB.prepare(`
@@ -2515,9 +2519,12 @@ export async function onRequest(context) {
       } });
     }
 
-    const requireHouseholdOwner = () => authUser?.role === 'owner'
+    const requireHouseholdOwner = () => ['super_admin', 'owner'].includes(authUser?.role)
       ? null
       : jsonResponse({ code: 403, message: '仅家庭所有者可以执行此操作' }, 403);
+    const requireSuperAdmin = () => authUser?.role === 'super_admin' && String(authUser?.username || '').toLowerCase() === 'admin'
+      ? null
+      : jsonResponse({ code: 403, message: '仅超级管理员 admin 可以管理注册白名单' }, 403);
 
     if (path === '/api/household' && method === 'GET') {
       const { results } = await env.DB.prepare('SELECT id, name, owner_user_id, status, created_at FROM households WHERE id = ? LIMIT 1').bind(householdId).all();
@@ -2529,7 +2536,7 @@ export async function onRequest(context) {
         SELECT u.id, u.username, u.display_name, u.role, u.status, u.linked_member_id, u.created_at,
                m.name AS linked_member_name, m.emoji AS linked_member_emoji
         FROM users u LEFT JOIN members m ON m.id = u.linked_member_id AND m.household_id = u.household_id
-        WHERE u.household_id = ? ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.created_at
+        WHERE u.household_id = ? ORDER BY CASE u.role WHEN 'super_admin' THEN 0 WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, u.created_at
       `).bind(householdId).all();
       return jsonResponse({ code: 0, data: { users: results || [] } });
     }
@@ -2541,7 +2548,7 @@ export async function onRequest(context) {
       const body = await context.request.json();
       const { results } = await env.DB.prepare('SELECT id, role, status, linked_member_id FROM users WHERE id = ? AND household_id = ? LIMIT 1').bind(targetId, householdId).all();
       if (!results.length) return jsonResponse({ code: 404, message: '家庭用户不存在' }, 404);
-      if (results[0].role === 'owner') return jsonResponse({ code: 400, message: '家庭所有者不能在这里修改' }, 400);
+      if (['super_admin', 'owner'].includes(results[0].role)) return jsonResponse({ code: 400, message: '超级管理员或家庭所有者不能在这里修改' }, 400);
       const nextRole = body.role === undefined ? results[0].role : String(body.role);
       const nextStatus = body.status === undefined ? results[0].status : String(body.status);
       const linkedMemberId = body.linked_member_id === undefined ? results[0].linked_member_id : (String(body.linked_member_id || '').trim() || null);
@@ -2557,7 +2564,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/household/registration-whitelist' && method === 'GET') {
-      const denied = requireHouseholdOwner();
+      const denied = requireSuperAdmin();
       if (denied) return denied;
       const { results } = await env.DB.prepare(`
         SELECT w.id, w.username, w.role, w.status, w.used_at, w.created_at,
@@ -2572,7 +2579,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/household/registration-whitelist' && method === 'POST') {
-      const denied = requireHouseholdOwner();
+      const denied = requireSuperAdmin();
       if (denied) return denied;
       const body = await context.request.json().catch(() => ({}));
       const username = String(body.username || '').trim();
@@ -2593,7 +2600,7 @@ export async function onRequest(context) {
     }
 
     if (path.match(/^\/api\/household\/registration-whitelist\/[\w-]+$/) && method === 'DELETE') {
-      const denied = requireHouseholdOwner();
+      const denied = requireSuperAdmin();
       if (denied) return denied;
       const id = path.split('/').pop();
       const result = await env.DB.prepare(`

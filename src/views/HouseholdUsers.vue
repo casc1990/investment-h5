@@ -6,7 +6,7 @@
         <strong>{{ me.household_name || '我的家庭' }}</strong>
         <small>{{ roleLabel(me.role) }} · {{ users.length }} 位用户</small>
       </div>
-      <van-button v-if="isOwner" size="small" type="primary" round @click="showWhitelistEditor = true">添加白名单</van-button>
+      <van-button v-if="isSuperAdmin" size="small" type="primary" round @click="showWhitelistEditor = true">添加白名单</van-button>
     </div>
 
     <div class="section-card">
@@ -18,11 +18,11 @@
           <span>@{{ user.username }} · {{ roleLabel(user.role) }}</span>
           <small>{{ user.status === 'disabled' ? '已停用' : user.linked_member_name ? `关联成员：${user.linked_member_name}` : '未关联资产成员' }}</small>
         </div>
-        <van-button v-if="isOwner && user.role !== 'owner'" size="mini" plain type="primary" @click="editUser(user)">管理</van-button>
+        <van-button v-if="isOwner && !['super_admin', 'owner'].includes(user.role)" size="mini" plain type="primary" @click="editUser(user)">管理</van-button>
       </div>
     </div>
 
-    <div v-if="isOwner" class="section-card">
+    <div v-if="isSuperAdmin" class="section-card">
       <div class="section-title"><strong>注册白名单</strong><span>只有预先登记的用户名可以注册并加入当前家庭</span></div>
       <div v-if="!whitelist.length" class="empty">暂无待注册用户</div>
       <div v-for="entry in whitelist" :key="entry.id" class="invite-row">
@@ -76,14 +76,15 @@ const whitelistUsername = ref('')
 const editingUser = ref(null)
 const editRole = ref('viewer')
 const saving = ref(false)
-const isOwner = computed(() => me.value.role === 'owner')
-const roleLabel = role => ({ owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
+const isOwner = computed(() => ['super_admin', 'owner'].includes(me.value.role))
+const isSuperAdmin = computed(() => me.value.role === 'super_admin' && String(me.value.username || '').toLowerCase() === 'admin')
+const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
 
 async function load() {
   me.value = await authApi.me()
   const userData = await householdApi.users()
   users.value = userData.users || []
-  if (me.value.role === 'owner') {
+  if (isSuperAdmin.value) {
     const whitelistData = await householdApi.whitelist()
     whitelist.value = whitelistData.whitelist || []
   }

@@ -17,13 +17,13 @@
       <section class="login-card">
         <div class="card-heading">
           <span>{{ isSetup ? '首次使用' : '欢迎回来' }}</span>
-          <h2>{{ isSetup ? '创建家庭管理员' : '登录家庭账户' }}</h2>
-          <p>{{ isSetup ? '设置系统的第一个管理账户' : '继续查看和管理你的家庭资产' }}</p>
+          <h2>{{ isSetup ? '创建超级管理员' : '登录家庭账户' }}</h2>
+          <p>{{ isSetup ? '初始化系统唯一的 admin 超级管理员' : '继续查看和管理你的家庭资产' }}</p>
         </div>
         <van-form @submit="onSubmit">
           <div class="field-group">
             <label>用户名</label>
-            <van-field v-model="formData.username" name="username" placeholder="请输入用户名" autocomplete="username" :rules="[{ required: true, message: '请输入用户名' }]">
+            <van-field v-model="formData.username" name="username" placeholder="请输入用户名" autocomplete="username" :readonly="isSetup" :rules="[{ required: true, message: '请输入用户名' }]">
               <template #left-icon><van-icon name="contact-o" /></template>
             </van-field>
           </div>
@@ -40,7 +40,7 @@
             </van-field>
           </div>
           <div v-if="error" class="error-msg"><van-icon name="warning-o" />{{ error }}</div>
-          <van-button round block type="primary" native-type="submit" :loading="loading" loading-text="正在验证...">{{ isSetup ? '创建管理员账户' : '安全登录' }}</van-button>
+          <van-button round block type="primary" native-type="submit" :loading="loading" loading-text="正在验证...">{{ isSetup ? '创建超级管理员' : '安全登录' }}</van-button>
         </van-form>
         <div v-if="!isSetup" class="register-entry"><span>首次使用家庭账户？</span><button type="button" @click="router.push('/register')">白名单注册 <b>→</b></button></div>
         <div class="security-note"><van-icon name="shield-o" /> 仅授权家庭用户可访问</div>

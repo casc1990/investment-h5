@@ -6,7 +6,8 @@ import { canWriteHouseholdData, DEFAULT_HOUSEHOLD_ID } from '../functions/[[path
 
 const source = readFileSync(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 
-test('家庭角色只有所有者和管理员可以写入', () => {
+test('超级管理员、家庭所有者和管理员可以写入', () => {
+  assert.equal(canWriteHouseholdData('super_admin'), true)
   assert.equal(canWriteHouseholdData('owner'), true)
   assert.equal(canWriteHouseholdData('admin'), true)
   assert.equal(canWriteHouseholdData('viewer'), false)
@@ -18,6 +19,7 @@ test('现有单管理员数据迁移到稳定的默认家庭', () => {
   assert.match(source, /INSERT OR IGNORE INTO households/)
   assert.match(source, /UPDATE users SET household_id = COALESCE\(household_id, \?\)/)
   assert.match(source, /UPDATE auth_tokens SET user_id = COALESCE\(user_id, \?\)/)
+  assert.match(source, /UPDATE users SET role = 'super_admin'.*username = 'admin'/)
 })
 
 test('认证会话关联用户和唯一家庭', () => {
@@ -58,6 +60,8 @@ test('注册白名单按用户名唯一并在注册时原子占用', () => {
   assert.match(source, /Number\(claim\?\.meta\?\.changes \|\| 0\) !== 1/)
   assert.match(source, /该用户名不在注册白名单中/)
   assert.match(source, /仅可移除尚未注册的白名单用户/)
+  assert.match(source, /仅超级管理员 admin 可以管理注册白名单/)
+  assert.match(source, /authUser\?\.role === 'super_admin'/)
 })
 
 test('家庭所有者管理用户角色和停用会话', () => {
