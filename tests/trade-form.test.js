@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { buildTradeQuickFundOptions, resolveTradeDraft } from '../src/utils/tradeForm.js'
+
+const tradesSource = readFileSync(new URL('../src/views/Trades.vue', import.meta.url), 'utf8')
 
 test('resolveTradeDraft 优先使用路由交易类型和偏好账户', () => {
   const result = resolveTradeDraft({
@@ -52,4 +55,13 @@ test('buildTradeQuickFundOptions 按账户过滤、去重并按市值排序', ()
     { fundCode: '002', fundName: '基金B' },
     { fundCode: '001', fundName: '基金A' },
   ])
+})
+
+test('交易提交期间显示处理中状态并阻止重复请求', () => {
+  assert.match(tradesSource, /const submitting = ref\(false\)/)
+  assert.match(tradesSource, /if \(submitting\.value\) return/)
+  assert.match(tradesSource, /:loading="submitting"/)
+  assert.match(tradesSource, /:disabled="submitting"/)
+  assert.match(tradesSource, /loading-text="处理中\.\.\."/)
+  assert.match(tradesSource, /finally \{\s*submitting\.value = false\s*\}/)
 })

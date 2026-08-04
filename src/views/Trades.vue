@@ -212,8 +212,15 @@
           <div class="type-hint">{{ currentTypeHint }}</div>
 
           <div class="modal-actions">
-            <van-button round @click="closeModal">取消</van-button>
-            <van-button round type="primary" native-type="submit">确认{{ formData.tradeType }}</van-button>
+            <van-button round :disabled="submitting" @click="closeModal">取消</van-button>
+            <van-button
+              round
+              type="primary"
+              native-type="submit"
+              :loading="submitting"
+              :disabled="submitting"
+              loading-text="处理中..."
+            >确认{{ formData.tradeType }}</van-button>
           </div>
         </van-form>
       </div>
@@ -274,6 +281,7 @@ const TRADE_CONFIGS = {
 const CORE_TRADE_TYPES = ['买入', '卖出', '转换']
 
 const loading = ref(false)
+const submitting = ref(false)
 const trades = ref([])
 const accounts = ref([])
 const members = ref([])
@@ -626,6 +634,7 @@ function applyQuickFund(fund) {
 }
 
 async function handleTrade() {
+  if (submitting.value) return
   if (!formData.value.memberId) {
     showToast('请选择成员')
     return
@@ -657,6 +666,7 @@ async function handleTrade() {
     }
   }
 
+  submitting.value = true
   try {
     if (isConversion.value) {
       await tradeApi.convert({
@@ -716,6 +726,8 @@ async function handleTrade() {
     console.error('Trade submit failed:', error)
     const message = error?.response?.data?.message || error?.message || `${formData.value.tradeType}失败`
     showToast(message)
+  } finally {
+    submitting.value = false
   }
 }
 
