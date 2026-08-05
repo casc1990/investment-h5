@@ -3,6 +3,7 @@
     <FundSectionNav />
     <!-- 筛选栏 -->
     <div class="filter-bar">
+      <button v-if="authIdentity.linked_member_id" type="button" class="my-assets-btn" :class="{ active: selectedMemberId === authIdentity.linked_member_id }" @click="onMemberChange(authIdentity.linked_member_id)">我的资产</button>
       <div class="filter-dropdowns">
         <van-dropdown-menu>
           <van-dropdown-item v-model="selectedMemberId" :title="selectedMemberTitle" :options="memberOptions" @change="onMemberChange" />
@@ -359,6 +360,7 @@ import {
 import { readPageCache, writePageCache } from '../utils/pageCache'
 import { readPositionViewState, writePositionViewState } from '../utils/positionViewState'
 import FundSectionNav from '../components/FundSectionNav.vue'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 
 const router = useRouter()
 const route = useRoute()
@@ -798,8 +800,8 @@ const openAddModal = () => {
   capturePositionsScroll()
   editingPosition.value = null
   formData.value = {
-    memberName: '',
-    memberId: '',
+    memberName: authIdentity.linked_member_name || '',
+    memberId: authIdentity.linked_member_id || '',
     accountName: '',
     accountId: '',
     fundCode: '',
@@ -880,6 +882,7 @@ watch([selectedMemberId, selectedAccountId, viewOption], ([memberId, accountId, 
 }, { immediate: true })
 
 onMounted(() => {
+  loadAuthIdentity().catch(() => {})
   window.addEventListener(ALLOCATION_PROFILES_UPDATED_EVENT, handleAllocationProfilesUpdated)
   applyRouteFilters()
   ensureFreshData({ force: true })
@@ -930,6 +933,7 @@ onDeactivated(() => {
   top: 0;
   z-index: 50;
 }
+.my-assets-btn { flex:none; height:30px; padding:0 8px; border:1px solid #dbe8f7; border-radius:999px; background:#f5f9ff; color:#3979bd; font-size:10px; white-space:nowrap; }.my-assets-btn.active { border-color:#1e80ff; background:#eaf3ff; color:#1e80ff; font-weight:600; }
 
 .filter-dropdowns {
   flex: 1;

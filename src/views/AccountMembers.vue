@@ -1,5 +1,16 @@
 <template>
   <div class="account-members-page">
+    <section class="identity-card">
+      <div class="identity-avatar">{{ authIdentity.linked_member_emoji || '👤' }}</div>
+      <div class="identity-copy">
+        <span>当前登录身份</span>
+        <strong>{{ authIdentity.display_name || authIdentity.username || '家庭用户' }}</strong>
+        <small>@{{ authIdentity.username || '-' }} · {{ roleLabel(authIdentity.role) }} · {{ authIdentity.household_name || '我的家庭' }}</small>
+        <em v-if="authIdentity.linked_member_id">关联资产成员：{{ authIdentity.linked_member_emoji || '👤' }} {{ authIdentity.linked_member_name }}</em>
+        <em v-else class="unlinked">尚未关联资产成员</em>
+      </div>
+      <button v-if="!authIdentity.linked_member_id" type="button" @click="switchTab('users')">去关联</button>
+    </section>
     <div class="management-header">
       <div class="header-copy">
         <div class="header-eyebrow">资产归属管理</div>
@@ -40,12 +51,14 @@ import apiClient, { accountApi, memberApi } from '../api'
 import Accounts from './Accounts.vue'
 import Members from './Members.vue'
 import HouseholdUsers from './HouseholdUsers.vue'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref(route.query.tab === 'users' ? 'users' : route.path === '/members' || route.query.tab === 'members' ? 'members' : 'accounts')
 const accounts = ref([])
 const members = ref([])
+const roleLabel = role => ({ super_admin: '超级管理员', owner: '家庭所有者', admin: '管理员', viewer: '只读成员' }[role] || '家庭成员')
 
 const switchTab = (tab) => {
   activeTab.value = tab
@@ -58,6 +71,7 @@ watch(() => [route.path, route.query.tab], ([path, tab]) => {
 
 onMounted(async () => {
   try {
+    await loadAuthIdentity({ force: true }).catch(() => {})
     await apiClient.post('/migrate')
     const [accountData, memberData] = await Promise.all([accountApi.list(), memberApi.list()])
     accounts.value = accountData?.accounts || []
@@ -74,6 +88,7 @@ onMounted(async () => {
   background: linear-gradient(180deg, #eef5ff 0, #f6f7f9 210px);
   padding-top: 10px;
 }
+.identity-card { display:flex; align-items:center; gap:11px; margin:0 12px 12px; padding:15px; border-radius:18px; background:linear-gradient(135deg,#fff,#f4f8ff); border:1px solid #dfe9f6; box-shadow:0 8px 24px rgba(45,78,122,.07); }.identity-avatar { display:grid; place-items:center; width:48px; height:48px; flex:none; border-radius:15px; background:#eaf3ff; font-size:26px; }.identity-copy { display:flex; flex:1; min-width:0; flex-direction:column; }.identity-copy>span { color:#2782e8; font-size:10px; font-weight:700; }.identity-copy strong { margin:2px 0; color:#1f2b3e; font-size:18px; }.identity-copy small { overflow:hidden; color:#8793a5; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }.identity-copy em { margin-top:4px; color:#3979bd; font-size:11px; font-style:normal; }.identity-copy em.unlinked { color:#e28b31; }.identity-card>button { flex:none; padding:7px 10px; border:1px solid #2c87ec; border-radius:999px; background:#fff; color:#2580df; font-size:11px; }
 
 .management-header {
   display: flex;

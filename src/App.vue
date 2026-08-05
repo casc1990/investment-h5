@@ -28,7 +28,8 @@
       >
         <template #icon="props">
           <div class="tab-icon-shell" :class="{ active: props.active }">
-            <van-icon :name="tab.icon" />
+            <span v-if="tab.to === '/accounts' && authIdentity.linked_member_emoji" class="identity-tab-avatar">{{ authIdentity.linked_member_emoji }}</span>
+            <van-icon v-else :name="tab.icon" />
           </div>
         </template>
         <span class="tab-label">{{ tab.label }}</span>
@@ -42,6 +43,7 @@ import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { KEEP_ALIVE_ROUTE_NAMES, appTabbarVisible } from './utils/appShell'
 import { MAIN_TABS, resolveMainTabIndex } from './utils/navigation'
+import { authIdentity, loadAuthIdentity } from './utils/authIdentity'
 
 const route = useRoute()
 const activeTab = ref(0)
@@ -55,6 +57,7 @@ const tabs = MAIN_TABS
 
 watch(() => route.path, (path) => {
   activeTab.value = resolveMainTabIndex(path)
+  if (isLoggedIn.value) loadAuthIdentity().catch(() => {})
 }, { immediate: true })
 </script>
 
@@ -178,6 +181,7 @@ html, body {
   background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   box-shadow: 0 8px 18px rgba(99, 102, 241, 0.3);
 }
+.identity-tab-avatar { font-size:20px; line-height:1; }
 
 .tab-label {
   display: block;

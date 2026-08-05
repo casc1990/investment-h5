@@ -258,6 +258,7 @@
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 import { accountApi, marketApi, memberApi, positionApi, tradeApi } from '../api'
 import { formatAmount as formatNumber, formatDateLabel as formatDate, todayDateParts } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
@@ -609,6 +610,10 @@ function openTradeModal(type = '买入') {
     preferredTradeType: type || formData.value.tradeType || preferredDraft.tradeType,
   })
   formData.value.tradeType = type
+  if (!formData.value.memberId && authIdentity.linked_member_id) {
+    formData.value.memberId = authIdentity.linked_member_id
+    formData.value.memberName = `${authIdentity.linked_member_emoji || '👤'} ${authIdentity.linked_member_name}`
+  }
   if (!formData.value.accountId && defaults.accountId) {
     formData.value.accountId = defaults.accountId
     formData.value.accountName = defaults.accountName
@@ -849,6 +854,7 @@ function closeModal() {
 }
 
 onMounted(async () => {
+  await loadAuthIdentity().catch(() => {})
   syncTradeTypeFromRoute()
   await ensureFreshData({ force: true })
 })

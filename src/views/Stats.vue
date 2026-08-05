@@ -77,7 +77,7 @@
 
       <div class="scope-summary-row">
         <span>当前：{{ activeScopeName }}</span>
-        <button class="text-button" @click="showScopeFilters = !showScopeFilters">{{ showScopeFilters ? '收起' : '筛选' }}</button>
+        <div><button v-if="authIdentity.linked_member_id" class="text-button" @click="selectMyAssets">我的资产</button><button class="text-button" @click="showScopeFilters = !showScopeFilters">{{ showScopeFilters ? '收起' : '筛选' }}</button></div>
       </div>
 
       <div v-if="showScopeFilters" class="scope-filter-panel">
@@ -295,6 +295,7 @@ import AllocationBucketProfitCalendar from '../components/AllocationBucketProfit
 import PeriodProfitBarChart from '../components/PeriodProfitBarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
 import { familyFinanceApi } from '../api'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
@@ -583,6 +584,11 @@ const resetFilters = () => {
   selectedAccount.value = 'all'
   selectedFundType.value = 'all'
 }
+const selectMyAssets = () => {
+  if (!authIdentity.linked_member_id) return
+  selectedMember.value = authIdentity.linked_member_id
+  selectedAccount.value = 'all'
+}
 
 watch(memberOptions, (options) => {
   const exists = options.some(item => item.value === selectedMember.value)
@@ -600,6 +606,7 @@ watch(fundTypeOptions, (options) => {
 }, { immediate: true })
 
 onMounted(() => {
+  loadAuthIdentity().catch(() => {})
   ensureFreshData({ force: true })
   syncSnapshots().catch(() => {})
 })

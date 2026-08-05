@@ -1197,10 +1197,12 @@ export async function onRequest(context) {
       if (!token) return null;
       const { results } = await env.DB.prepare(
         `SELECT t.*, u.id AS user_id, u.username, u.display_name, u.household_id, u.role, u.status AS user_status,
-                h.name AS household_name
+                u.linked_member_id, h.name AS household_name,
+                m.name AS linked_member_name, m.emoji AS linked_member_emoji, m.relation AS linked_member_relation
          FROM auth_tokens t
          JOIN users u ON u.id = t.user_id
          JOIN households h ON h.id = u.household_id
+         LEFT JOIN members m ON m.id = u.linked_member_id AND m.household_id = u.household_id
          WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > ?) AND u.status = 'active'`
       ).bind(token, Math.floor(Date.now() / 1000)).all();
       return results.length > 0 ? results[0] : null;
@@ -2608,6 +2610,10 @@ export async function onRequest(context) {
         household_id: householdId,
         household_name: authUser.household_name,
         role: authUser.role,
+        linked_member_id: authUser.linked_member_id || null,
+        linked_member_name: authUser.linked_member_name || null,
+        linked_member_emoji: authUser.linked_member_emoji || null,
+        linked_member_relation: authUser.linked_member_relation || null,
       } });
     }
 

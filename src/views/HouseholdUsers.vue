@@ -147,6 +147,7 @@
 import { computed, onActivated, onMounted, ref } from 'vue'
 import { showConfirmDialog, showDialog, showToast } from 'vant'
 import { authApi, householdApi } from '../api'
+import { updateAuthIdentity } from '../utils/authIdentity'
 
 const me = ref({})
 const users = ref([])
@@ -214,6 +215,7 @@ async function saveHouseholdName() {
   try {
     await householdApi.update({ name })
     me.value = { ...me.value, household_name: name }
+    updateAuthIdentity({ household_name: name })
     showHouseholdEditor.value = false
     showToast('家庭名称已更新')
   } catch (error) { showToast(error?.response?.data?.message || '更新失败') }
@@ -281,7 +283,12 @@ async function saveUser() {
   try {
     const payload = { linked_member_id: editMemberId.value || null }
     if (!['super_admin', 'owner'].includes(editingUser.value.role)) payload.role = editRole.value
-    await householdApi.updateUser(editingUser.value.id, payload); showToast('用户资料已更新'); showUserEditor.value = false; await load()
+    await householdApi.updateUser(editingUser.value.id, payload)
+    if (editingUser.value.id === me.value.id) {
+      const linked = members.value.find(member => member.id === editMemberId.value)
+      updateAuthIdentity({ linked_member_id: linked?.id || '', linked_member_name: linked?.name || '', linked_member_emoji: linked?.emoji || '', linked_member_relation: linked?.relation || '' })
+    }
+    showToast('用户资料已更新'); showUserEditor.value = false; await load()
   }
   catch (error) { showToast(error?.response?.data?.message || '保存失败') }
   finally { saving.value = false }

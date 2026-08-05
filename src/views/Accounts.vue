@@ -124,6 +124,7 @@ import { ref, computed, onActivated, onMounted } from 'vue'
 import { showConfirmDialog, showToast, showSuccessToast } from 'vant'
 import { accountApi, memberApi } from '../api'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 
 const emit = defineEmits(['data-loaded'])
 
@@ -222,8 +223,8 @@ const openAddModal = () => {
   formData.value = {
     accountName: '',
     channel: '',
-    memberId: '',
-    memberName: '',
+    memberId: authIdentity.linked_member_id || '',
+    memberName: authIdentity.linked_member_name || '',
     remark: '',
     emoji: '💳',
   }
@@ -318,6 +319,7 @@ const closeModal = () => {
 }
 
 onMounted(() => {
+  loadAuthIdentity().catch(() => {})
   ensureFreshData({ force: true })
 })
 

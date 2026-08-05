@@ -4,6 +4,7 @@
       <div class="portfolio-overview-head">
         <div class="family-overview-copy"><small>家庭资产负债</small><strong>家庭净资产</strong></div>
         <div class="header-actions">
+          <button v-if="authIdentity.linked_member_id" @click="selectMyAssets">我的资产</button>
           <button @click="amountsHidden = !amountsHidden">{{ amountsHidden ? '显示' : '隐藏' }}</button>
           <button :disabled="refreshing" @click="refreshHome">{{ refreshing ? '刷新中' : '刷新' }}</button>
           <button @click="handleLogout">退出</button>
@@ -257,6 +258,7 @@ import { authApi, eventApi, familyFinanceApi, fundApi, statsApi } from '../api'
 import { formatAmount as formatNumber } from '../utils/formatters'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
 import { clearPageCaches, readPageCache, writePageCache } from '../utils/pageCache'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 
 const router = useRouter()
 const cachedHome = readPageCache('home')
@@ -293,6 +295,9 @@ const homeDailyProfitRate = computed(() => {
 const visibleEvents = computed(() => eventGroups.value[activeEventTab.value] || [])
 const contributionMemberTabs = computed(() => overview.value?.members || [])
 const selectedOverviewMember = computed(() => contributionMemberTabs.value.find(member => member.member_id === selectedContributionMemberId.value) || null)
+const selectMyAssets = () => {
+  if (contributionMemberTabs.value.some(member => member.member_id === authIdentity.linked_member_id)) selectedContributionMemberId.value = authIdentity.linked_member_id
+}
 const accountContributionGroups = computed(() => {
   const groups = new Map()
   const memberId = selectedContributionMemberId.value
@@ -515,6 +520,7 @@ const handleLogout = async () => {
 }
 
 onMounted(() => {
+  loadAuthIdentity().catch(() => {})
   ensureFreshData({ force: true })
 })
 

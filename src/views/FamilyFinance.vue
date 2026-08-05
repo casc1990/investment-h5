@@ -180,6 +180,7 @@ import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
 import { readPageCache, writePageCache } from '../utils/pageCache'
 import TrendChart from '../components/TrendChart.vue'
+import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 
 const EmptyState = defineComponent({ props: { text: String }, setup: props => () => h('div', { class: 'empty-state' }, [h('span', '🏡'), h('strong', props.text), h('small', '点击右上角新增开始记账')]) })
 const MemberSelect = defineComponent({
@@ -327,10 +328,11 @@ const handleAssetGroupChange = () => {
   form.include_in_investable_assets = false
 }
 const openCreate = () => {
+  const defaultMemberId = authIdentity.linked_member_id || ''
   editingAssetId.value = ''; editingReceivableId.value = ''; assetAction.value = 'create'; formMode.value = activeTab.value === 'assets' ? 'asset' : activeTab.value === 'receivables' ? 'receivable' : 'liability'
-  if (formMode.value === 'asset') resetForm({ asset_group: '', category_code: '', name: '', current_value: '', valuation_date: today(), member_id: '', include_in_investable_assets: false, remark: '' })
-  if (formMode.value === 'receivable') resetForm({ category_code: '', name: '', debtor_name: '', original_amount: '', due_date: '', member_id: '' })
-  if (formMode.value === 'liability') resetForm({ category_code: '', name: '', creditor_name: '', outstanding_principal: '', monthly_payment: '', member_id: '' })
+  if (formMode.value === 'asset') resetForm({ asset_group: '', category_code: '', name: '', current_value: '', valuation_date: today(), member_id: defaultMemberId, include_in_investable_assets: false, remark: '' })
+  if (formMode.value === 'receivable') resetForm({ category_code: '', name: '', debtor_name: '', original_amount: '', due_date: '', member_id: defaultMemberId })
+  if (formMode.value === 'liability') resetForm({ category_code: '', name: '', creditor_name: '', outstanding_principal: '', monthly_payment: '', member_id: defaultMemberId })
   formVisible.value = true
 }
 const openAssetEdit = item => {
@@ -374,7 +376,7 @@ const removeAsset = async () => {
 const settle = async (type, item) => {
   try { await showConfirmDialog({ title: '确认结清', message: `确认将“${item.name}”的剩余金额设为0？` }); type === 'receivable' ? await familyFinanceApi.settleReceivable(item.id) : await familyFinanceApi.settleLiability(item.id); await loadData(); showSuccessToast('已结清') } catch (error) { if (error !== 'cancel') showFailToast(error.message || '操作失败') }
 }
-onMounted(loadData)
+onMounted(() => { loadAuthIdentity().catch(() => {}); loadData() })
 onActivated(loadData)
 </script>
 
