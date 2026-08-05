@@ -38,11 +38,10 @@ test('新增账户、家庭财务、持仓和交易默认使用当前关联成�
   assert.match(trades, /!formData\.value\.memberId && authIdentity\.linked_member_id/)
 })
 
-test('首页、持仓和统计提供我的资产快捷筛选', () => {
+test('首页和统计提供我的资产快捷筛选，基金页保持原有筛选布局', () => {
   assert.match(home, />我的资产<\/button>/)
   assert.match(home, /selectedContributionMemberId\.value = authIdentity\.linked_member_id/)
-  assert.match(positions, /class="my-assets-btn"/)
-  assert.match(positions, /onMemberChange\(authIdentity\.linked_member_id\)/)
+  assert.doesNotMatch(positions, /class="my-assets-btn"/)
   assert.match(stats, /const selectMyAssets/)
   assert.match(stats, /selectedMember\.value = authIdentity\.linked_member_id/)
 })

@@ -319,7 +319,11 @@ onActivated(() => {
 
 <style scoped>
 .household-users { padding: 10px 12px 26px; }
-.household-card,.section-card { margin-bottom: 12px; padding: 16px; border: 1px solid #e5ebf3; border-radius: 17px; background: #fff; box-shadow: 0 8px 24px rgba(44,72,110,.06); }
+.household-card,.section-card { margin-bottom: 12px; padding: 16px; border: 1px solid rgba(116,145,190,.14); border-radius: 17px; box-shadow: 0 8px 24px rgba(44,72,110,.07); }
+.household-card { background:linear-gradient(135deg,#eef7ff,#f4f0ff); }
+.section-card { background:linear-gradient(145deg,#fff 0%,#f7faff 100%); }
+.section-card:nth-of-type(3) { background:linear-gradient(145deg,#fff 0%,#f8f4ff 100%); }
+.section-card:nth-of-type(4) { background:linear-gradient(145deg,#fff 0%,#fff8ef 100%); }
 .household-card { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .household-card div,.section-title,.user-info,.invite-row div { display:flex; flex-direction:column; min-width:0; }
 .household-card span,.section-title span,.user-info span,.user-info small,.invite-row span { color:#8a96a8; font-size:12px; }

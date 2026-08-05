@@ -85,10 +85,21 @@ onMounted(async () => {
 <style scoped>
 .account-members-page {
   min-height: 100vh;
-  background: linear-gradient(180deg, #eef5ff 0, #f6f7f9 210px);
+  background:
+    radial-gradient(circle at 92% 2%, rgba(121, 91, 244, .13), transparent 28%),
+    linear-gradient(180deg, #edf5ff 0, #f5f6fa 280px);
   padding-top: 10px;
 }
-.identity-card { display:flex; align-items:center; gap:11px; margin:0 12px 12px; padding:15px; border-radius:18px; background:linear-gradient(135deg,#fff,#f4f8ff); border:1px solid #dfe9f6; box-shadow:0 8px 24px rgba(45,78,122,.07); }.identity-avatar { display:grid; place-items:center; width:48px; height:48px; flex:none; border-radius:15px; background:#eaf3ff; font-size:26px; }.identity-copy { display:flex; flex:1; min-width:0; flex-direction:column; }.identity-copy>span { color:#2782e8; font-size:10px; font-weight:700; }.identity-copy strong { margin:2px 0; color:#1f2b3e; font-size:18px; }.identity-copy small { overflow:hidden; color:#8793a5; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }.identity-copy em { margin-top:4px; color:#3979bd; font-size:11px; font-style:normal; }.identity-copy em.unlinked { color:#e28b31; }.identity-card>button { flex:none; padding:7px 10px; border:1px solid #2c87ec; border-radius:999px; background:#fff; color:#2580df; font-size:11px; }
+.identity-card { position:relative; display:flex; align-items:center; gap:12px; overflow:hidden; margin:0 12px 12px; padding:17px; border-radius:20px; background:linear-gradient(135deg,#237ff0 0%,#536be9 58%,#7457dc 100%); box-shadow:0 12px 28px rgba(54,91,201,.22); }
+.identity-card::after { position:absolute; right:-30px; top:-42px; width:130px; height:130px; border:1px solid rgba(255,255,255,.15); border-radius:50%; content:""; }
+.identity-avatar { z-index:1; display:grid; place-items:center; width:52px; height:52px; flex:none; border:1px solid rgba(255,255,255,.36); border-radius:17px; background:rgba(255,255,255,.2); font-size:28px; box-shadow:inset 0 1px rgba(255,255,255,.22); }
+.identity-copy { z-index:1; display:flex; flex:1; min-width:0; flex-direction:column; }
+.identity-copy>span { color:rgba(255,255,255,.72); font-size:10px; font-weight:700; letter-spacing:.5px; }
+.identity-copy strong { margin:2px 0; color:#fff; font-size:19px; }
+.identity-copy small { overflow:hidden; color:rgba(255,255,255,.72); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.identity-copy em { margin-top:5px; color:#fff; font-size:11px; font-style:normal; }
+.identity-copy em.unlinked { color:#fff1c7; }
+.identity-card>button { z-index:1; flex:none; padding:7px 10px; border:1px solid rgba(255,255,255,.55); border-radius:999px; background:rgba(255,255,255,.14); color:#fff; font-size:11px; }
 
 .management-header {
   display: flex;
@@ -97,9 +108,9 @@ onMounted(async () => {
   gap: 12px;
   margin: 0 12px 12px;
   padding: 18px;
-  border: 1px solid rgba(116, 159, 219, 0.18);
+  border: 1px solid rgba(125, 139, 224, 0.16);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(135deg, #f5f1ff 0%, #edf7ff 100%);
   box-shadow: 0 10px 30px rgba(55, 94, 145, 0.08);
 }
 
@@ -136,7 +147,7 @@ onMounted(async () => {
   flex-shrink: 0;
   padding: 9px 11px;
   border-radius: 13px;
-  background: #f4f8ff;
+  background: rgba(255, 255, 255, .68);
 }
 
 .management-summary div {
@@ -212,6 +223,18 @@ onMounted(async () => {
 :deep(.members-page) {
   min-height: auto;
   padding-top: 10px;
+}
+
+:deep(.account-card),
+:deep(.member-card) {
+  border-color: rgba(116, 145, 190, .14);
+  background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(242,247,255,.96));
+  box-shadow: 0 7px 20px rgba(49, 76, 116, .07);
+}
+
+:deep(.account-card:nth-child(even)),
+:deep(.member-card:nth-child(even)) {
+  background: linear-gradient(145deg, #fff, #f7f3ff);
 }
 
 @media (max-width: 380px) {
