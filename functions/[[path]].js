@@ -1328,6 +1328,9 @@ export async function onRequest(context) {
         prevNav,
       });
       const navDate = r.nav_jzrq || null;
+      const dailyProfitConfirmedDate = Number(r.nav_updated_at || 0) > 0
+        ? getChinaDateString(new Date(Number(r.nav_updated_at) * 1000))
+        : navDate;
       const positionNow = new Date();
       const tradingDay = isChinaTradingDay(positionNow);
       const dailyProfitMeta = getDailyProfitMeta(navDate, positionNow, r.fund_name || '');
@@ -1386,6 +1389,7 @@ export async function onRequest(context) {
         nav_gszzl: navGszzl,
         nav_dwjz: confirmedNav,
         nav_jzrq: r.nav_jzrq || null,
+        daily_profit_confirmed_date: dailyProfitConfirmedDate,
         nav_category: navCategory,
         nav_update_status: navUpdateStatus,
         expected_nav_date: expectedNavDate,

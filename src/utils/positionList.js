@@ -13,7 +13,7 @@ export const buildPositionSummary = (positions = []) => {
   const activePositions = (positions || []).filter(position => toFiniteNumber(position.quantity ?? position.shares) > 0)
   if (!activePositions.length) return null
   const dailyProfitDate = activePositions
-    .map(position => String(position.nav_jzrq || '').slice(0, 10))
+    .map(position => String(position.daily_profit_confirmed_date || position.nav_jzrq || '').slice(0, 10))
     .filter(Boolean)
     .sort()
     .at(-1) || ''
@@ -21,7 +21,8 @@ export const buildPositionSummary = (positions = []) => {
     summary.totalCost += toFiniteNumber(position.cost)
     summary.totalMarketValue += getPositionMarketValue(position)
     summary.totalHoldingProfit += toFiniteNumber(position.current_profit)
-    if (String(position.nav_jzrq || '').slice(0, 10) === dailyProfitDate) {
+    const confirmationDate = String(position.daily_profit_confirmed_date || position.nav_jzrq || '').slice(0, 10)
+    if (confirmationDate === dailyProfitDate) {
       summary.totalYesterdayProfit += toFiniteNumber(position.yesterday_profit ?? position.daily_profit)
     }
     return summary

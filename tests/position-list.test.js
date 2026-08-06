@@ -26,13 +26,13 @@ test('持仓支持市值和日收益排序并生成净值状态', () => {
   assert.equal(getPositionNavStatus({ nav_update_status: 'idle' }).key, 'updated')
 })
 
-test('持仓汇总只统计标题日期对应的日收益', () => {
+test('持仓汇总按确认日期统计并包含当天确认的 QDII 收益', () => {
   const summary = buildPositionSummary([
-    { quantity: 100, cost: 100, current_market_value: 110, current_profit: 10, yesterday_profit: -20, nav_jzrq: '2026-08-03' },
-    { quantity: 100, cost: 100, current_market_value: 120, current_profit: 20, yesterday_profit: 8, nav_jzrq: '2026-07-31' },
+    { quantity: 100, cost: 100, current_market_value: 110, current_profit: 10, yesterday_profit: 32.02, nav_jzrq: '2026-08-06', daily_profit_confirmed_date: '2026-08-06' },
+    { quantity: 100, cost: 100, current_market_value: 120, current_profit: 20, yesterday_profit: -78.66, nav_jzrq: '2026-08-05', daily_profit_confirmed_date: '2026-08-06' },
   ])
 
-  assert.equal(summary.dailyProfitDate, '2026-08-03')
-  assert.equal(summary.totalYesterdayProfit, -20)
+  assert.equal(summary.dailyProfitDate, '2026-08-06')
+  assert.equal(summary.totalYesterdayProfit, -46.64)
   assert.equal(summary.totalMarketValue, 230)
 })
