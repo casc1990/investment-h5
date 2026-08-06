@@ -205,46 +205,51 @@ const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 
     })
 }
 
+const getPositionHistoryKey = (position = {}) => position.id || `${position.account_id || ''}::${position.fund_code || ''}`
+
+const getDailyProfitSignature = (position = {}) => [
+  String(position.nav_jzrq || ''),
+  safeNumber(position.yesterday_profit ?? position.daily_profit).toFixed(4),
+].join('::')
+
+// A platform-style daily profit is recognized on the snapshot/capture date.
+// Only positions whose confirmed NAV/profit signature changed since the prior
+// snapshot contribute, so stale NAV values are not counted repeatedly.
+export const buildConfirmationDailyEntries = (snapshots = [], { positionFilter = () => true } = {}) => {
+  const rows = []
+  let previousByPosition = new Map()
+
+  sortSnapshotsAsc(snapshots).forEach((snapshot) => {
+    const positions = (snapshot?.positions || []).filter(positionFilter)
+    const changedPositions = positions.filter((position) => {
+      const key = getPositionHistoryKey(position)
+      return previousByPosition.get(key) !== getDailyProfitSignature(position)
+    })
+
+    rows.push({
+      date: String(snapshot?.date || '').slice(0, 10),
+      snapshot,
+      positions: changedPositions,
+    })
+
+    previousByPosition = new Map(positions.map(position => [
+      getPositionHistoryKey(position),
+      getDailyProfitSignature(position),
+    ]))
+  })
+
+  return rows.filter(row => row.date)
+}
+
 export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '' } = {}) => {
   const sortedSnapshots = sortSnapshotsAsc(snapshots)
-  const latestEntryByPositionAndDate = new Map()
+  const scopedPositionFilter = (position) => !isAdvisoryPosition(position)
+    && filterSnapshotPositions({ positions: [position] }, { memberId, accountId, fundType, fundQuery }).length > 0
 
-  sortedSnapshots.forEach((snapshot) => {
-    const filteredPositions = filterSnapshotPositions(snapshot, { memberId, accountId, fundType, fundQuery })
-    filteredPositions
-      .filter(item => !isAdvisoryPosition(item))
-      .forEach((position) => {
-        const profitDate = String(position.nav_jzrq || snapshot?.summary?.dailyProfitDate || snapshot.date || '').slice(0, 10)
-        if (!profitDate) return
-        const positionKey = position.id || `${position.account_id || ''}::${position.fund_code || ''}`
-        latestEntryByPositionAndDate.set(`${positionKey}::${profitDate}`, {
-          profitDate,
-          position,
-          snapshot,
-        })
-      })
-  })
-
-  const entriesByDate = new Map()
-  latestEntryByPositionAndDate.forEach((entry) => {
-    if (!entriesByDate.has(entry.profitDate)) entriesByDate.set(entry.profitDate, [])
-    entriesByDate.get(entry.profitDate).push(entry)
-  })
-
-  const rows = [...entriesByDate.entries()].map(([profitDate, entries]) => {
-    const latestContributingSnapshot = entries.reduce((latest, entry) => (
-      !latest || String(entry.snapshot?.date || '').localeCompare(String(latest.date || '')) >= 0
-        ? entry.snapshot
-        : latest
-    ), null)
-    // Delayed NAV updates (notably QDII funds) may contribute a day's profit in a
-    // later snapshot. Keep those finalized daily-profit entries, but use the
-    // snapshot captured on the selected calendar date for cumulative metrics.
-    // Otherwise two adjacent dates can incorrectly display the same latest total.
-    const contextSnapshot = sortedSnapshots.find(snapshot => String(snapshot?.date || '').slice(0, 10) === profitDate)
-      || latestContributingSnapshot
+  const rows = buildConfirmationDailyEntries(sortedSnapshots, { positionFilter: scopedPositionFilter }).map(({ date, snapshot: contextSnapshot, positions }) => {
     const contextPositions = filterSnapshotPositions(contextSnapshot, { memberId, accountId, fundType, fundQuery })
-    const dailyProfit = Number(entries.reduce((sum, entry) => sum + safeNumber(entry.position?.yesterday_profit), 0).toFixed(2))
+      .filter(item => !isAdvisoryPosition(item))
+    const dailyProfit = Number(positions.reduce((sum, position) => sum + safeNumber(position?.yesterday_profit ?? position?.daily_profit), 0).toFixed(2))
     const shouldUseSummary = memberId === 'all'
       && accountId === 'all'
       && !hasFundScopedFilters({ fundType, fundQuery })
@@ -252,7 +257,7 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
     if (shouldUseSummary) {
       const summary = contextSnapshot?.summary || {}
       return {
-        date: profitDate,
+        date,
         member_id: 'all',
         member_name: '全部成员',
         account_id: 'all',
@@ -270,13 +275,13 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
     const aggregated = aggregatePositions(contextPositions, { memberId, accountId })
 
     return {
-      date: profitDate,
+      date,
       account_id: accountId,
       ...aggregated,
       daily_profit: dailyProfit,
       daily_profit_rate: calcDailyProfitRate(dailyProfit, aggregated.total_market_value),
     }
-  }).filter(Boolean)
+  }).filter(row => row && row.daily_profit !== 0)
 
   return sortRowsDesc(rows)
 }

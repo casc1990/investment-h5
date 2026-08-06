@@ -71,7 +71,7 @@
       <div class="section-header">
         <div>
           <div class="section-title">📈 收益走势</div>
-          <div class="section-subtitle">按天看日收益，按周期看阶段收益</div>
+          <div class="section-subtitle">按确认日统计，包含当天更新的 QDII 收益</div>
         </div>
       </div>
 
@@ -146,7 +146,7 @@
         </div>
       </div>
       <p v-if="selectedTrendRow && trendMode === 'daily'" class="snapshot-metric-note">
-        快照累计值可能包含当日确认的延迟净值补记，不一定等于前一日快照加当日日收益。
+        日收益按确认日统计，包含当天更新的上一交易日 QDII 收益；净值归属日仅用于明细说明。
       </p>
     </div>
 

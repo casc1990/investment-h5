@@ -37,20 +37,21 @@ test('首页/统计页的持仓日收益计算应与持仓页保持一致，优�
   assert.equal(result, 0)
 })
 
-test('顶部指定收益日期时不混入延迟更新基金的其他日期收益', () => {
+test('首页按确认日期汇总，并包含当天确认的上一交易日 QDII 收益', () => {
+  const confirmedAt = Math.floor(new Date('2026-08-03T20:00:00+08:00').getTime() / 1000)
   const regular = calculateOverviewPositionDailyProfitForDate(
     { quantity: 100 },
-    { jzrq: '2026-08-03', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
+    { jzrq: '2026-08-03', updated_at: confirmedAt, dwjz: 1.1, prev_nav: 1, gszzl: 10 },
     '2026-08-03',
     new Date('2026-08-03T12:00:00+08:00'),
   )
   const delayed = calculateOverviewPositionDailyProfitForDate(
     { quantity: 100 },
-    { jzrq: '2026-07-31', dwjz: 1.1, prev_nav: 1, gszzl: 10 },
+    { jzrq: '2026-07-31', updated_at: confirmedAt, dwjz: 1.1, prev_nav: 1, gszzl: 10 },
     '2026-08-03',
     new Date('2026-08-03T12:00:00+08:00'),
   )
 
   assert.equal(regular, 10)
-  assert.equal(delayed, 0)
+  assert.equal(delayed, 10)
 })

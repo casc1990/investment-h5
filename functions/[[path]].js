@@ -301,8 +301,11 @@ export function calculateOverviewPositionDailyProfit(position = {}, snapshot = n
 }
 
 export function calculateOverviewPositionDailyProfitForDate(position = {}, snapshot = null, profitDate = '', now = new Date()) {
-  const navDate = String(snapshot?.jzrq ?? position.nav_jzrq ?? '').slice(0, 10);
-  if (!profitDate || navDate !== String(profitDate).slice(0, 10)) return 0;
+  const updatedAt = Number(snapshot?.updated_at ?? position.nav_updated_at ?? 0);
+  const confirmationDate = updatedAt > 0
+    ? getChinaDateString(new Date(updatedAt * 1000))
+    : String(snapshot?.jzrq ?? position.nav_jzrq ?? '').slice(0, 10);
+  if (!profitDate || confirmationDate !== String(profitDate).slice(0, 10)) return 0;
   return calculateOverviewPositionDailyProfit(position, snapshot, now);
 }
 
@@ -4274,7 +4277,10 @@ export async function onRequest(context) {
 
       const heldFundCodes = [...new Set(positions.filter(position => Number(position.quantity || 0) > 0).map(position => position.fund_code))];
       const heldSnapshots = heldFundCodes.map(code => snapshotMap[code]).filter(Boolean);
-      const dailyProfitDate = heldSnapshots.map(snapshot => snapshot.jzrq || '').sort().pop() || null;
+      const dailyProfitDate = heldSnapshots.map(snapshot => {
+        const updatedAt = Number(snapshot.updated_at || 0);
+        return updatedAt > 0 ? getChinaDateString(new Date(updatedAt * 1000)) : (snapshot.jzrq || '');
+      }).sort().pop() || null;
 
       const accountStatsMap = {};
       let totalInvested = 0;

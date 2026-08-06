@@ -394,42 +394,28 @@ export const buildAllocationBucketDailyProfitTrend = ({ profile: rawProfile, sna
   const includedAssetTypes = allowedAssetTypes.filter(assetType => trackedFunds.some(item => item.assetType === assetType))
   if (!includedAssetTypes.length) return []
 
-  const latestEntryByFundAndProfitDate = new Map()
-  for (const snapshot of [...snapshots].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
-    for (const position of snapshot?.positions || []) {
-      if (!trackedIds.has(position.id)) continue
+  const rowsByDate = new Map()
+  const confirmationRows = buildConfirmationDailyEntries(snapshots, {
+    positionFilter: position => trackedIds.has(position.id),
+  })
+  for (const confirmationRow of confirmationRows) {
+    for (const position of confirmationRow.positions) {
       const assetType = assetTypeByPositionId.get(position.id)
       if (!assetType || !includedAssetTypes.includes(assetType)) continue
-      const profitDate = String(
-        position.nav_jzrq
-        || snapshot?.summary?.dailyProfitDate
-        || snapshot?.date
-        || ''
-      ).slice(0, 10)
-      if (!profitDate) continue
-      latestEntryByFundAndProfitDate.set(`${position.id}::${profitDate}`, {
-        assetType,
-        profitDate,
-        value: getPositionYesterdayProfit(position),
-      })
+      const row = rowsByDate.get(confirmationRow.date) || {
+        key: confirmationRow.date,
+        date: confirmationRow.date,
+        label: confirmationRow.date.slice(5),
+        valuesByAssetType: includedAssetTypes.reduce((acc, itemAssetType) => {
+          acc[itemAssetType] = 0
+          return acc
+        }, {}),
+        totalValue: 0,
+      }
+      row.valuesByAssetType[assetType] = round2(row.valuesByAssetType[assetType] + getPositionYesterdayProfit(position))
+      row.totalValue = round2(Object.values(row.valuesByAssetType).reduce((sum, value) => sum + safeNumber(value), 0))
+      rowsByDate.set(confirmationRow.date, row)
     }
-  }
-
-  const rowsByDate = new Map()
-  for (const entry of latestEntryByFundAndProfitDate.values()) {
-    const row = rowsByDate.get(entry.profitDate) || {
-      key: entry.profitDate,
-      date: entry.profitDate,
-      label: entry.profitDate.slice(5),
-      valuesByAssetType: includedAssetTypes.reduce((acc, assetType) => {
-        acc[assetType] = 0
-        return acc
-      }, {}),
-      totalValue: 0,
-    }
-    row.valuesByAssetType[entry.assetType] = round2(row.valuesByAssetType[entry.assetType] + entry.value)
-    row.totalValue = round2(Object.values(row.valuesByAssetType).reduce((sum, value) => sum + safeNumber(value), 0))
-    rowsByDate.set(entry.profitDate, row)
   }
 
   const rows = [...rowsByDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
@@ -482,32 +468,17 @@ export const buildAllocationBucketProfitPeriods = ({ profile: rawProfile, snapsh
   const trackedFunds = (profile.funds || []).filter(item => item?.positionId && item.assetType === assetType)
   if (!trackedFunds.length || !Array.isArray(snapshots) || !snapshots.length) return []
   const trackedIds = new Set(trackedFunds.map(item => item.positionId))
-  const entriesByFundAndProfitDate = new Map()
   const groups = new Map()
 
-  for (const snapshot of [...snapshots].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
-    for (const position of snapshot?.positions || []) {
-      if (!trackedIds.has(position.id)) continue
-      const profitDate = String(
-        position.nav_jzrq
-        || snapshot?.summary?.dailyProfitDate
-        || snapshot?.date
-        || ''
-      ).slice(0, 10)
-      if (!profitDate) continue
-      entriesByFundAndProfitDate.set(`${position.id}::${profitDate}`, {
-        position,
-        profitDate,
-      })
-    }
-  }
-
-  for (const { position, profitDate } of [...entriesByFundAndProfitDate.values()]
-    .sort((a, b) => String(a.profitDate).localeCompare(String(b.profitDate)))) {
-    const key = getAllocationPeriodKey(profitDate, period)
-    const group = groups.get(key) || { key, startDate: profitDate, endDate: profitDate, funds: new Map() }
-    group.startDate = group.startDate < profitDate ? group.startDate : profitDate
-    group.endDate = group.endDate > profitDate ? group.endDate : profitDate
+  const confirmationRows = buildConfirmationDailyEntries(snapshots, {
+    positionFilter: position => trackedIds.has(position.id),
+  })
+  for (const confirmationRow of confirmationRows) {
+    for (const position of confirmationRow.positions) {
+      const key = getAllocationPeriodKey(confirmationRow.date, period)
+      const group = groups.get(key) || { key, startDate: confirmationRow.date, endDate: confirmationRow.date, funds: new Map() }
+      group.startDate = group.startDate < confirmationRow.date ? group.startDate : confirmationRow.date
+      group.endDate = group.endDate > confirmationRow.date ? group.endDate : confirmationRow.date
 
       const fund = group.funds.get(position.id) || {
         positionId: position.id,
@@ -519,7 +490,8 @@ export const buildAllocationBucketProfitPeriods = ({ profile: rawProfile, snapsh
       fund.profit = round2(fund.profit + getPositionYesterdayProfit(position))
       fund.latestMarketValue = round2(safeNumber(position.cost) + safeNumber(position.current_profit))
       group.funds.set(position.id, fund)
-    groups.set(key, group)
+      groups.set(key, group)
+    }
   }
 
   return [...groups.values()].map(group => {
@@ -823,3 +795,4 @@ export const buildAllocationSuggestions = ({ profile: rawProfile, positions = []
     summary,
   }
 }
+import { buildConfirmationDailyEntries } from './statsHistory.js'

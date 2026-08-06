@@ -193,7 +193,7 @@ test('基金日收益签名未变化的重复快照不会进入历史每日统�
   assert.ok(rows.every(item => item.date !== '2026-06-01'))
 })
 
-test('QDII 在下一个交易日更新上一交易日收益时，会按实际净值日期入历史统计', () => {
+test('QDII 在下一日确认上一交易日收益时，会计入确认日统计', () => {
   const qdiiSnapshots = [
     {
       date: '2026-05-23',
@@ -235,11 +235,11 @@ test('QDII 在下一个交易日更新上一交易日收益时，会按实际净
 
   const rows = buildDailyHistoryRows(qdiiSnapshots, { memberId: 'all', accountId: 'all' })
 
-  assert.deepEqual(rows.map(item => item.date), ['2026-05-23', '2026-05-21'])
+  assert.deepEqual(rows.map(item => item.date), ['2026-05-26'])
   assert.equal(rows[0].daily_profit, 45)
 })
 
-test('非交易日打开统计页时，应显示实际收益所属净值日期，而不是当天快照日期', () => {
+test('非交易日确认的收益按快照确认日期展示', () => {
   const staleSnapshots = [
     {
       date: '2026-06-20',
@@ -257,7 +257,7 @@ test('非交易日打开统计页时，应显示实际收益所属净值日期�
 
   const rows = buildDailyHistoryRows(staleSnapshots, { memberId: 'all', accountId: 'all' })
 
-  assert.deepEqual(rows.map(item => item.date), ['2026-06-18'])
+  assert.deepEqual(rows.map(item => item.date), ['2026-06-20'])
   assert.equal(rows[0].daily_profit, 50)
 })
 
@@ -294,7 +294,7 @@ test('仅估算净值变化但日收益未更新时，不应把当天快照计�
   assert.deepEqual(rows.map(item => item.date), ['2026-06-08'])
 })
 
-test('周末补更不重复累计未变的基金收益，并按各自净值日期归属', () => {
+test('周末补更按确认日统计且不重复累计未变基金收益', () => {
   const weekendSnapshots = [
     {
       date: '2026-07-03',
@@ -317,14 +317,14 @@ test('周末补更不重复累计未变的基金收益，并按各自净值日�
   const rows = buildDailyHistoryRows(weekendSnapshots)
 
   assert.deepEqual(rows.map(row => [row.date, row.daily_profit]), [
-    ['2026-07-03', 120],
-    ['2026-07-02', -20],
+    ['2026-07-04', 20],
+    ['2026-07-03', 80],
   ])
   assert.equal(buildPeriodHistoryRows(weekendSnapshots, { period: 'week' })[0].period_profit, 100)
   assert.equal(buildPeriodHistoryRows(weekendSnapshots, { period: 'month' })[0].period_profit, 100)
 })
 
-test('延迟补齐日收益时累计指标仍取所选日期快照', () => {
+test('延迟补齐的 QDII 与普通基金统一计入确认日', () => {
   const delayedSnapshots = [
     {
       date: '2026-07-30',
@@ -356,11 +356,11 @@ test('延迟补齐日收益时累计指标仍取所选日期快照', () => {
   const july30 = rows.find(row => row.date === '2026-07-30')
   const july31 = rows.find(row => row.date === '2026-07-31')
 
-  assert.equal(july30.daily_profit, 603.3)
+  assert.equal(july30.daily_profit, -113.58)
   assert.equal(july30.total_market_value, 578506.37)
   assert.equal(july30.total_profit, 20628.13)
   assert.equal(july30.total_profit_rate, 3.7)
-  assert.equal(july31.daily_profit, 214.75)
+  assert.equal(july31.daily_profit, 662.53)
   assert.equal(july31.total_market_value, 580160.95)
   assert.equal(july31.total_profit, 21282.72)
   assert.equal(july31.total_profit_rate, 3.81)

@@ -516,8 +516,8 @@ test('策略详情每日收益统计会汇总所有已纳入基金的当日总�
 
   assert.equal(series.length, 1)
   assert.equal(series[0].label, '每日总收益')
-  assert.deepEqual(series[0].points.map(item => item.value), [210, 100, 160])
-  assert.equal(series[0].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 90)
+  assert.deepEqual(series[0].points.map(item => item.value), [210, 150, 70])
+  assert.equal(series[0].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 0)
 })
 
 test('策略详情可按类别生成每日收益多折线趋势图，有几类基金就输出几根线', () => {
@@ -570,8 +570,8 @@ test('策略详情可按类别生成每日收益多折线趋势图，有几类�
   assert.deepEqual(series[0].points.map(item => item.date), ['2026-06-24', '2026-06-25', '2026-06-26'])
   assert.deepEqual(series[0].points.map(item => item.value), [80, 120, 60])
   assert.deepEqual(series[1].points.map(item => item.value), [-20, 30, 10])
-  assert.deepEqual(series[2].points.map(item => item.value), [150, -50, 90])
-  assert.equal(series[2].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 90)
+  assert.deepEqual(series[2].points.map(item => item.value), [150, 0, 0])
+  assert.equal(series[2].points[2].raw.valuesByAssetType[ALLOCATION_ASSET_TYPES.QDII], 0)
 })
 
 test('策略详情每日收益按各基金实际净值日期归属，并忽略周末重复快照', () => {
