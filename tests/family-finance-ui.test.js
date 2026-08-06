@@ -52,14 +52,29 @@ test('家庭财务变更后仍在后台自动记录快照', () => {
   assert.match(functionSource, /context\.waitUntil\([\s\S]*?captureFamilySnapshot/)
 })
 
-test('资产增长趋势按每次手工资产操作生成坐标点并联动记录', () => {
+test('资产增长趋势合并手工资产和顾投更新事件', () => {
   assert.match(viewSource, /<TrendChart/)
   assert.match(viewSource, /@select="selectedAssetTrend = \$event"/)
   assert.match(viewSource, /selectedAssetOperations/)
   assert.match(viewSource, /操作记录/)
   assert.match(functionSource, /FROM family_asset_records r[\s\S]*?JOIN family_assets a/)
-  assert.match(functionSource, /assetBalances\.set\(record\.asset_id/)
+  assert.match(functionSource, /FROM advisory_product_snapshots s[\s\S]*?JOIN advisory_products p/)
+  assert.match(functionSource, /category_code: 'advisory'/)
+  assert.match(functionSource, /assetBalances\.set\(event\.asset_id/)
+  assert.match(functionSource, /queueFamilySnapshot\(snapshot_date\)/)
   assert.match(functionSource, /asset_trend: assetTrend/)
+})
+
+test('家庭财务可按成员筛选资产、应收、负债和对应趋势', () => {
+  assert.match(viewSource, /aria-label="按资产成员筛选"/)
+  assert.match(viewSource, /全部成员/)
+  assert.match(viewSource, /未关联/)
+  assert.match(viewSource, /filteredAdvisoryProducts/)
+  assert.match(viewSource, /filteredReceivables/)
+  assert.match(viewSource, /filteredLiabilities/)
+  assert.match(viewSource, /filterTrendByMember/)
+  assert.match(functionSource, /COALESCE\(p\.member_id, a\.member_id\) AS member_id/)
+  assert.match(functionSource, /member_id: record\.member_id/)
 })
 
 test('应收页展示汇总字段和独立应收趋势，不再显示资产趋势', () => {

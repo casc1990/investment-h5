@@ -27,6 +27,12 @@
       </button>
     </nav>
 
+    <div class="member-filter" aria-label="按资产成员筛选">
+      <button v-for="item in memberFilterOptions" :key="item.value" type="button" :class="{ active: selectedMemberId === item.value }" @click="selectedMemberId = item.value">
+        {{ item.label }}
+      </button>
+    </div>
+
     <main class="content-card">
       <div class="section-head">
         <div><h2>{{ activeTabLabel }}</h2><p>{{ activeTabDescription }}</p></div>
@@ -51,13 +57,13 @@
 
       <template v-else-if="activeTab === 'receivables'">
         <div class="receivable-summary-grid">
-          <div><span>应收总额</span><strong>{{ money(receivableSummary.total_amount) }}</strong></div>
-          <div><span>应收笔数</span><strong>{{ receivableSummary.total_count }} 笔</strong></div>
-          <div><span>已逾期金额</span><strong :class="{ warning: receivableSummary.overdue_amount > 0 }">{{ money(receivableSummary.overdue_amount) }}</strong></div>
-          <div><span>已逾期笔数</span><strong :class="{ warning: receivableSummary.overdue_count > 0 }">{{ receivableSummary.overdue_count }} 笔</strong></div>
+          <div><span>应收总额</span><strong>{{ money(displayedReceivableSummary.total_amount) }}</strong></div>
+          <div><span>应收笔数</span><strong>{{ displayedReceivableSummary.total_count }} 笔</strong></div>
+          <div><span>已逾期金额</span><strong :class="{ warning: displayedReceivableSummary.overdue_amount > 0 }">{{ money(displayedReceivableSummary.overdue_amount) }}</strong></div>
+          <div><span>已逾期笔数</span><strong :class="{ warning: displayedReceivableSummary.overdue_count > 0 }">{{ displayedReceivableSummary.overdue_count }} 笔</strong></div>
         </div>
-        <div v-if="receivables.length" class="plain-list">
-          <article v-for="item in receivables" :key="item.id" class="debt-row">
+        <div v-if="filteredReceivables.length" class="plain-list">
+          <article v-for="item in filteredReceivables" :key="item.id" class="debt-row">
             <div class="debt-top"><div><strong>{{ item.name }}</strong><span>{{ categoryName('receivables', item.category_code) }} · {{ item.debtor_name || '未填债务人' }}</span></div><b>{{ money(item.outstanding_amount) }}</b></div>
             <div class="debt-meta"><span>{{ item.due_date ? `到期 ${item.due_date}` : '未设到期日' }}</span><span>{{ ownerName(item) }}</span></div>
             <div class="row-actions"><button class="ghost" @click="openReceivableEdit(item)">编辑</button><button @click="openPayment('receivable', item)">记录回款</button><button class="ghost" @click="settle('receivable', item)">结清</button></div>
@@ -67,8 +73,8 @@
       </template>
 
       <template v-else>
-        <div v-if="liabilities.length" class="plain-list">
-          <article v-for="item in liabilities" :key="item.id" class="debt-row liability">
+        <div v-if="filteredLiabilities.length" class="plain-list">
+          <article v-for="item in filteredLiabilities" :key="item.id" class="debt-row liability">
             <div class="debt-top"><div><strong>{{ item.name }}</strong><span>{{ categoryName('liabilities', item.category_code) }} · {{ item.creditor_name || '未填债权人' }}</span></div><b>{{ money(item.outstanding_principal) }}</b></div>
             <div class="debt-meta"><span>{{ item.monthly_payment ? `月供 ${money(item.monthly_payment)}` : '未设月供' }}</span><span>{{ ownerName(item) }}</span></div>
             <div class="row-actions"><button @click="openPayment('liability', item)">记录还款</button><button class="ghost" @click="settle('liability', item)">结清</button></div>
@@ -79,7 +85,7 @@
     </main>
 
     <section v-if="activeTab === 'assets'" class="trend-section">
-      <div class="trend-head"><h2>资产增长趋势</h2><p>每次手工资产录入或更新都会生成坐标点</p></div>
+      <div class="trend-head"><h2>资产增长趋势</h2><p>手工资产和顾投每次更新都会生成坐标点</p></div>
       <TrendChart
         :points="assetTrendPoints"
         summary-label="所选节点资产"
@@ -174,7 +180,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onActivated, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { familyFinanceApi, memberApi } from '../api'
@@ -192,6 +198,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai'
 const router = useRouter()
 const loading = ref(false), saving = ref(false), formVisible = ref(false)
 const activeTab = ref('assets'), formMode = ref('asset'), editingAssetId = ref(''), editingReceivableId = ref(''), paymentType = ref(''), paymentItem = ref(null)
+const selectedMemberId = ref('all')
 const assetAction = ref('create')
 const members = ref([]), assets = ref([]), receivables = ref([]), liabilities = ref([]), advisoryProducts = ref([]), assetTrend = ref([]), receivableTrend = ref([])
 const selectedAssetTrend = ref(null)
@@ -218,6 +225,7 @@ const cacheFamilyFinance = () => writePageCache('family-finance', {
     assets: assets.value,
     receivables: receivables.value,
     liabilities: liabilities.value,
+    advisory_products: advisoryProducts.value,
     asset_trend: assetTrend.value,
     receivable_trend: receivableTrend.value,
     receivable_summary: { ...receivableSummary },
@@ -229,10 +237,22 @@ const cachedFamilyFinance = readPageCache('family-finance')
 if (cachedFamilyFinance?.overview) applyOverviewData(cachedFamilyFinance.overview)
 if (cachedFamilyFinance?.members) members.value = cachedFamilyFinance.members
 
+const matchesSelectedMember = item => selectedMemberId.value === 'all'
+  || (selectedMemberId.value === 'unassigned' ? !item.member_id : item.member_id === selectedMemberId.value)
+const memberFilterOptions = computed(() => {
+  const options = [{ value: 'all', label: '全部成员' }, ...members.value.map(item => ({ value: item.id, label: `${item.emoji || '👤'} ${item.name}` }))]
+  const allItems = [...assets.value, ...advisoryProducts.value, ...receivables.value, ...liabilities.value]
+  if (allItems.some(item => !item.member_id)) options.push({ value: 'unassigned', label: '未关联' })
+  return options
+})
+const filteredAssets = computed(() => assets.value.filter(matchesSelectedMember))
+const filteredAdvisoryProducts = computed(() => advisoryProducts.value.filter(matchesSelectedMember))
+const filteredReceivables = computed(() => receivables.value.filter(matchesSelectedMember))
+const filteredLiabilities = computed(() => liabilities.value.filter(matchesSelectedMember))
 const tabs = computed(() => [
-  { key: 'assets', label: '资产', count: assets.value.length + advisoryProducts.value.length },
-  { key: 'receivables', label: '应收', count: receivables.value.length },
-  { key: 'liabilities', label: '负债', count: liabilities.value.length },
+  { key: 'assets', label: '资产', count: filteredAssets.value.length + filteredAdvisoryProducts.value.length },
+  { key: 'receivables', label: '应收', count: filteredReceivables.value.length },
+  { key: 'liabilities', label: '负债', count: filteredLiabilities.value.length },
 ])
 const activeTabLabel = computed(() => tabs.value.find(item => item.key === activeTab.value)?.label || '')
 const activeTabDescription = computed(() => ({ assets: '手工记录银行、股票、公积金等余额', receivables: '跟踪借出和待收回的款项', liabilities: '记录家庭剩余待还本金' }[activeTab.value]))
@@ -267,10 +287,11 @@ const changeClass = value => Number(value || 0) > 0 ? 'increase' : Number(value 
 const assetIcon = code => ({ advisory: '🤖', stock: '📈', bank_wealth: '🏦', bond: '📜', gold: '🪙', bank_demand: '💳', bank_fixed: '🏦', cash: '💵', provident_fund: '🏠', medical_account: '🏥', pension_account: '👵', property: '🏡', vehicle: '🚗' }[code] || '📦')
 const groupedAssets = computed(() => {
   const map = new Map()
-  const advisoryAssets = advisoryProducts.value.map(item => ({
+  const advisoryAssets = filteredAdvisoryProducts.value.map(item => ({
     id: `advisory-${item.id}`,
     advisory_id: item.id,
     account_id: item.account_id,
+    member_id: item.member_id,
     source_type: 'advisory',
     category_code: 'advisory',
     name: item.product_name,
@@ -280,7 +301,7 @@ const groupedAssets = computed(() => {
     member_emoji: item.member_emoji,
     remark: item.remark || '顾投组合日报',
   }))
-  for (const item of [...advisoryAssets, ...assets.value]) {
+  for (const item of [...advisoryAssets, ...filteredAssets.value]) {
     const category = categories.assets.find(categoryItem => categoryItem.code === item.category_code)
     const key = category?.group || 'other', name = category?.groupName || '其他资产'
     if (!map.has(key)) map.set(key, { key, name, total: 0, items: [] })
@@ -288,20 +309,47 @@ const groupedAssets = computed(() => {
   }
   return [...map.values()]
 })
-const assetTrendPoints = computed(() => assetTrend.value.map(item => ({
+const filterTrendByMember = rows => {
+  if (selectedMemberId.value === 'all') return rows
+  let totalValue = 0
+  return rows.flatMap(item => {
+    const operations = (item.operations || []).filter(matchesSelectedMember)
+    if (!operations.length) return []
+    totalValue += operations.reduce((sum, operation) => sum + Number(operation.change_value || 0), 0)
+    return [{ ...item, total_value: Number(totalValue.toFixed(2)), operations }]
+  })
+}
+const filteredAssetTrend = computed(() => filterTrendByMember(assetTrend.value))
+const filteredReceivableTrend = computed(() => filterTrendByMember(receivableTrend.value))
+const assetTrendPoints = computed(() => filteredAssetTrend.value.map(item => ({
   key: item.key,
   date: item.date,
   value: Number(item.total_value || 0),
   raw: item,
 })))
 const selectedAssetOperations = computed(() => selectedAssetTrend.value?.operations || [])
-const receivableTrendPoints = computed(() => receivableTrend.value.map(item => ({
+const receivableTrendPoints = computed(() => filteredReceivableTrend.value.map(item => ({
   key: item.key,
   date: item.date,
   value: Number(item.total_value || 0),
   raw: item,
 })))
 const selectedReceivableOperations = computed(() => selectedReceivableTrend.value?.operations || [])
+const displayedReceivableSummary = computed(() => {
+  const todayValue = today()
+  const overdue = filteredReceivables.value.filter(item => item.due_date && item.due_date < todayValue)
+  return {
+    total_amount: filteredReceivables.value.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0),
+    total_count: filteredReceivables.value.length,
+    overdue_amount: overdue.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0),
+    overdue_count: overdue.length,
+  }
+})
+
+watch(selectedMemberId, () => {
+  selectedAssetTrend.value = null
+  selectedReceivableTrend.value = null
+})
 
 const loadData = async () => {
   if (loading.value) return
@@ -508,6 +556,10 @@ onActivated(loadData)
   box-shadow: 0 3px 10px rgba(37, 59, 91, .08);
 }
 .section-tabs button.active span { background: #1e80ff; color: #fff; }
+.member-filter { display:flex; gap:7px; margin:10px 12px 0; padding:2px 0 4px; overflow-x:auto; scrollbar-width:none; }
+.member-filter::-webkit-scrollbar { display:none; }
+.member-filter button { flex:none; min-height:32px; padding:0 12px; border:1px solid #e2e8f0; border-radius:999px; background:#fff; color:#64748b; font-size:12px; }
+.member-filter button.active { border-color:#1e80ff; background:#eaf4ff; color:#1e80ff; font-weight:600; box-shadow:0 4px 12px rgba(30,128,255,.1); }
 
 .content-card,
 .trend-section { margin-top: 12px; padding: 16px; }

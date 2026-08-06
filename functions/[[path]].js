@@ -1628,6 +1628,7 @@ export async function onRequest(context) {
         env.DB.prepare(`
           SELECT p.id, p.product_name, p.account_id, p.status, p.remark, p.include_in_investable_assets,
                  a.name AS account_name, a.channel AS account_channel,
+                 COALESCE(p.member_id, a.member_id) AS member_id,
                  m.name AS member_name, m.emoji AS member_emoji,
                  s.snapshot_date, COALESCE(s.total_amount, 0) AS total_amount,
                  COALESCE(s.daily_profit, 0) AS daily_profit,
@@ -2814,15 +2815,28 @@ export async function onRequest(context) {
     // 与基金 positions/trades 完全隔离，只在总览中读取基金市值。
     if (path === '/api/family-finance/overview' && method === 'GET') {
       const data = await getFamilyFinanceData();
-      const [snapshotQuery, assetRecordQuery, receivableHistoryQuery, receivablePaymentQuery] = await Promise.all([
+      const [snapshotQuery, assetRecordQuery, advisoryHistoryQuery, receivableHistoryQuery, receivablePaymentQuery] = await Promise.all([
         env.DB.prepare('SELECT snapshot_date, summary_json FROM household_family_snapshots WHERE household_id = ? ORDER BY snapshot_date DESC LIMIT 24').bind(householdId).all(),
         env.DB.prepare(`
-          SELECT r.*, a.name AS asset_name, a.category_code, m.name AS member_name, m.emoji AS member_emoji
+          SELECT r.*, a.name AS asset_name, a.category_code, a.member_id,
+                 m.name AS member_name, m.emoji AS member_emoji
           FROM family_asset_records r
           JOIN family_assets a ON r.asset_id = a.id
           LEFT JOIN members m ON a.member_id = m.id
           WHERE a.status != 'archived' AND a.household_id = ?
           ORDER BY r.record_date ASC, r.created_at ASC, r.id ASC
+          LIMIT 120
+        `).bind(householdId).all(),
+        env.DB.prepare(`
+          SELECT s.id, s.product_id, s.snapshot_date, s.total_amount, s.created_at, s.updated_at,
+                 p.product_name AS asset_name, COALESCE(p.member_id, a.member_id) AS member_id,
+                 m.name AS member_name, m.emoji AS member_emoji
+          FROM advisory_product_snapshots s
+          JOIN advisory_products p ON s.product_id = p.id
+          LEFT JOIN accounts a ON p.account_id = a.id
+          LEFT JOIN members m ON COALESCE(p.member_id, a.member_id) = m.id
+          WHERE COALESCE(p.status, '正常') != '已删除' AND p.household_id = ?
+          ORDER BY s.snapshot_date ASC, s.created_at ASC, s.id ASC
           LIMIT 120
         `).bind(householdId).all(),
         env.DB.prepare(`
@@ -2841,25 +2855,66 @@ export async function onRequest(context) {
           ORDER BY p.payment_date ASC, p.created_at ASC, p.id ASC
         `).bind(householdId).all(),
       ]);
-      const assetBalances = new Map();
-      const assetTrend = (assetRecordQuery.results || []).map(record => {
-        assetBalances.set(record.asset_id, normalizeFamilyMoney(record.current_value));
-        const totalValue = normalizeFamilyMoney([...assetBalances.values()].reduce((sum, value) => sum + value, 0));
-        return {
-          key: record.id,
-          date: record.record_date,
+      const assetEvents = (assetRecordQuery.results || []).map(record => ({
+        key: record.id,
+        type: 'manual',
+        asset_id: record.asset_id,
+        date: record.record_date,
+        created_at: record.created_at,
+        updated_at: record.created_at,
+        current_value: normalizeFamilyMoney(record.current_value),
+        operation: {
+          id: record.id,
+          asset_id: record.asset_id,
+          asset_name: record.asset_name,
+          category_code: record.category_code,
+          member_id: record.member_id,
+          member_name: record.member_name,
+          member_emoji: record.member_emoji,
+          change_value: normalizeFamilyMoney(record.change_value),
+          remark: record.remark,
+        },
+      }));
+      const advisoryBalancesByProduct = new Map();
+      (advisoryHistoryQuery.results || []).forEach(record => {
+        const previousValue = Number(advisoryBalancesByProduct.get(record.product_id) || 0);
+        const currentValue = normalizeFamilyMoney(record.total_amount);
+        advisoryBalancesByProduct.set(record.product_id, currentValue);
+        assetEvents.push({
+          key: `advisory-${record.id}`,
+          type: 'advisory',
+          asset_id: `advisory-${record.product_id}`,
+          date: record.snapshot_date,
           created_at: record.created_at,
-          total_value: totalValue,
-          operations: [{
-            id: record.id,
-            asset_id: record.asset_id,
+          updated_at: record.updated_at,
+          current_value: currentValue,
+          operation: {
+            id: `advisory-${record.id}`,
+            asset_id: `advisory-${record.product_id}`,
             asset_name: record.asset_name,
-            category_code: record.category_code,
+            category_code: 'advisory',
+            member_id: record.member_id,
             member_name: record.member_name,
             member_emoji: record.member_emoji,
-            change_value: normalizeFamilyMoney(record.change_value),
-            remark: record.remark,
-          }],
+            change_value: normalizeFamilyMoney(currentValue - previousValue),
+            remark: previousValue === 0 ? '初始录入顾投资产' : '更新顾投资产',
+          },
+        });
+      });
+      assetEvents.sort((a, b) => String(a.date).localeCompare(String(b.date))
+        || Number(a.created_at || 0) - Number(b.created_at || 0)
+        || Number(a.updated_at || 0) - Number(b.updated_at || 0)
+        || String(a.key).localeCompare(String(b.key)));
+      const assetBalances = new Map();
+      const assetTrend = assetEvents.map(event => {
+        assetBalances.set(event.asset_id, normalizeFamilyMoney(event.current_value));
+        const totalValue = normalizeFamilyMoney([...assetBalances.values()].reduce((sum, value) => sum + value, 0));
+        return {
+          key: event.key,
+          date: event.date,
+          created_at: event.created_at,
+          total_value: totalValue,
+          operations: [event.operation],
         };
       });
       const receivableRows = receivableHistoryQuery.results || [];
@@ -2872,6 +2927,7 @@ export async function onRequest(context) {
         amount: normalizeFamilyMoney(row.original_amount),
         receivable_name: row.name,
         category_code: row.category_code,
+        member_id: row.member_id,
         member_name: row.member_name,
         member_emoji: row.member_emoji,
         remark: row.remark || '新增应收款',
@@ -2885,6 +2941,7 @@ export async function onRequest(context) {
         amount: normalizeFamilyMoney(row.amount),
         receivable_name: row.receivable_name,
         category_code: row.category_code,
+        member_id: row.member_id,
         member_name: row.member_name,
         member_emoji: row.member_emoji,
         remark: row.remark || '记录回款',
@@ -3772,12 +3829,14 @@ export async function onRequest(context) {
         await env.DB.prepare(
           'UPDATE advisory_product_snapshots SET total_amount = ?, daily_profit = ?, current_profit = ?, profit_rate = ?, updated_at = unixepoch() WHERE id = ?'
         ).bind(total_amount, daily_profit, current_profit, profit_rate, existing.results[0].id).run();
+        queueFamilySnapshot(snapshot_date);
         return jsonResponse({ code: 0, data: { id: existing.results[0].id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate } });
       }
       const id = generateId();
       await env.DB.prepare(
         'INSERT INTO advisory_product_snapshots (id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate) VALUES (?, ?, ?, ?, ?, ?, ?)'
       ).bind(id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate).run();
+      queueFamilySnapshot(snapshot_date);
       return jsonResponse({ code: 0, data: { id, product_id, snapshot_date, total_amount, daily_profit, current_profit, profit_rate } });
     }
 
