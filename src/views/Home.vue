@@ -223,9 +223,9 @@
             <button v-if="selectedEvent.event_type === 'nav_update'" class="outline" :disabled="eventSyncing" @click="syncSelectedEvent">{{ eventSyncing ? '同步中...' : '立即补同步' }}</button>
             <button
               class="primary"
-              :disabled="eventProcessing"
+              :disabled="eventProcessing || isDividendProcessingBlocked(selectedEvent)"
               @click="selectedEvent.source_type === 'dividend_announcement' ? processDividendEvent() : changeEventStatus('processed')"
-            >{{ eventProcessing ? '处理中...' : selectedEvent.source_type === 'dividend_announcement' ? '立即处理' : '标记已处理' }}</button>
+            >{{ eventProcessing ? '处理中...' : dividendProcessButtonLabel(selectedEvent) }}</button>
           </template>
           <button v-else class="outline full" @click="changeEventStatus('pending')">重新打开</button>
         </div>
@@ -389,6 +389,12 @@ const formatEventDateTime = timestamp => eventDate(timestamp).toLocaleString('zh
 const formatDividendPerShare = value => Number(value || 0).toFixed(4)
 const formatShareQuantity = value => Number(value || 0).toFixed(4)
 const isReinvestDividendEvent = event => event?.event_type === 'dividend' && ['红利再投', '分红再投'].includes(event?.detail?.trade_type)
+const isDividendProcessingBlocked = event => event?.source_type === 'dividend_announcement' && Boolean(event?.dividend_preview?.error)
+const dividendProcessButtonLabel = event => {
+  if (event?.source_type !== 'dividend_announcement') return '标记已处理'
+  if (!isDividendProcessingBlocked(event)) return '立即处理'
+  return String(event?.dividend_preview?.error || '').includes('净值') ? '待净值公布' : '暂不可处理'
+}
 const profitClass = value => ({ positive: Number(value || 0) > 0, negative: Number(value || 0) < 0, neutral: Number(value || 0) === 0 })
 const displayMoney = value => amountsHidden.value ? '¥••••••' : `¥${formatNumber(value || 0)}`
 const displaySignedMoney = value => {
@@ -433,6 +439,10 @@ const changeEventStatus = async status => {
 
 const processDividendEvent = async () => {
   if (!selectedEvent.value || eventProcessing.value) return
+  if (isDividendProcessingBlocked(selectedEvent.value)) {
+    showToast(selectedEvent.value.dividend_preview.error)
+    return
+  }
   eventProcessing.value = true
   try {
     const result = await eventApi.updateStatus(selectedEvent.value.id, { status: 'processed' })
@@ -1012,6 +1022,7 @@ onActivated(() => {
 .event-detail-description, .event-detail-note { margin-top: 14px; padding: 14px; border-radius: 10px; background: #f8fafc; font-size: 13px; line-height: 1.6; color: #475569; }
 .event-detail-actions { display: flex; gap: 8px; margin-top: 20px; }
 .event-detail-actions button { flex: 1; min-height: 44px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.event-detail-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 .event-detail-actions .secondary { background: #fff; border: 1px solid #cbd5e1; color: #475569; }
 .event-detail-actions .outline { background: #fff; border: 1px solid #2563eb; color: #2563eb; }
 .event-detail-actions .primary { background: #2563eb; border: 1px solid #2563eb; color: #fff; }

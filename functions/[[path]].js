@@ -2293,6 +2293,15 @@ export async function onRequest(context) {
       const positions = await getDividendPositions(event);
       if (!positions.length) throw new Error('当前没有该基金的有效持仓，无法处理分红');
       const reinvestNav = await resolveDividendReinvestNav(event, detail, positions);
+      const hasReinvestPosition = positions.some(position => (position.dividend_method || '红利再投') === '红利再投');
+      if (hasReinvestPosition && reinvestNav <= 0) {
+        const exDate = String(detail.ex_date || detail.record_date || '').trim();
+        const chinaToday = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        if (exDate && chinaToday < exDate) {
+          throw new Error(`除息日为 ${exDate}，红利再投需等待除息日净值公布后处理`);
+        }
+        throw new Error(`除息日${exDate ? ` ${exDate}` : ''}净值尚未公布，公布后即可处理红利再投`);
+      }
       const drafts = positions.map(position => ({
         position,
         trade: buildDividendTrade({ position, detail, confirmedNav: reinvestNav }),

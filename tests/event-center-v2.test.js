@@ -36,6 +36,13 @@ test('分红公告提供立即处理并展示四位精度的每份分红', () =>
   assert.match(homeSource, /红利再投新增/)
 })
 
+test('红利再投缺少除息日净值时禁用处理并提示等待净值公布', () => {
+  assert.match(apiSource, /红利再投需等待除息日净值公布后处理/)
+  assert.match(apiSource, /净值尚未公布，公布后即可处理红利再投/)
+  assert.match(homeSource, /isDividendProcessingBlocked\(selectedEvent\)/)
+  assert.match(homeSource, /待净值公布/)
+})
+
 test('事件详情弹层挂载到 body 顶层且高于固定底部菜单', () => {
   assert.match(homeSource, /teleport="body"/)
   assert.match(homeSource, /:z-index="1000"/)
