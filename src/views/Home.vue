@@ -61,7 +61,7 @@
 
     <!-- 成员分布 -->
     <div v-if="contributionMemberTabs.length" class="section member-distribution-section">
-      <div class="section-heading"><div><div class="section-title">成员分布</div><div class="section-subtitle">查看成员各类基金资产的持有收益</div></div></div>
+      <div class="section-heading"><div><div class="section-title">成员分布</div><div class="section-subtitle">查看成员各账户的持有收益</div></div></div>
       <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看资产分布">
         <button v-for="member in contributionMemberTabs" :key="member.member_id" :class="{ active: selectedContributionMemberId === member.member_id }" role="tab" @click="selectedContributionMemberId = member.member_id">{{ member.emoji }} {{ member.member_name }}</button>
       </div>
@@ -72,7 +72,7 @@
               <span class="member-emoji">{{ selectedOverviewMember.emoji }}</span>
               <div class="member-title-wrap">
                 <span class="member-name">{{ selectedOverviewMember.member_name }}</span>
-                <span class="member-count">{{ selectedOverviewMember.assetCategories?.length || 0 }}类资产</span>
+                <span class="member-count">{{ selectedOverviewMember.accounts?.length || 0 }}个账户</span>
               </div>
             </div>
             <div class="member-overview">
@@ -81,7 +81,7 @@
             </div>
           </div>
 
-          <div v-if="selectedOverviewMember.assetCategories?.length" class="member-stats two-metrics">
+          <div v-if="selectedOverviewMember.accounts?.length" class="member-stats two-metrics">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
               <span class="stat-value">¥{{ formatNumber(selectedOverviewMember.marketValue || 0) }}</span>
@@ -92,21 +92,21 @@
             </div>
           </div>
 
-          <div v-if="selectedOverviewMember.assetCategories?.length" class="member-asset-list">
-            <div v-for="asset in selectedOverviewMember.assetCategories" :key="asset.assetCategory" class="member-asset-item">
-              <div class="asset-main">
-                <div class="asset-title-row">
-                  <span class="asset-name">{{ asset.assetCategoryLabel }}</span>
-                  <span class="asset-count">{{ asset.fundCount }}只</span>
+          <div v-if="selectedOverviewMember.accounts?.length" class="member-account-list">
+            <button v-for="account in selectedOverviewMember.accounts" :key="account.accountId" class="member-account-item" @click="openAccount(account)">
+              <div class="account-main">
+                <div class="account-title-row">
+                  <span class="account-name">{{ account.accountName }}</span>
+                  <span v-if="account.channel" class="account-channel">{{ account.channel }}</span>
                 </div>
-                <div class="asset-subtitle">持有金额 ¥{{ formatNumber(asset.marketValue || 0) }}</div>
+                <div class="account-subtitle">持有金额 ¥{{ formatNumber(account.marketValue || 0) }}</div>
               </div>
-              <div class="asset-side">
-                <div class="asset-profit-label">总收益</div>
-                <div class="asset-profit" :class="profitClass(asset.totalProfit)">{{ displaySignedMoney(asset.totalProfit) }}</div>
-                <div class="asset-profit-rate" :class="profitClass(asset.totalProfitRate)">{{ displayPercent(asset.totalProfitRate) }}</div>
+              <div class="account-side">
+                <div class="account-profit-label">总收益</div>
+                <div class="account-profit" :class="profitClass(account.profit)">{{ displaySignedMoney(account.profit) }}</div>
+                <div class="account-profit-rate" :class="profitClass(account.profitRate)">{{ displayPercent(account.profitRate) }}</div>
               </div>
-            </div>
+            </button>
           </div>
 
           <div v-else class="member-empty">
@@ -401,6 +401,7 @@ const displayPercent = value => {
   return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`
 }
 const openPosition = item => item.positionId ? router.push(`/positions/${item.positionId}`) : router.push('/positions')
+const openAccount = account => router.push({ path: '/positions', query: { account_id: account.accountId } })
 const eventDetailDescription = event => {
   if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
   const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)
@@ -795,14 +796,14 @@ onActivated(() => {
   color: #4ade80;
 }
 
-.member-asset-list {
+.member-account-list {
   margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.member-asset-item {
+.member-account-item {
   width: 100%;
   display: flex;
   align-items: center;
@@ -815,25 +816,25 @@ onActivated(() => {
   text-align: left;
 }
 
-.asset-main {
+.account-main {
   flex: 1;
   min-width: 0;
 }
 
-.asset-title-row {
+.account-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.asset-name {
+.account-name {
   font-size: 14px;
   font-weight: 600;
   color: #1f2937;
 }
 
-.asset-count {
+.account-channel {
   font-size: 11px;
   color: #6366f1;
   background: #eef2ff;
@@ -841,37 +842,37 @@ onActivated(() => {
   padding: 2px 8px;
 }
 
-.asset-subtitle {
+.account-subtitle {
   margin-top: 6px;
   font-size: 12px;
   color: #94a3b8;
 }
 
-.asset-side {
+.account-side {
   text-align: right;
   flex-shrink: 0;
 }
-.asset-profit-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
+.account-profit-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
 
-.asset-profit,
-.asset-profit-rate {
+.account-profit,
+.account-profit-rate {
   font-family: 'Courier New', monospace;
   font-size: 13px;
   font-weight: 700;
 }
 
-.asset-profit-rate {
+.account-profit-rate {
   margin-top: 4px;
   font-size: 10px;
 }
 
-.asset-profit.positive,
-.asset-profit-rate.positive {
+.account-profit.positive,
+.account-profit-rate.positive {
   color: #f87171;
 }
 
-.asset-profit.negative,
-.asset-profit-rate.negative {
+.account-profit.negative,
+.account-profit-rate.negative {
   color: #4ade80;
 }
 

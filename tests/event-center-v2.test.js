@@ -124,27 +124,28 @@ test('首页日收益展示基于总资产减持有收益的收益率并优化�
   assert.match(homeSource, /contribution-main \{ flex: 1;[\s\S]*align-items: flex-start/)
 })
 
-test('首页成员分布展示成员总收益和各资产类别收益率', () => {
+test('首页成员分布展示成员总收益和各账户持有收益率', () => {
   assert.match(homeSource, /member-overview-label">总收益/)
   assert.match(homeSource, /displaySignedMoney\(selectedOverviewMember\.profit\)/)
-  assert.match(homeSource, /selectedOverviewMember\.assetCategories/)
-  assert.match(homeSource, /asset\.assetCategoryLabel/)
-  assert.match(homeSource, /displaySignedMoney\(asset\.totalProfit\)/)
-  assert.match(homeSource, /displayPercent\(asset\.totalProfitRate\)/)
-  assert.match(apiSource, /memberAssetCategoryMap/)
+  assert.match(homeSource, /selectedOverviewMember\.accounts/)
+  assert.match(homeSource, /account\.accountName/)
+  assert.match(homeSource, /displaySignedMoney\(account\.profit\)/)
+  assert.match(homeSource, /displayPercent\(account\.profitRate\)/)
+  assert.match(apiSource, /accounts: memberAccounts/)
 })
 
 test('成员分布使用成员 Tab 单成员展示并位于总收益贡献之前', () => {
   assert.match(homeSource, /selectedOverviewMember/)
   assert.match(homeSource, /aria-label="选择成员查看资产分布"/)
-  assert.match(homeSource, /selectedOverviewMember\.assetCategories/)
+  assert.match(homeSource, /selectedOverviewMember\.accounts/)
   assert.ok(homeSource.indexOf('成员分布') < homeSource.indexOf('总收益贡献'))
 })
 
-test('成员分布不再展示账户日收益', () => {
+test('成员分布按账户展示总收益且不再展示日收益', () => {
   const memberSection = homeSource.slice(homeSource.indexOf('<!-- 成员分布 -->'), homeSource.indexOf('class="section contribution-section"'))
   assert.doesNotMatch(memberSection, /日收益/)
-  assert.doesNotMatch(memberSection, /selectedOverviewMember\.accounts/)
+  assert.match(memberSection, /selectedOverviewMember\.accounts/)
+  assert.match(memberSection, /account\.accountName/)
   assert.match(memberSection, /持有金额/)
   assert.match(memberSection, /总收益/)
 })
