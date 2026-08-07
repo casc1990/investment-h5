@@ -34,6 +34,17 @@ test('分红解析兼容表格标签之间的空白', () => {
   assert.equal(rows[0].dividend_per_share, 0.005)
 })
 
+test('分红解析兼容每10份派现金并换算成每份金额', () => {
+  const fund008163Html = '<tr><td>2026年</td><td>2026-08-06</td><td>2026-08-06</td><td>每10份派现金0.0400元</td><td>2026-08-07</td></tr>'
+  const rows = parseUpcomingDividendRows(fund008163Html, { now: new Date('2026-08-08T10:00:00+08:00') })
+  assert.deepEqual(rows, [{
+    record_date: '2026-08-06',
+    ex_date: '2026-08-06',
+    dividend_per_share: 0.004,
+    payment_date: '2026-08-07',
+  }])
+})
+
 test('周末扫描会回看前3个工作日并收集012708在7月9日的分红', () => {
   const fund012708Html = '<tr><td>2026年</td><td>2026-07-09</td><td>2026-07-09</td><td>每份派现金0.0040元</td><td>2026-07-13</td></tr>'
   const rows = parseUpcomingDividendRows(fund012708Html, { now: new Date('2026-07-11T10:00:00+08:00') })

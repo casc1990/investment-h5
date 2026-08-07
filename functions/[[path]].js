@@ -148,15 +148,17 @@ export function parseUpcomingDividendRows(html = '', {
   const startDate = getChinaDateString(addChinaBusinessDays(now, -Math.max(0, Number(businessDaysBefore || 0))));
   const endDate = getChinaDateString(addChinaBusinessDays(now, Math.max(0, Number(businessDaysAfter || 0))));
   const rows = [];
-  const rowPattern = /<tr>\s*<td>\d{4}年<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<td>每份派现金([\d.]+)元<\/td>\s*<td>(\d{4}-\d{2}-\d{2})<\/td>\s*<\/tr>/g;
+  const rowPattern = /<tr[^>]*>\s*<td[^>]*>\d{4}年<\/td>\s*<td[^>]*>(\d{4}-\d{2}-\d{2})<\/td>\s*<td[^>]*>(\d{4}-\d{2}-\d{2})<\/td>\s*<td[^>]*>每\s*(?:(\d+(?:\.\d+)?)\s*)?份派现金\s*([\d.]+)\s*元<\/td>\s*<td[^>]*>(\d{4}-\d{2}-\d{2})<\/td>\s*<\/tr>/g;
   let match;
   while ((match = rowPattern.exec(String(html || ''))) !== null) {
-    const [, recordDate, exDate, dividendPerShare, paymentDate] = match;
+    const [, recordDate, exDate, unitCountText, dividendAmountText, paymentDate] = match;
     if (recordDate < startDate || recordDate > endDate) continue;
+    const unitCount = Math.max(1, Number(unitCountText || 1));
+    const dividendPerShare = Number((Number(dividendAmountText || 0) / unitCount).toFixed(8));
     rows.push({
       record_date: recordDate,
       ex_date: exDate,
-      dividend_per_share: Number(dividendPerShare),
+      dividend_per_share: dividendPerShare,
       payment_date: paymentDate,
     });
   }
