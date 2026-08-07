@@ -61,7 +61,7 @@
 
     <!-- 成员分布 -->
     <div v-if="contributionMemberTabs.length" class="section member-distribution-section">
-      <div class="section-heading"><div><div class="section-title">成员分布</div><div class="section-subtitle">查看成员资产与账户日收益</div></div></div>
+      <div class="section-heading"><div><div class="section-title">成员分布</div><div class="section-subtitle">查看成员各类基金资产的持有收益</div></div></div>
       <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看资产分布">
         <button v-for="member in contributionMemberTabs" :key="member.member_id" :class="{ active: selectedContributionMemberId === member.member_id }" role="tab" @click="selectedContributionMemberId = member.member_id">{{ member.emoji }} {{ member.member_name }}</button>
       </div>
@@ -72,50 +72,41 @@
               <span class="member-emoji">{{ selectedOverviewMember.emoji }}</span>
               <div class="member-title-wrap">
                 <span class="member-name">{{ selectedOverviewMember.member_name }}</span>
-                <span class="member-count">{{ selectedOverviewMember.accounts?.length || 0 }}个账户</span>
+                <span class="member-count">{{ selectedOverviewMember.assetCategories?.length || 0 }}类资产</span>
               </div>
             </div>
             <div class="member-overview">
-              <div class="member-overview-label">日收益</div>
-              <div class="member-overview-profit" :class="profitClass(selectedOverviewMember.dailyProfit)">{{ displaySignedMoney(selectedOverviewMember.dailyProfit) }}</div>
+              <div class="member-overview-label">总收益</div>
+              <div class="member-overview-profit" :class="profitClass(selectedOverviewMember.profit)">{{ displaySignedMoney(selectedOverviewMember.profit) }}</div>
             </div>
           </div>
 
-          <div v-if="selectedOverviewMember.accounts?.length" class="member-stats four-metrics">
+          <div v-if="selectedOverviewMember.assetCategories?.length" class="member-stats two-metrics">
             <div class="stat-item">
               <span class="stat-label">总资产</span>
               <span class="stat-value">¥{{ formatNumber(selectedOverviewMember.marketValue || 0) }}</span>
             </div>
-            <div class="stat-item align-right"><span class="stat-label">日收益</span><span class="stat-value profit" :class="profitClass(selectedOverviewMember.dailyProfit)">{{ displaySignedMoney(selectedOverviewMember.dailyProfit) }}</span></div>
-            <div class="stat-item"><span class="stat-label">总收益</span><span class="stat-value profit" :class="profitClass(selectedOverviewMember.profit)">{{ displaySignedMoney(selectedOverviewMember.profit) }}</span></div>
             <div class="stat-item align-right">
               <span class="stat-label">总收益率</span>
-              <span class="stat-value profit" :class="profitClass(selectedOverviewMember.profit)">
-                {{ selectedOverviewMember.profitRate || 0 }}%
-              </span>
+              <span class="stat-value profit" :class="profitClass(selectedOverviewMember.profitRate)">{{ displayPercent(selectedOverviewMember.profitRate) }}</span>
             </div>
           </div>
 
-          <div v-if="selectedOverviewMember.accounts?.length" class="member-account-list">
-            <button v-for="account in selectedOverviewMember.accounts" :key="account.accountId" class="member-account-item" @click="openAccount(account)">
-              <div class="account-main">
-                <div class="account-title-row">
-                  <span class="account-name">{{ account.accountName }}</span>
-                  <span v-if="account.channel" class="account-channel">{{ account.channel }}</span>
+          <div v-if="selectedOverviewMember.assetCategories?.length" class="member-asset-list">
+            <div v-for="asset in selectedOverviewMember.assetCategories" :key="asset.assetCategory" class="member-asset-item">
+              <div class="asset-main">
+                <div class="asset-title-row">
+                  <span class="asset-name">{{ asset.assetCategoryLabel }}</span>
+                  <span class="asset-count">{{ asset.fundCount }}只</span>
                 </div>
-                <div class="account-subtitle">持有金额 ¥{{ formatNumber(account.marketValue || 0) }}</div>
-                <div class="account-holding-profit" :class="profitClass(account.profit)">持有收益 {{ displaySignedMoney(account.profit) }}</div>
+                <div class="asset-subtitle">持有金额 ¥{{ formatNumber(asset.marketValue || 0) }}</div>
               </div>
-              <div class="account-side">
-                <div class="account-daily-label">日收益</div>
-                <div class="account-profit" :class="profitClass(account.dailyProfit)">
-                  {{ displaySignedMoney(account.dailyProfit) }}
-                </div>
-                <div class="account-holding-rate" :class="profitClass(account.profitRate)">
-                  持有收益率 {{ displayPercent(account.profitRate) }}
-                </div>
+              <div class="asset-side">
+                <div class="asset-profit-label">总收益</div>
+                <div class="asset-profit" :class="profitClass(asset.totalProfit)">{{ displaySignedMoney(asset.totalProfit) }}</div>
+                <div class="asset-profit-rate" :class="profitClass(asset.totalProfitRate)">{{ displayPercent(asset.totalProfitRate) }}</div>
               </div>
-            </button>
+            </div>
           </div>
 
           <div v-else class="member-empty">
@@ -127,19 +118,19 @@
 
     <div v-if="contributionMemberTabs.length" class="section contribution-section">
       <div class="section-heading">
-        <div><div class="section-title">每日收益贡献</div><div class="section-subtitle">每个账户展示当日收益率最高和最低基金</div></div>
+        <div><div class="section-title">总收益贡献</div><div class="section-subtitle">每个账户展示持有收益率最高和最低基金</div></div>
         <button class="section-more" @click="router.push('/positions')">全部持仓</button>
       </div>
-      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看每日收益贡献">
+      <div class="contribution-member-tabs" role="tablist" aria-label="选择成员查看总收益贡献">
         <button v-for="member in contributionMemberTabs" :key="member.member_id" :class="{ active: selectedContributionMemberId === member.member_id }" role="tab" @click="selectedContributionMemberId = member.member_id">{{ member.emoji }} {{ member.member_name }}</button>
       </div>
-      <div v-if="!accountContributionGroups.length" class="contribution-empty">该成员暂无基金日收益数据</div>
+      <div v-if="!accountContributionGroups.length" class="contribution-empty">该成员暂无基金持有收益数据</div>
       <div v-for="group in accountContributionGroups" :key="group.accountId" class="contribution-account-group">
         <div class="contribution-account-head"><strong>{{ group.accountName }}</strong><span>{{ group.items.length }} 项</span></div>
         <button v-for="item in group.items" :key="`${item.accountId}:${item.fundCode}:${item.rankLabel}`" class="contribution-item" @click="openPosition(item)">
           <span class="contribution-rank" :class="item.rankType">{{ item.rankLabel }}</span>
           <div class="contribution-main"><strong>{{ item.fundName }}</strong><span>{{ item.fundCode }}</span></div>
-          <div class="contribution-value" :class="profitClass(item.dailyProfit)"><strong>{{ displaySignedMoney(item.dailyProfit) }}</strong><span :class="profitClass(item.dailyChangeRate)">{{ displayPercent(item.dailyChangeRate) }}</span></div>
+          <div class="contribution-value" :class="profitClass(item.totalProfit)"><strong>{{ displaySignedMoney(item.totalProfit) }}</strong><span :class="profitClass(item.totalProfitRate)">{{ displayPercent(item.totalProfitRate) }}</span></div>
         </button>
       </div>
     </div>
@@ -301,13 +292,13 @@ const selectMyAssets = () => {
 const accountContributionGroups = computed(() => {
   const groups = new Map()
   const memberId = selectedContributionMemberId.value
-  for (const item of (overview.value?.dailyContributions || []).filter(row => !memberId || row.memberId === memberId)) {
+  for (const item of (overview.value?.totalContributions || []).filter(row => !memberId || row.memberId === memberId)) {
     const key = item.accountId || 'unassigned'
     if (!groups.has(key)) groups.set(key, { accountId: key, accountName: item.accountName || '未命名账户', funds: [] })
     groups.get(key).funds.push(item)
   }
   return [...groups.values()].map(group => {
-    const sorted = [...group.funds].sort((a, b) => Number(b.dailyChangeRate || 0) - Number(a.dailyChangeRate || 0))
+    const sorted = [...group.funds].sort((a, b) => Number(b.totalProfitRate || 0) - Number(a.totalProfitRate || 0))
     const highest = sorted[0]
     const lowest = sorted[sorted.length - 1]
     const items = highest ? [{ ...highest, rankLabel: '最高', rankType: 'highest' }] : []
@@ -410,7 +401,6 @@ const displayPercent = value => {
   return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`
 }
 const openPosition = item => item.positionId ? router.push(`/positions/${item.positionId}`) : router.push('/positions')
-const openAccount = account => router.push({ path: '/positions', query: { account_id: account.accountId } })
 const eventDetailDescription = event => {
   if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
   const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)
@@ -774,7 +764,7 @@ onActivated(() => {
   padding-top: 12px;
   border-top: 1px solid #edf2f7;
 }
-.member-stats.four-metrics { display: grid; grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
+.member-stats.two-metrics { display: grid; grid-template-columns: repeat(2, 1fr); }
 
 .stat-item {
   display: flex;
@@ -805,14 +795,14 @@ onActivated(() => {
   color: #4ade80;
 }
 
-.member-account-list {
+.member-asset-list {
   margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.member-account-item {
+.member-asset-item {
   width: 100%;
   display: flex;
   align-items: center;
@@ -825,25 +815,25 @@ onActivated(() => {
   text-align: left;
 }
 
-.account-main {
+.asset-main {
   flex: 1;
   min-width: 0;
 }
 
-.account-title-row {
+.asset-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.account-name {
+.asset-name {
   font-size: 14px;
   font-weight: 600;
   color: #1f2937;
 }
 
-.account-channel {
+.asset-count {
   font-size: 11px;
   color: #6366f1;
   background: #eef2ff;
@@ -851,40 +841,37 @@ onActivated(() => {
   padding: 2px 8px;
 }
 
-.account-subtitle {
+.asset-subtitle {
   margin-top: 6px;
   font-size: 12px;
   color: #94a3b8;
 }
-.account-holding-profit { margin-top: 5px; font-family: 'Courier New', monospace; font-size: 11px; font-weight: 700; }
 
-.account-side {
+.asset-side {
   text-align: right;
   flex-shrink: 0;
 }
-.account-daily-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
+.asset-profit-label { margin-bottom: 3px; font-size: 10px; color: #94a3b8; }
 
-.account-profit,
-.account-holding-rate {
+.asset-profit,
+.asset-profit-rate {
   font-family: 'Courier New', monospace;
   font-size: 13px;
   font-weight: 700;
 }
 
-.account-holding-rate {
+.asset-profit-rate {
   margin-top: 4px;
   font-size: 10px;
 }
 
-.account-profit.positive,
-.account-holding-profit.positive,
-.account-holding-rate.positive {
+.asset-profit.positive,
+.asset-profit-rate.positive {
   color: #f87171;
 }
 
-.account-profit.negative,
-.account-holding-profit.negative,
-.account-holding-rate.negative {
+.asset-profit.negative,
+.asset-profit-rate.negative {
   color: #4ade80;
 }
 

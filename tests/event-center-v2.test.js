@@ -85,8 +85,8 @@ test('分红公告详情按账户分红方式预览份额或现金', () => {
   assert.match(homeSource, /account\.dividend_method === '红利再投'/)
 })
 
-test('首页升级为带净值进度和收益贡献的每日收益看板', () => {
-  for (const text of ['基金资产', '每日收益贡献', '累计收益', '持仓收益率', '立即分配']) {
+test('首页升级为带净值进度和总收益贡献的收益看板', () => {
+  for (const text of ['基金资产', '总收益贡献', '累计收益', '持仓收益率', '立即分配']) {
     assert.match(homeSource, new RegExp(text))
   }
   for (const field of ['dailyProfitDate', 'updatedFundCount', 'totalFundCount', 'staleFundCount', 'dailyContributions']) {
@@ -96,13 +96,15 @@ test('首页升级为带净值进度和收益贡献的每日收益看板', () =>
   assert.match(homeSource, /amountsHidden/)
 })
 
-test('首页贡献榜按账户展示收益率最高最低基金且账户明确显示日收益', () => {
+test('首页贡献榜按账户展示持有收益率最高最低基金', () => {
   assert.match(homeSource, /accountContributionGroups/)
   assert.match(homeSource, /rankLabel: '最高'/)
   assert.match(homeSource, /rankLabel: '最低'/)
-  assert.match(homeSource, /每个账户展示当日收益率最高和最低基金/)
-  assert.match(homeSource, /account-daily-label">日收益/)
-  assert.match(apiSource, /accountStats\.dailyProfit/)
+  assert.match(homeSource, /每个账户展示持有收益率最高和最低基金/)
+  assert.match(homeSource, /b\.totalProfitRate/)
+  assert.match(homeSource, /displaySignedMoney\(item\.totalProfit\)/)
+  assert.match(apiSource, /totalContributions/)
+  assert.match(apiSource, /totalProfitRate:/)
 })
 
 test('首页贡献榜支持成员 Tab 且顶部更新进度与持有收益同行', () => {
@@ -122,24 +124,27 @@ test('首页日收益展示基于总资产减持有收益的收益率并优化�
   assert.match(homeSource, /contribution-main \{ flex: 1;[\s\S]*align-items: flex-start/)
 })
 
-test('首页成员分布同时展示总收益金额和总收益率', () => {
-  assert.match(homeSource, /<span class="stat-label">总收益<\/span>/)
+test('首页成员分布展示成员总收益和各资产类别收益率', () => {
+  assert.match(homeSource, /member-overview-label">总收益/)
   assert.match(homeSource, /displaySignedMoney\(selectedOverviewMember\.profit\)/)
-  assert.match(homeSource, /member-stats four-metrics/)
-  assert.match(homeSource, /member-stats\.four-metrics \{ display: grid; grid-template-columns: repeat\(2, 1fr\)/)
+  assert.match(homeSource, /selectedOverviewMember\.assetCategories/)
+  assert.match(homeSource, /asset\.assetCategoryLabel/)
+  assert.match(homeSource, /displaySignedMoney\(asset\.totalProfit\)/)
+  assert.match(homeSource, /displayPercent\(asset\.totalProfitRate\)/)
+  assert.match(apiSource, /memberAssetCategoryMap/)
 })
 
-test('成员分布使用成员 Tab 单成员展示并位于每日收益贡献之前', () => {
+test('成员分布使用成员 Tab 单成员展示并位于总收益贡献之前', () => {
   assert.match(homeSource, /selectedOverviewMember/)
   assert.match(homeSource, /aria-label="选择成员查看资产分布"/)
-  assert.match(homeSource, /selectedOverviewMember\.accounts/)
-  assert.ok(homeSource.indexOf('成员分布') < homeSource.indexOf('每日收益贡献'))
+  assert.match(homeSource, /selectedOverviewMember\.assetCategories/)
+  assert.ok(homeSource.indexOf('成员分布') < homeSource.indexOf('总收益贡献'))
 })
 
-test('成员分布的账户项同时展示持有收益金额和持有收益率', () => {
-  assert.match(homeSource, /持有收益 \{\{ displaySignedMoney\(account\.profit\) \}\}/)
-  assert.match(homeSource, /displayPercent\(account\.profitRate\)/)
-  assert.match(homeSource, /account-holding-profit/)
-  assert.match(homeSource, /account-holding-rate/)
-  assert.ok(homeSource.indexOf('account-subtitle') < homeSource.indexOf('account-holding-profit'))
+test('成员分布不再展示账户日收益', () => {
+  const memberSection = homeSource.slice(homeSource.indexOf('<!-- 成员分布 -->'), homeSource.indexOf('class="section contribution-section"'))
+  assert.doesNotMatch(memberSection, /日收益/)
+  assert.doesNotMatch(memberSection, /selectedOverviewMember\.accounts/)
+  assert.match(memberSection, /持有金额/)
+  assert.match(memberSection, /总收益/)
 })

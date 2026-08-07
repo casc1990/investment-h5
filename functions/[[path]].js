@@ -282,6 +282,26 @@ export function summarizeOverviewDailyProfits(positionDailyProfit = 0, advisoryD
   };
 }
 
+const OVERVIEW_ASSET_CATEGORY_ORDER = ['pure_bond', 'fixed_income', 'dividend', 'index', 'qdii', 'other'];
+const OVERVIEW_ASSET_CATEGORY_LABELS = {
+  pure_bond: '纯债基金',
+  fixed_income: '固收类基金',
+  dividend: '红利类基金',
+  index: '指数类基金',
+  qdii: '海外QDII基金',
+  other: '其他基金',
+};
+
+export function detectOverviewAssetCategory(fundName = '') {
+  const text = String(fundName || '').trim().toLowerCase();
+  if (['qdii', '纳斯达克', '纳指', '标普', '恒生', '日经', '道琼斯', 'msci', '海外', '全球'].some(keyword => text.includes(keyword))) return 'qdii';
+  if (['红利', '股息', '高股息', '红利低波'].some(keyword => text.includes(keyword))) return 'dividend';
+  if (['纯债', '中短债', '短债', '长债', '债券'].some(keyword => text.includes(keyword))) return 'pure_bond';
+  if (['指数', 'etf', '联接', '沪深300', '中证500', '中证1000', '创业板', '科创'].some(keyword => text.includes(keyword))) return 'index';
+  if (['固收', '增强', '稳健收益', '稳健增利', '收益增强', '一年持有', '持有期'].some(keyword => text.includes(keyword))) return 'fixed_income';
+  return 'other';
+}
+
 export function calculateOverviewPositionDailyProfit(position = {}, snapshot = null, now = new Date()) {
   const quantity = Number(position.quantity || position.shares || 0);
   const confirmedNav = Number(snapshot?.dwjz || snapshot?.gsz || position.nav_dwjz || position.nav_gsz || 0);
@@ -4292,6 +4312,8 @@ export async function onRequest(context) {
       let totalPositionYesterdayProfit = 0;
       let totalAdvisoryYesterdayProfit = 0;
       let totalCumulativeProfit = 0;
+      const memberAssetCategoryMap = new Map();
+      const totalContributionMap = new Map();
 
       accounts.forEach(acc => {
         accountStatsMap[acc.id] = {
@@ -4325,6 +4347,45 @@ export async function onRequest(context) {
         const positionDailyProfit = calculateOverviewPositionDailyProfitForDate(pos, snap, dailyProfitDate);
         accountStats.dailyProfit += positionDailyProfit;
         totalPositionYesterdayProfit += positionDailyProfit;
+
+        if (Number(pos.quantity || 0) > 0) {
+          const positionProfit = marketValue - cost;
+          const assetCategory = detectOverviewAssetCategory(pos.fund_name);
+          const categoryKey = `${accountStats.member_id || 'unassigned'}:${assetCategory}`;
+          const category = memberAssetCategoryMap.get(categoryKey) || {
+            assetCategory,
+            assetCategoryLabel: OVERVIEW_ASSET_CATEGORY_LABELS[assetCategory],
+            memberId: accountStats.member_id || null,
+            invested: 0,
+            marketValue: 0,
+            totalProfit: 0,
+            totalProfitRate: 0,
+            fundCodes: new Set(),
+          };
+          category.invested += cost;
+          category.marketValue += marketValue;
+          category.totalProfit += positionProfit;
+          category.fundCodes.add(pos.fund_code);
+          memberAssetCategoryMap.set(categoryKey, category);
+
+          const contributionKey = `${pos.account_id}:${pos.fund_code}`;
+          const contribution = totalContributionMap.get(contributionKey) || {
+            positionId: pos.id,
+            fundCode: pos.fund_code,
+            fundName: pos.fund_name || pos.fund_code,
+            accountId: pos.account_id,
+            accountName: accountStats.accountName || '',
+            memberId: accountStats.member_id || null,
+            invested: 0,
+            marketValue: 0,
+            totalProfit: 0,
+            totalProfitRate: 0,
+          };
+          contribution.invested += cost;
+          contribution.marketValue += marketValue;
+          contribution.totalProfit += positionProfit;
+          totalContributionMap.set(contributionKey, contribution);
+        }
       });
 
       const advisoryStats = advisoryProducts.map(product => {
@@ -4371,6 +4432,19 @@ export async function onRequest(context) {
           const memberProfit = memberMarketValue - memberInvested;
           const memberProfitRate = memberInvested > 0 ? (memberProfit / memberInvested * 100) : 0;
           const memberDailyProfit = memberAccounts.reduce((sum, account) => sum + account.dailyProfit, 0);
+          const assetCategories = [...memberAssetCategoryMap.values()]
+            .filter(category => category.memberId === member.id)
+            .map(category => ({
+              assetCategory: category.assetCategory,
+              assetCategoryLabel: category.assetCategoryLabel,
+              memberId: category.memberId,
+              invested: Number(category.invested.toFixed(2)),
+              marketValue: Number(category.marketValue.toFixed(2)),
+              totalProfit: Number(category.totalProfit.toFixed(2)),
+              totalProfitRate: Number((category.invested > 0 ? category.totalProfit / category.invested * 100 : 0).toFixed(2)),
+              fundCount: category.fundCodes.size,
+            }))
+            .sort((a, b) => OVERVIEW_ASSET_CATEGORY_ORDER.indexOf(a.assetCategory) - OVERVIEW_ASSET_CATEGORY_ORDER.indexOf(b.assetCategory));
           return {
             member_id: member.id,
             member_name: member.name,
@@ -4381,6 +4455,7 @@ export async function onRequest(context) {
             profit: Number(memberProfit.toFixed(2)),
             profitRate: Number(memberProfitRate.toFixed(2)),
             dailyProfit: Number(memberDailyProfit.toFixed(2)),
+            assetCategories,
           };
         })
         .filter(member => !memberId || member.member_id === memberId);
@@ -4415,6 +4490,15 @@ export async function onRequest(context) {
       const dailyContributions = [...contributionMap.values()]
         .map(item => ({ ...item, dailyProfit: Number(item.dailyProfit.toFixed(2)) }))
         .sort((a, b) => Math.abs(b.dailyProfit) - Math.abs(a.dailyProfit));
+      const totalContributions = [...totalContributionMap.values()]
+        .map(item => ({
+          ...item,
+          invested: Number(item.invested.toFixed(2)),
+          marketValue: Number(item.marketValue.toFixed(2)),
+          totalProfit: Number(item.totalProfit.toFixed(2)),
+          totalProfitRate: Number((item.invested > 0 ? item.totalProfit / item.invested * 100 : 0).toFixed(2)),
+        }))
+        .sort((a, b) => Math.abs(b.totalProfit) - Math.abs(a.totalProfit));
 
       return jsonResponse({
         code: 0,
@@ -4438,6 +4522,7 @@ export async function onRequest(context) {
           accounts: filteredAccounts,
           unassignedAccounts,
           dailyContributions,
+          totalContributions,
         },
       });
     }

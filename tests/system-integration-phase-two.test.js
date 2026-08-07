@@ -13,7 +13,7 @@ test('首页将家庭总览和基金资产合并为同一张主卡', () => {
   assert.match(homeSource, /class="fund-summary-block"/)
   assert.match(homeSource, /<span>基金资产<\/span>/)
   assert.doesNotMatch(homeSource, /class="header-card"/)
-  assert.match(homeSource, /每日收益贡献/)
+  assert.match(homeSource, /总收益贡献/)
 })
 
 test('统计页整合家庭资产和基金收益且保留原基金统计', () => {
@@ -42,7 +42,7 @@ test('家庭统计加载失败不会阻断现有基金统计', () => {
   assert.match(statsSource, /Failed to fetch family stats/)
 })
 
-test('首页账户入口和基金统计只保留真实基金持仓口径', () => {
-  assert.match(homeSource, /path: '\/positions'/)
+test('首页基金入口和收益统计只保留真实基金持仓口径', () => {
+  assert.match(homeSource, /router\.push\('\/positions'\)/)
   assert.doesNotMatch(homeSource, /account\.hasAdvisory/)
 })
