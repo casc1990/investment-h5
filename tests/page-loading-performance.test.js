@@ -17,11 +17,12 @@ test('首页一次请求读取两组事件，事件重建在后台独立执行',
   assert.match(apiSource, /groups:\s*\{[\s\S]*pending:[\s\S]*confirmed:/)
 })
 
-test('主要页面优先恢复缓存，统计快照保存不阻塞首屏', () => {
+test('主要页面优先恢复缓存，统计快照统一由服务端生成', () => {
   assert.match(homeSource, /readPageCache\('home'\)/)
   assert.match(statsSource, /readPageCache\('stats'\)/)
-  assert.match(snapshotSource, /persistProfitSnapshot\(snapshotResult\.snapshot\)\.catch/)
-  assert.doesNotMatch(snapshotSource, /await persistProfitSnapshot/)
+  assert.match(snapshotSource, /profitSnapshotApi\.capture\(\)/)
+  assert.match(snapshotSource, /serverSnapshot\?\.summary/)
+  assert.doesNotMatch(snapshotSource, /persistProfitSnapshot/)
 })
 
 test('策略详情优先恢复持仓缓存，并行刷新且首次激活不重复请求', () => {

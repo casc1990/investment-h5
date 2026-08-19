@@ -1,5 +1,5 @@
-import { advisoryApi, positionApi, statsApi } from '../api'
-import { persistProfitSnapshot, recordProfitSnapshot } from './profitLedger'
+import { advisoryApi, positionApi, profitSnapshotApi, statsApi } from '../api'
+import { recordProfitSnapshot } from './profitLedger'
 import { buildSnapshotPayloadFromApis } from './perfHelpers'
 
 export const fetchProfitSnapshotData = async () => {
@@ -17,20 +17,22 @@ export const fetchProfitSnapshotData = async () => {
 }
 
 export const captureProfitSnapshotFromApis = async () => {
-  const payload = await fetchProfitSnapshotData()
+  const [payload, captureData] = await Promise.all([
+    fetchProfitSnapshotData(),
+    profitSnapshotApi.capture(),
+  ])
+  const serverSnapshot = captureData?.snapshot || captureData?.snapshots?.[0]
 
   const snapshotResult = recordProfitSnapshot({
-    summary: payload.overview?.summary,
-    positions: payload.snapshotPositions,
+    summary: serverSnapshot?.summary,
+    positions: serverSnapshot?.positions,
+    capturedAt: serverSnapshot?.captured_at,
+    dateKey: serverSnapshot?.date,
   })
-  if (snapshotResult.saved) {
-    persistProfitSnapshot(snapshotResult.snapshot).catch(error => {
-      console.warn('[profitSnapshot] background save failed:', error)
-    })
-  }
 
   return {
     ...payload,
+    serverSnapshot,
     snapshotResult,
   }
 }

@@ -42,6 +42,13 @@ test('家庭统计加载失败不会阻断现有基金统计', () => {
   assert.match(statsSource, /Failed to fetch family stats/)
 })
 
+test('统计页刷新只能读取服务端生成的完整收益快照', () => {
+  const snapshotServiceSource = readFileSync(new URL('../src/utils/profitSnapshotService.js', import.meta.url), 'utf8')
+  assert.match(snapshotServiceSource, /profitSnapshotApi\.capture\(\)/)
+  assert.doesNotMatch(snapshotServiceSource, /profitSnapshotApi\.save/)
+  assert.doesNotMatch(snapshotServiceSource, /persistProfitSnapshot/)
+})
+
 test('首页基金入口和收益统计只保留真实基金持仓口径', () => {
   assert.match(homeSource, /router\.push\('\/positions'\)/)
   assert.doesNotMatch(homeSource, /account\.hasAdvisory/)

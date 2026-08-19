@@ -195,6 +195,7 @@ export const allocationProfileApi = {
 
 export const profitSnapshotApi = {
   list: () => dedupedGet('/profit-snapshots'),
+  capture: () => apiClient.post('/profit-snapshots/capture'),
   save: (snapshot) => apiClient.put(`/profit-snapshots/${snapshot.date}`, { snapshot }),
 }
 
