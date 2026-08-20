@@ -156,8 +156,6 @@ const annotatePosition = (item = {}) => ({
   fund_type: item.fund_type || detectFundType(item),
 })
 
-const hasFundScopedFilters = ({ fundType = 'all', fundQuery = '' } = {}) => normalizeFundTypeValue(fundType) !== 'all' || Boolean(normalizeText(fundQuery))
-
 const getChinaDateString = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Shanghai',
@@ -250,26 +248,6 @@ export const buildDailyHistoryRows = (snapshots = [], { memberId = 'all', accoun
     const contextPositions = filterSnapshotPositions(contextSnapshot, { memberId, accountId, fundType, fundQuery })
       .filter(item => !isAdvisoryPosition(item))
     const dailyProfit = Number(positions.reduce((sum, position) => sum + safeNumber(position?.yesterday_profit ?? position?.daily_profit), 0).toFixed(2))
-    const shouldUseSummary = memberId === 'all'
-      && accountId === 'all'
-      && !hasFundScopedFilters({ fundType, fundQuery })
-
-    if (shouldUseSummary) {
-      const summary = contextSnapshot?.summary || {}
-      return {
-        date,
-        member_id: 'all',
-        member_name: '全部成员',
-        account_id: 'all',
-        account_name: '全部账户',
-        total_market_value: Number(safeNumber(summary.totalMarketValue).toFixed(2)),
-        total_profit: Number(safeNumber(summary.totalHoldingProfit).toFixed(2)),
-        total_profit_rate: Number(safeNumber(summary.totalProfitRate).toFixed(2)),
-        daily_profit: dailyProfit,
-        daily_profit_rate: calcDailyProfitRate(dailyProfit, summary.totalMarketValue),
-      }
-    }
-
     if (!contextPositions.length) return null
 
     const aggregated = aggregatePositions(contextPositions, { memberId, accountId })

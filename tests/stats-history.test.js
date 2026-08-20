@@ -134,12 +134,12 @@ test('按天历史行可输出全部账户汇总', () => {
   assert.equal(rows.length, 3)
   assert.deepEqual(rows.map(item => item.date), ['2026-06-02', '2026-05-31', '2026-05-30'])
   assert.equal(rows[0].account_name, '全部账户')
-  assert.equal(rows[0].total_market_value, 4600)
+  assert.equal(rows[0].total_market_value, 5320)
   assert.equal(rows[0].total_profit, 820)
   assert.equal(rows[0].daily_profit, 44)
 })
 
-test('全部账户历史行优先使用基金昨日收益，不混入顾投昨日收益', () => {
+test('全部账户历史行只汇总基金金额和收益，不混入顾投数据', () => {
   const mixedSnapshots = [
     {
       date: '2026-06-10',
@@ -161,6 +161,9 @@ test('全部账户历史行优先使用基金昨日收益，不混入顾投昨�
 
   const rows = buildDailyHistoryRows(mixedSnapshots, { memberId: 'all', accountId: 'all' })
 
+  assert.equal(rows[0].total_market_value, 8500)
+  assert.equal(rows[0].total_profit, 500)
+  assert.equal(rows[0].total_profit_rate, 6.25)
   assert.equal(rows[0].daily_profit, 156.66)
 })
 
@@ -411,11 +414,11 @@ test('周期历史行可按月聚合并计算当期收益', () => {
   assert.equal(rows[0].period_label, '2026年06月')
   assert.equal(rows[0].start_date, '2026-06-01')
   assert.equal(rows[0].period_profit, 44)
-  assert.equal(rows[0].period_profit_rate, 0.97)
+  assert.equal(rows[0].period_profit_rate, 0.83)
   assert.equal(rows[0].period_max_drawdown, 0)
   assert.equal(rows[1].period_key, '2026-05')
   assert.equal(rows[1].period_profit, 110)
-  assert.equal(rows[1].period_profit_rate, 2.69)
+  assert.equal(rows[1].period_profit_rate, 2.29)
   assert.equal(rows[1].period_max_drawdown, 0)
 })
 
