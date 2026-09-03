@@ -2263,12 +2263,14 @@ export async function onRequest(context) {
 
     async function getDividendPositions(event) {
       const { results } = await env.DB.prepare(`
-        SELECT p.*, a.name AS account_name
+        SELECT p.*, a.name AS account_name, a.member_id,
+               m.name AS member_name, m.emoji AS member_emoji
         FROM positions p
-        LEFT JOIN accounts a ON a.id = p.account_id
-        WHERE p.fund_code = ? AND p.quantity > 0
-        ORDER BY p.account_id, p.id
-      `).bind(event.fund_code).all();
+        JOIN accounts a ON a.id = p.account_id
+        LEFT JOIN members m ON m.id = a.member_id AND m.household_id = a.household_id
+        WHERE p.fund_code = ? AND p.quantity > 0 AND a.household_id = ?
+        ORDER BY m.name, p.account_id, p.id
+      `).bind(event.fund_code, event.household_id || DEFAULT_HOUSEHOLD_ID).all();
       return results || [];
     }
 
@@ -2294,32 +2296,47 @@ export async function onRequest(context) {
       if (!positions.length) throw new Error('当前没有该基金的有效持仓，无法处理分红');
       const reinvestNav = await resolveDividendReinvestNav(event, detail, positions);
       const hasReinvestPosition = positions.some(position => (position.dividend_method || '红利再投') === '红利再投');
+      let processingBlockedReason = '';
       if (hasReinvestPosition && reinvestNav <= 0) {
         const exDate = String(detail.ex_date || detail.record_date || '').trim();
         const chinaToday = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
         if (exDate && chinaToday < exDate) {
-          throw new Error(`除息日为 ${exDate}，红利再投需等待除息日净值公布后处理`);
+          processingBlockedReason = `除息日为 ${exDate}，红利再投需等待除息日净值公布后处理`;
+        } else {
+          processingBlockedReason = `除息日${exDate ? ` ${exDate}` : ''}净值尚未公布，公布后即可处理红利再投`;
         }
-        throw new Error(`除息日${exDate ? ` ${exDate}` : ''}净值尚未公布，公布后即可处理红利再投`);
       }
       const drafts = positions.map(position => ({
         position,
-        trade: buildDividendTrade({ position, detail, confirmedNav: reinvestNav }),
+        trade: processingBlockedReason && (position.dividend_method || '红利再投') === '红利再投'
+          ? {
+              trade_type: TRADE_TYPES.REINVEST_DIVIDEND,
+              quantity: null,
+              amount: Number((Number(position.quantity || 0) * Number(detail.dividend_per_share || 0)).toFixed(4)),
+              reinvest_nav: null,
+            }
+          : buildDividendTrade({ position, detail, confirmedNav: reinvestNav }),
       }));
       const accounts = drafts.map(({ position, trade }) => ({
         position_id: position.id,
         account_id: position.account_id,
         account_name: position.account_name || '',
+        member_id: position.member_id || '',
+        member_name: position.member_name || '未关联成员',
+        member_emoji: position.member_emoji || '👤',
         held_quantity: Number(position.quantity || 0),
         dividend_method: position.dividend_method || '红利再投',
         amount: trade.amount,
-        added_quantity: trade.quantity || 0,
+        added_quantity: trade.quantity,
         reinvest_nav: trade.reinvest_nav,
       }));
       return {
         accounts,
-        total_added_quantity: Number(accounts.reduce((sum, item) => sum + item.added_quantity, 0).toFixed(4)),
+        member_count: new Set(accounts.map(item => item.member_id || item.member_name)).size,
+        account_count: new Set(accounts.map(item => item.account_id)).size,
+        total_added_quantity: Number(accounts.reduce((sum, item) => sum + Number(item.added_quantity || 0), 0).toFixed(4)),
         total_cash_amount: Number(accounts.filter(item => item.dividend_method !== '红利再投').reduce((sum, item) => sum + item.amount, 0).toFixed(4)),
+        error: processingBlockedReason || undefined,
       };
     }
 
@@ -2327,6 +2344,7 @@ export async function onRequest(context) {
       let detail = {};
       try { detail = JSON.parse(event.detail_json || '{}'); } catch { detail = {}; }
       const preview = await previewDividendAnnouncement(event);
+      if (preview.error) throw new Error(preview.error);
       const positions = await getDividendPositions(event);
       const drafts = positions.map(position => ({
         position,

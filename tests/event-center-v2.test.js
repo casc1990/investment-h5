@@ -92,6 +92,23 @@ test('分红公告详情按账户分红方式预览份额或现金', () => {
   assert.match(homeSource, /account\.dividend_method === '红利再投'/)
 })
 
+test('同一基金由多位成员持有时按家庭隔离并展示成员账户归属', () => {
+  assert.match(apiSource, /a\.household_id = \?/)
+  assert.match(apiSource, /m\.name AS member_name/)
+  assert.match(apiSource, /member_count: new Set/)
+  assert.match(homeSource, /所属成员/)
+  assert.match(homeSource, /持有份额/)
+  assert.match(homeSource, /dividend-account-block/)
+  assert.match(homeSource, /account\.member_emoji/)
+  assert.match(homeSource, /涉及 \$\{memberCount\} 位成员、\$\{accountCount\} 个账户/)
+})
+
+test('除息净值未公布时仍返回成员账户预览但禁止分红入账', () => {
+  assert.match(apiSource, /error: processingBlockedReason \|\| undefined/)
+  assert.match(apiSource, /if \(preview\.error\) throw new Error\(preview\.error\)/)
+  assert.match(homeSource, /account\.added_quantity == null \? '待净值公布'/)
+})
+
 test('首页升级为带净值进度和总收益贡献的收益看板', () => {
   for (const text of ['基金资产', '总收益贡献', '累计收益', '持仓收益率', '立即分配']) {
     assert.match(homeSource, new RegExp(text))

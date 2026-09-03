@@ -200,13 +200,15 @@
           <div class="event-detail-row"><span>除息日</span><b>{{ selectedEvent.detail?.ex_date || '—' }}</b></div>
           <div class="event-detail-row"><span>每份分红</span><b>{{ formatDividendPerShare(selectedEvent.detail?.dividend_per_share) }} 元</b></div>
           <div class="event-detail-row"><span>红利发放日</span><b>{{ selectedEvent.detail?.payment_date || '—' }}</b></div>
-          <template v-for="account in selectedEvent.dividend_preview?.accounts || []" :key="account.position_id">
+          <div v-for="account in selectedEvent.dividend_preview?.accounts || []" :key="account.position_id" class="dividend-account-block">
+            <div class="event-detail-row"><span>所属成员</span><b>{{ account.member_emoji }} {{ account.member_name || '未关联成员' }}</b></div>
             <div class="event-detail-row"><span>所属账户</span><b>{{ account.account_name || '—' }}</b></div>
+            <div class="event-detail-row"><span>持有份额</span><b>{{ formatShareQuantity(account.held_quantity) }} 份</b></div>
             <div class="event-detail-row"><span>分红方式</span><b>{{ account.dividend_method }}</b></div>
-            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>预计新增份额</span><b>{{ formatShareQuantity(account.added_quantity) }} 份</b></div>
-            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>份额折算净值</span><b>{{ formatDividendPerShare(account.reinvest_nav) }}</b></div>
+            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>预计新增份额</span><b>{{ account.added_quantity == null ? '待净值公布' : `${formatShareQuantity(account.added_quantity)} 份` }}</b></div>
+            <div v-if="account.dividend_method === '红利再投'" class="event-detail-row"><span>份额折算净值</span><b>{{ account.reinvest_nav == null ? '待公布' : formatDividendPerShare(account.reinvest_nav) }}</b></div>
             <div v-else class="event-detail-row"><span>预计现金分红</span><b>{{ formatNumber(account.amount) }} 元</b></div>
-          </template>
+          </div>
           <div v-if="selectedEvent.dividend_preview?.error" class="event-detail-note">{{ selectedEvent.dividend_preview.error }}</div>
         </template>
         <template v-else>
@@ -410,11 +412,15 @@ const openPosition = item => item.positionId ? router.push(`/positions/${item.po
 const openAccount = account => router.push({ path: '/positions', query: { account_id: account.accountId } })
 const eventDetailDescription = event => {
   if (event?.source_type !== 'dividend_announcement' || !event?.dividend_preview?.accounts?.length) return event?.description || ''
+  const memberCount = Number(event.dividend_preview.member_count || 0)
+  const accountCount = Number(event.dividend_preview.account_count || 0)
+  const ownershipSummary = `涉及 ${memberCount} 位成员、${accountCount} 个账户。`
+  if (event.dividend_preview.error) return ownershipSummary
   const addedQuantity = Number(event.dividend_preview.total_added_quantity || 0)
   const cashAmount = Number(event.dividend_preview.total_cash_amount || 0)
-  if (addedQuantity > 0 && cashAmount > 0) return `预计红利再投新增 ${addedQuantity.toFixed(4)} 份，现金分红 ${formatNumber(cashAmount)} 元。`
-  if (addedQuantity > 0) return `该持仓采用红利再投，预计新增 ${addedQuantity.toFixed(4)} 份。`
-  return `该持仓采用现金分红，预计到账 ${formatNumber(cashAmount)} 元。`
+  if (addedQuantity > 0 && cashAmount > 0) return `${ownershipSummary}预计红利再投新增 ${addedQuantity.toFixed(4)} 份，现金分红 ${formatNumber(cashAmount)} 元。`
+  if (addedQuantity > 0) return `${ownershipSummary}预计红利再投新增 ${addedQuantity.toFixed(4)} 份。`
+  return `${ownershipSummary}预计现金分红到账 ${formatNumber(cashAmount)} 元。`
 }
 
 const openEventDetail = async event => {
@@ -1019,6 +1025,8 @@ onActivated(() => {
 .event-detail-row { display: flex; justify-content: space-between; gap: 24px; padding: 12px 0; border-top: 1px solid #f1f5f9; font-size: 13px; }
 .event-detail-row span { color: #64748b; }
 .event-detail-row b { text-align: right; font-weight: 500; }
+.dividend-account-block { margin-top: 12px; padding: 0 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fbfdff; }
+.dividend-account-block .event-detail-row:first-child { border-top: 0; }
 .event-detail-description, .event-detail-note { margin-top: 14px; padding: 14px; border-radius: 10px; background: #f8fafc; font-size: 13px; line-height: 1.6; color: #475569; }
 .event-detail-actions { display: flex; gap: 8px; margin-top: 20px; }
 .event-detail-actions button { flex: 1; min-height: 44px; border-radius: 8px; font-size: 13px; font-weight: 600; }
