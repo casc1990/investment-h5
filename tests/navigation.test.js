@@ -28,6 +28,7 @@ test('资产配置页面仍在 keep-alive 白名单中', () => {
 
 test('统计相关别名路由仍映射到统计菜单高亮', () => {
   assert.equal(MAIN_TAB_INDEX_MAP['/ledger'], MAIN_TAB_INDEX_MAP['/stats'])
+  assert.equal(resolveMainTabIndex('/data-health'), MAIN_TAB_INDEX_MAP['/stats'])
 })
 
 test('成员和账户合并到我的入口', () => {

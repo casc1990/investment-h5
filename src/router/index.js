@@ -58,6 +58,11 @@ const routes = [
     component: () => import('../views/Stats.vue'),
   },
   {
+    path: '/data-health',
+    name: 'DataHealth',
+    component: () => import('../views/DataHealth.vue'),
+  },
+  {
     path: '/allocation',
     name: 'AllocationStrategies',
     component: () => import('../views/AllocationStrategies.vue'),

@@ -4,7 +4,7 @@
  */
 
 import axios from 'axios'
-import { shouldLogApi } from '../utils/appShell.js'
+import { notifyInvestmentDataUpdated, shouldLogApi } from '../utils/appShell.js'
 import { unwrapApiPayload } from '../utils/apiResponse.js'
 
 const APP_ENV = import.meta.env || {}
@@ -26,6 +26,12 @@ const dedupedGet = (url, config = {}) => {
   const request = apiClient.get(url, config).finally(() => pendingGetRequests.delete(key))
   pendingGetRequests.set(key, request)
   return request
+}
+
+const mutateInvestmentData = async (request, source) => {
+  const result = await request
+  notifyInvestmentDataUpdated({ source })
+  return result
 }
 
 // 请求拦截：注入 token
@@ -119,18 +125,18 @@ export const accountApi = {
 export const positionApi = {
   list: (params) => dedupedGet('/positions', { params }),
   get: (id) => apiClient.get(`/positions/${id}`),
-  create: (data) => apiClient.post('/positions', data),
-  update: (id, data) => apiClient.put(`/positions/${id}`, data),
-  delete: (id) => apiClient.delete(`/positions/${id}`),
+  create: (data) => mutateInvestmentData(apiClient.post('/positions', data), 'position'),
+  update: (id, data) => mutateInvestmentData(apiClient.put(`/positions/${id}`, data), 'position'),
+  delete: (id) => mutateInvestmentData(apiClient.delete(`/positions/${id}`), 'position'),
 }
 
 // ============ 交易 API ============
 
 export const tradeApi = {
   list: (params) => apiClient.get('/trades', { params }),
-  create: (data) => apiClient.post('/trades', data),
-  convert: (data) => apiClient.post('/trades/convert', data),
-  delete: (id) => apiClient.delete(`/trades/${id}`),
+  create: (data) => mutateInvestmentData(apiClient.post('/trades', data), 'trade'),
+  convert: (data) => mutateInvestmentData(apiClient.post('/trades/convert', data), 'trade'),
+  delete: (id) => mutateInvestmentData(apiClient.delete(`/trades/${id}`), 'trade'),
 }
 
 // ============ 行情 API ============
@@ -152,7 +158,7 @@ export const eventApi = {
   list: (params) => dedupedGet('/events', { params }),
   reconcile: () => apiClient.post('/events/reconcile'),
   get: (id) => apiClient.get(`/events/${id}`),
-  updateStatus: (id, data) => apiClient.patch(`/events/${id}/status`, data),
+  updateStatus: (id, data) => mutateInvestmentData(apiClient.patch(`/events/${id}/status`, data), 'event'),
 }
 
 // ============ 成员 API ============

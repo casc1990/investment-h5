@@ -51,7 +51,7 @@ const getPeriodKey = (dateKey, period) => {
   return String(dateKey)
 }
 
-const getPeriodStartDate = (period, periodKey) => {
+export const getPeriodStartDate = (period, periodKey) => {
   if (period === 'week') return String(periodKey)
   if (period === 'month') return `${periodKey}-01`
   if (period === 'quarter') {
@@ -84,13 +84,13 @@ const normalizeScopeLabel = ({ memberName = '', accountName = '', memberId = 'al
   return '全部账户'
 }
 
-const isAdvisoryPosition = (item = {}) => String(item.id || item.fund_code || '').startsWith('advisory-')
+export const isAdvisoryPosition = (item = {}) => String(item.id || item.fund_code || '').startsWith('advisory-')
 
 const normalizeText = (value = '') => String(value || '').trim().toLowerCase()
 
 const containsAny = (text = '', keywords = []) => keywords.some(keyword => text.includes(keyword))
 
-const getPositionMarketValue = (item = {}) => {
+export const getPositionMarketValue = (item = {}) => {
   const directValue = Number(item.current_market_value)
   if (Number.isFinite(directValue)) return directValue
   return safeNumber(item.cost) + safeNumber(item.current_profit)
@@ -190,7 +190,7 @@ const aggregatePositions = (positions = [], { memberId = 'all', accountId = 'all
   }
 }
 
-const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '', fundCode = 'all' } = {}) => {
+export const filterSnapshotPositions = (snapshot = {}, { memberId = 'all', accountId = 'all', fundType = 'all', fundQuery = '', fundCode = 'all' } = {}) => {
   return (snapshot.positions || [])
     .map(annotatePosition)
     .filter((item) => {

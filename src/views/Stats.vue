@@ -156,6 +156,7 @@
           <div class="section-title">🗂️ 周期汇总</div>
           <div class="section-subtitle">{{ currentPeriodLabel }}视角下的阶段表现</div>
         </div>
+        <button class="health-entry-button" @click="router.push('/data-health')">数据健康 <van-icon name="arrow" /></button>
       </div>
 
       <div class="chip-row period-selector-row">
@@ -169,25 +170,35 @@
       </div>
 
       <div v-if="periodRows.length" class="period-list">
-        <div v-for="row in visiblePeriodRows" :key="row.period_key" class="period-card">
+        <div
+          v-for="row in visiblePeriodReconciliations"
+          :key="row.period_key"
+          class="period-card reconciliation-card"
+          role="button"
+          tabindex="0"
+          @click="openReconciliation(row)"
+          @keydown.enter="openReconciliation(row)"
+        >
           <div class="period-top">
             <div>
               <div class="period-title">{{ row.period_label }} <span v-if="row.period_scope_note" class="period-scope-note">{{ row.period_scope_note }}</span></div>
-              <div class="period-date">{{ row.start_date }} ~ {{ row.end_date }}</div>
+              <div class="period-date">{{ row.coverage_start_date }} ~ {{ row.end_date }} <span v-if="row.coverage_note">· {{ row.coverage_note }}</span></div>
             </div>
-            <div class="period-amount">¥{{ formatAmount(row.total_market_value) }}</div>
+            <div class="period-closing-value"><span>期末基金市值</span><strong>¥{{ formatAmount(row.closing_market_value) }}</strong></div>
           </div>
-          <div class="period-grid">
-            <div>
-              <span class="small-label">当期收益</span>
-              <div class="small-value" :class="profitClass(row.period_profit)">{{ formatSignedAmount(row.period_profit) }}</div>
-            </div>
-            <div>
-              <span class="small-label">当期收益率</span>
-              <div class="small-value" :class="profitClass(row.period_profit_rate)">{{ formatSignedPercent(row.period_profit_rate) }}</div>
-            </div>
+          <div class="reconciliation-equation">
+            <div><span>期初</span><strong>¥{{ formatAmount(row.opening_market_value) }}</strong></div>
+            <i>+</i>
+            <div><span>资金/持仓</span><strong :class="profitClass(row.net_capital_flow)">{{ formatSignedAmount(row.net_capital_flow) }}</strong></div>
+            <i>+</i>
+            <div><span>投资收益</span><strong :class="profitClass(row.investment_profit)">{{ formatSignedAmount(row.investment_profit) }}</strong></div>
+            <i>=</i>
+            <div><span>期末</span><strong>¥{{ formatAmount(row.closing_market_value) }}</strong></div>
           </div>
-          <div class="period-secondary">最大亏损 <span :class="profitClass(row.period_max_drawdown)">{{ formatSignedAmount(row.period_max_drawdown) }}</span> · 总收益率 <span :class="profitClass(row.total_profit_rate)">{{ formatSignedPercent(row.total_profit_rate) }}</span></div>
+          <div class="period-secondary">
+            <span>投资收益率 <b :class="profitClass(row.investment_profit_rate)">{{ formatSignedPercent(row.investment_profit_rate) }}</b></span>
+            <span class="reconciliation-link">{{ row.is_balanced ? '已对平' : '待核对' }} · 查看明细 <van-icon name="arrow" /></span>
+          </div>
         </div>
         <button
           v-if="periodRows.length > 2"
@@ -282,23 +293,59 @@
       <van-empty v-else description="暂无历史快照，点一次刷新统计即可开始积累" />
     </div>
 
+    <van-popup v-model:show="showReconciliationDetail" position="bottom" round teleport="body" class="reconciliation-popup">
+      <div v-if="selectedReconciliation" class="reconciliation-detail">
+        <div class="detail-drag-handle"></div>
+        <div class="detail-header">
+          <div><strong>周期对账明细</strong><span>{{ selectedReconciliation.coverage_start_date }} ~ {{ selectedReconciliation.end_date }}{{ selectedReconciliation.coverage_note ? ` · ${selectedReconciliation.coverage_note}` : '' }}</span></div>
+          <button @click="showReconciliationDetail = false"><van-icon name="cross" /></button>
+        </div>
+        <div class="detail-equation">
+          <div><span>期初市值</span><b>¥{{ formatAmount(selectedReconciliation.opening_market_value) }}</b></div>
+          <i>+</i>
+          <div><span>资金/持仓变动</span><b :class="profitClass(selectedReconciliation.net_capital_flow)">{{ formatSignedAmount(selectedReconciliation.net_capital_flow) }}</b></div>
+          <i>+</i>
+          <div><span>投资收益</span><b :class="profitClass(selectedReconciliation.investment_profit)">{{ formatSignedAmount(selectedReconciliation.investment_profit) }}</b></div>
+          <i>=</i>
+          <div><span>期末市值</span><b>¥{{ formatAmount(selectedReconciliation.closing_market_value) }}</b></div>
+        </div>
+        <div class="detail-status" :class="{ balanced: selectedReconciliation.is_balanced }">
+          <van-icon :name="selectedReconciliation.is_balanced ? 'passed' : 'warning-o'" />
+          {{ selectedReconciliation.is_balanced ? '数据已对平' : '存在待核对差额' }}
+        </div>
+        <div class="ledger-heading"><strong>明细流水</strong><span>交易归属日 · 收益确认日</span></div>
+        <div v-if="selectedReconciliation.ledger_entries.length" class="ledger-list">
+          <div v-for="entry in selectedReconciliation.ledger_entries" :key="entry.key" class="ledger-row">
+            <div class="ledger-date">{{ shortMonthDay(entry.date) }}</div>
+            <div class="ledger-copy"><span class="ledger-category">{{ entry.category }}</span><strong>{{ entry.title }}</strong><small>{{ entry.note }}</small></div>
+            <b :class="profitClass(entry.amount)">{{ formatSignedAmount(entry.amount) }}</b>
+          </div>
+        </div>
+        <van-empty v-else image-size="60" description="该周期暂无资金或收益流水" />
+        <p v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="detail-note">
+          资金/持仓变动中含 {{ formatSignedAmount(selectedReconciliation.inferred_position_flow) }} 未关联交易流水的持仓调整，可在上方明细中核对。
+        </p>
+      </div>
+    </van-popup>
+
     </template>
     <van-loading v-if="loading" type="spinner" class="loading" />
   </div>
 </template>
 
 <script setup>
-import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
 import PeriodProfitBarChart from '../components/PeriodProfitBarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
-import { familyFinanceApi } from '../api'
+import { familyFinanceApi, tradeApi } from '../api'
 import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
 import { shouldRefreshPageData } from '../utils/perfHelpers'
+import { INVESTMENT_DATA_UPDATED_EVENT } from '../utils/appShell'
 import { fetchProfitSnapshots, getProfitSnapshots } from '../utils/profitLedger'
 import { readPageCache, writePageCache } from '../utils/pageCache'
 import {
@@ -311,6 +358,7 @@ import {
   buildTrendSeries,
   getNextLoopDisplayCount,
 } from '../utils/statsHistory'
+import { buildPeriodReconciliations } from '../utils/statsReconciliation'
 
 const cachedStats = readPageCache('stats')
 const router = useRouter()
@@ -319,6 +367,7 @@ const overview = ref(cachedStats?.overview || null)
 const familyOverview = ref(cachedStats?.familyOverview || null)
 const activeStatsDomain = ref('family')
 const allSnapshots = ref(getProfitSnapshots())
+const allTrades = ref(cachedStats?.trades || [])
 const lastLoadedAt = ref(cachedStats?.savedAt || 0)
 const hasLoadedOnce = ref(Boolean(cachedStats?.overview))
 
@@ -339,6 +388,8 @@ const periodVisibleCountMap = ref({
 })
 const dailyHistoryVisibleCount = ref(2)
 const contributionRange = ref(30)
+const selectedReconciliation = ref(null)
+const showReconciliationDetail = ref(false)
 
 const familyMoney = value => `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const compactFamilyMoney = value => {
@@ -399,6 +450,15 @@ const syncSnapshots = async () => {
   try { allSnapshots.value = await fetchProfitSnapshots() } catch { refreshSnapshots() }
 }
 
+const loadTrades = async () => {
+  try {
+    const tradeData = await tradeApi.list()
+    allTrades.value = tradeData?.trades || []
+  } catch (error) {
+    console.warn('Failed to load reconciliation trades:', error)
+  }
+}
+
 const fetchData = async () => {
   loading.value = true
   try {
@@ -408,7 +468,8 @@ const fetchData = async () => {
     if (familyResult.status === 'fulfilled') familyOverview.value = familyResult.value
     else console.warn('Failed to fetch family stats:', familyResult.reason)
     refreshSnapshots()
-    writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value })
+    await loadTrades()
+    writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value })
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
   } catch (error) {
@@ -429,7 +490,7 @@ const handleRefresh = async () => {
     loading.value = true
     try {
       familyOverview.value = await familyFinanceApi.overview()
-      writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value })
+      writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value })
       showToast('家庭资产统计已刷新')
     } catch (error) {
       console.error('Failed to refresh family stats:', error)
@@ -488,9 +549,24 @@ const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   fundType: selectedFundType.value,
   period: periodMode.value,
 }))
+const periodReconciliations = computed(() => buildPeriodReconciliations({
+  periodRows: periodRows.value,
+  dailyRows: allDailyHistoryRows.value,
+  snapshots: allSnapshots.value,
+  trades: allTrades.value,
+  filters: {
+    memberId: selectedMember.value,
+    accountId: selectedAccount.value,
+    fundType: selectedFundType.value,
+  },
+}))
 const visiblePeriodRows = computed(() => {
   const count = periodVisibleCountMap.value[periodMode.value] || 2
   return periodRows.value.slice(0, count)
+})
+const visiblePeriodReconciliations = computed(() => {
+  const count = periodVisibleCountMap.value[periodMode.value] || 2
+  return periodReconciliations.value.slice(0, count)
 })
 const contributionRows = computed(() => buildPeriodProfitContributionRows(allSnapshots.value, {
   memberId: selectedMember.value,
@@ -533,8 +609,14 @@ const formatSignedPercent = (value) => {
 }
 
 const formatCurrencyValue = (value) => `¥${formatAmount(value)}`
+const shortMonthDay = date => String(date || '').slice(5).replace('-', '月') + (date ? '日' : '')
 const handleTrendSelect = (row) => {
   selectedTrendRow.value = row
+}
+
+const openReconciliation = (row) => {
+  selectedReconciliation.value = row
+  showReconciliationDetail.value = true
 }
 
 const handleMorePeriodRows = () => {
@@ -590,6 +672,10 @@ const selectMyAssets = () => {
   selectedAccount.value = 'all'
 }
 
+const handleInvestmentDataUpdated = () => {
+  fetchData().catch(() => {})
+}
+
 watch(memberOptions, (options) => {
   const exists = options.some(item => item.value === selectedMember.value)
   if (!exists) selectedMember.value = 'all'
@@ -606,14 +692,21 @@ watch(fundTypeOptions, (options) => {
 }, { immediate: true })
 
 onMounted(() => {
+  window.addEventListener(INVESTMENT_DATA_UPDATED_EVENT, handleInvestmentDataUpdated)
   loadAuthIdentity().catch(() => {})
   ensureFreshData({ force: true })
   syncSnapshots().catch(() => {})
+  loadTrades().catch(() => {})
+})
+
+onUnmounted(() => {
+  window.removeEventListener(INVESTMENT_DATA_UPDATED_EVENT, handleInvestmentDataUpdated)
 })
 
 onActivated(() => {
   ensureFreshData()
   syncSnapshots().catch(() => {})
+  loadTrades().catch(() => {})
 })
 </script>
 
@@ -1161,6 +1254,85 @@ onActivated(() => {
   padding: 10px 12px;
 }
 
+.health-entry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: #eef5ff;
+  color: #1e80ff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reconciliation-card {
+  cursor: pointer;
+  background: linear-gradient(180deg, #fff 0%, #fbfdff 100%);
+  border-color: #e2e9f3;
+  box-shadow: 0 5px 16px rgba(37, 59, 91, .05);
+}
+
+.period-closing-value {
+  flex: none;
+  text-align: right;
+}
+
+.period-closing-value span,
+.reconciliation-equation span {
+  display: block;
+  color: #8a94a3;
+  font-size: 9px;
+}
+
+.period-closing-value strong {
+  display: block;
+  margin-top: 2px;
+  color: #172033;
+  font-family: 'Courier New', monospace;
+  font-size: 15px;
+}
+
+.reconciliation-equation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr) 10px minmax(0, 1fr) 10px minmax(0, 1fr);
+  align-items: center;
+  margin-top: 9px;
+  padding: 9px 7px;
+  border-radius: 10px;
+  background: #f6f9fd;
+}
+
+.reconciliation-equation > div {
+  min-width: 0;
+  text-align: center;
+}
+
+.reconciliation-equation > div:last-child {
+  grid-column: 7 / 8;
+}
+
+.reconciliation-equation i {
+  color: #a3adbb;
+  font-size: 11px;
+  font-style: normal;
+  text-align: center;
+}
+
+.reconciliation-equation strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #334155;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .period-card .period-top {
   align-items: center;
 }
@@ -1184,6 +1356,96 @@ onActivated(() => {
   font-size: 11px;
   text-align: right;
 }
+
+.reconciliation-card .period-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.reconciliation-link {
+  display: inline-flex;
+  align-items: center;
+  color: #1e80ff;
+  font-weight: 600;
+}
+
+:deep(.reconciliation-popup) {
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #f5f7fb;
+}
+
+.reconciliation-detail {
+  padding: 0 14px calc(24px + env(safe-area-inset-bottom));
+}
+
+.detail-drag-handle {
+  width: 38px;
+  height: 4px;
+  margin: 8px auto 12px;
+  border-radius: 999px;
+  background: #d8dee8;
+}
+
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 3px 13px;
+}
+
+.detail-header strong,
+.detail-header span {
+  display: block;
+}
+
+.detail-header strong { color: #172033; font-size: 18px; }
+.detail-header span { margin-top: 3px; color: #8a94a3; font-size: 11px; }
+.detail-header button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: #e8edf5; color: #64748b; }
+
+.detail-equation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 11px minmax(0, 1fr) 11px minmax(0, 1fr) 11px minmax(0, 1fr);
+  align-items: center;
+  padding: 13px 8px;
+  border: 1px solid #e2e9f3;
+  border-radius: 15px;
+  background: #fff;
+}
+
+.detail-equation > div { min-width: 0; text-align: center; }
+.detail-equation > div:last-child { grid-column: 7 / 8; }
+.detail-equation span { display: block; color: #8490a3; font-size: 9px; }
+.detail-equation b { display: block; margin-top: 4px; overflow: hidden; color: #253047; font-family: 'Courier New', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.detail-equation i { color: #9aa5b5; font-style: normal; text-align: center; }
+
+.detail-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin: 8px 0 13px;
+  color: #f59e0b;
+  font-size: 11px;
+}
+
+.detail-status.balanced { color: #16b364; }
+.ledger-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 0 3px 8px; }
+.ledger-heading strong { color: #253047; font-size: 14px; }
+.ledger-heading span { color: #98a2b3; font-size: 9px; }
+.ledger-list { overflow: hidden; border: 1px solid #e4eaf2; border-radius: 15px; background: #fff; }
+.ledger-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 11px; border-bottom: 1px solid #eef2f7; }
+.ledger-row:last-child { border-bottom: 0; }
+.ledger-date { color: #1e80ff; font-size: 10px; font-weight: 700; }
+.ledger-copy { min-width: 0; }
+.ledger-category { display: inline-block; margin-bottom: 3px; padding: 2px 5px; border-radius: 5px; background: #eef5ff; color: #1e80ff; font-size: 9px; }
+.ledger-copy strong, .ledger-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-copy strong { color: #334155; font-size: 11px; }
+.ledger-copy small { margin-top: 2px; color: #98a2b3; font-size: 9px; }
+.ledger-row > b { font-family: 'Courier New', monospace; font-size: 11px; }
+.detail-note { margin-top: 9px; padding: 9px 10px; border-radius: 10px; background: #eef5ff; color: #6f7e94; font-size: 9px; line-height: 1.5; }
 
 .daily-history-card {
   background: #fafafa;

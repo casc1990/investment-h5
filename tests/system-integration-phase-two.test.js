@@ -26,6 +26,23 @@ test('统计页整合家庭资产和基金收益且保留原基金统计', () =>
   assert.match(statsSource, /收益走势/)
   assert.match(statsSource, /周期汇总/)
   assert.match(statsSource, /收益贡献与拖累/)
+  assert.match(statsSource, /期初/)
+  assert.match(statsSource, /资金\/持仓/)
+  assert.match(statsSource, /期末基金市值/)
+  assert.match(statsSource, /查看明细/)
+  assert.match(statsSource, /router\.push\('\/data-health'\)/)
+})
+
+test('数据健康页覆盖快照对账、净值和历史自动重算', () => {
+  const healthSource = readFileSync(new URL('../src/views/DataHealth.vue', import.meta.url), 'utf8')
+  const reconciliationSource = readFileSync(new URL('../src/utils/statsReconciliation.js', import.meta.url), 'utf8')
+  for (const text of ['数据健康', '历史自动重算', '重新检查']) {
+    assert.match(healthSource, new RegExp(text))
+  }
+  assert.match(reconciliationSource, /跨页面基金市值/)
+  assert.match(reconciliationSource, /周期收益对账/)
+  assert.match(healthSource, /buildPeriodReconciliations/)
+  assert.match(healthSource, /\['week', 'month', 'quarter', 'halfyear', 'year'\]/)
 })
 
 test('家庭净资产趋势读取快照净资产且资产结构按二级分类拆分', () => {
