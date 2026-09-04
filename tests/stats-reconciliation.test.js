@@ -76,6 +76,7 @@ test('缺少周期期初快照时从首个可用快照起算', () => {
   assert.equal(rows[0].explicit_capital_flow, 0)
   assert.equal(rows[0].net_capital_flow, 1000)
   assert.equal(rows[0].confirmed_profit, 22.68)
+  assert.equal(rows[0].ledger_entries.some(item => item.category === '快照差额'), true)
 })
 
 test('延迟补录交易只归属实际入账周期，不按旧交易日重复计算', () => {

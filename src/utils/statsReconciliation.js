@@ -147,10 +147,10 @@ export const buildPeriodReconciliations = ({
       ? [{
           key: `position-adjustment-${periodRow.period_key}`,
           date: endDate,
-          category: '持仓调整',
-          title: '未关联流水的持仓变动',
+          category: '快照差额',
+          title: '市值变化与明细合计的差额',
           amount: inferredPositionFlow,
-          note: '历史补录、手动校准或快照口径变化',
+          note: '非每日净值基金、精度差、历史补录或手动校准',
         }]
       : []
     const confirmationAdjustment = 0
@@ -232,9 +232,9 @@ export const buildDataHealthReport = ({ snapshots = [], overview = null, reconci
     },
     {
       key: 'unmatched-adjustments',
-      label: '未关联持仓变动',
+      label: '快照差额',
       status: adjustedPeriods.length > 0 ? 'warning' : 'passed',
-      detail: adjustedPeriods.length > 0 ? `${adjustedPeriods.length}个周期含历史补录或校准` : '所有变动均已关联流水',
+      detail: adjustedPeriods.length > 0 ? `${adjustedPeriods.length}个周期的市值变化与明细合计有差额` : '期末市值与明细合计一致',
     },
     {
       key: 'nav',

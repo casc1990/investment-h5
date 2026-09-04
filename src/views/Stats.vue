@@ -184,20 +184,28 @@
               <div class="period-title">{{ row.period_label }} <span v-if="row.period_scope_note" class="period-scope-note">{{ row.period_scope_note }}</span></div>
               <div class="period-date">{{ row.coverage_start_date }} ~ {{ row.end_date }} <span v-if="row.coverage_note">· {{ row.coverage_note }}</span></div>
             </div>
-            <div class="period-closing-value"><span>期末基金市值</span><strong>¥{{ formatAmount(row.closing_market_value) }}</strong></div>
+            <van-icon class="period-card-arrow" name="arrow" />
           </div>
-          <div class="reconciliation-equation">
-            <div><span>期初</span><strong>¥{{ formatAmount(row.opening_market_value) }}</strong></div>
-            <i>+</i>
-            <div><span>资金/持仓</span><strong :class="profitClass(row.net_capital_flow)">{{ formatSignedAmount(row.net_capital_flow) }}</strong></div>
-            <i>+</i>
-            <div><span>投资收益</span><strong :class="profitClass(row.investment_profit)">{{ formatSignedAmount(row.investment_profit) }}</strong></div>
-            <i>=</i>
-            <div><span>期末</span><strong>¥{{ formatAmount(row.closing_market_value) }}</strong></div>
+          <div class="period-metric-grid">
+            <div class="period-main-metric">
+              <span>期末基金市值</span>
+              <strong>¥{{ formatAmount(row.closing_market_value) }}</strong>
+            </div>
+            <div class="period-main-metric profit-metric">
+              <span>本期投资收益</span>
+              <strong :class="profitClass(row.investment_profit)">{{ formatSignedAmount(row.investment_profit) }}</strong>
+              <small :class="profitClass(row.investment_profit_rate)">{{ formatSignedPercent(row.investment_profit_rate) }}</small>
+            </div>
           </div>
-          <div class="period-secondary">
-            <span>投资收益率 <b :class="profitClass(row.investment_profit_rate)">{{ formatSignedPercent(row.investment_profit_rate) }}</b></span>
-            <span class="reconciliation-link">{{ row.is_balanced ? '已对平' : '待核对' }} · 查看明细 <van-icon name="arrow" /></span>
+          <div class="period-balance-line">
+            <span>期初 <b>¥{{ formatAmount(row.opening_market_value) }}</b></span>
+            <van-icon name="arrow" />
+            <span>期末 <b>¥{{ formatAmount(row.closing_market_value) }}</b></span>
+          </div>
+          <div class="period-secondary reconciliation-meta">
+            <span class="flow-chip">已记录资金 <b :class="profitClass(row.explicit_capital_flow)">{{ formatSignedAmount(row.explicit_capital_flow) }}</b></span>
+            <span v-if="Math.abs(row.inferred_position_flow) >= 0.01" class="snapshot-gap-chip">快照差额 <b :class="profitClass(row.inferred_position_flow)">{{ formatSignedAmount(row.inferred_position_flow) }}</b></span>
+            <span class="reconciliation-link">查看明细 <van-icon name="arrow" /></span>
           </div>
         </div>
         <button
@@ -301,18 +309,20 @@
           <button @click="showReconciliationDetail = false"><van-icon name="cross" /></button>
         </div>
         <div class="detail-equation">
-          <div><span>期初市值</span><b>¥{{ formatAmount(selectedReconciliation.opening_market_value) }}</b></div>
-          <i>+</i>
-          <div><span>资金/持仓变动</span><b :class="profitClass(selectedReconciliation.net_capital_flow)">{{ formatSignedAmount(selectedReconciliation.net_capital_flow) }}</b></div>
-          <i>+</i>
-          <div><span>投资收益</span><b :class="profitClass(selectedReconciliation.investment_profit)">{{ formatSignedAmount(selectedReconciliation.investment_profit) }}</b></div>
-          <i>=</i>
-          <div><span>期末市值</span><b>¥{{ formatAmount(selectedReconciliation.closing_market_value) }}</b></div>
+          <div><span>期初基金市值</span><b>¥{{ formatAmount(selectedReconciliation.opening_market_value) }}</b></div>
+          <div><span><i>+</i> 已记录资金流</span><b :class="profitClass(selectedReconciliation.explicit_capital_flow)">{{ formatSignedAmount(selectedReconciliation.explicit_capital_flow) }}</b></div>
+          <div><span><i>+</i> 本期投资收益</span><b :class="profitClass(selectedReconciliation.investment_profit)">{{ formatSignedAmount(selectedReconciliation.investment_profit) }}</b></div>
+          <div v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="snapshot-gap-row"><span><i>+</i> 快照差额</span><b :class="profitClass(selectedReconciliation.inferred_position_flow)">{{ formatSignedAmount(selectedReconciliation.inferred_position_flow) }}</b></div>
+          <div class="detail-total-row"><span><i>=</i> 期末基金市值</span><b>¥{{ formatAmount(selectedReconciliation.closing_market_value) }}</b></div>
         </div>
-        <div class="detail-status" :class="{ balanced: selectedReconciliation.is_balanced }">
-          <van-icon :name="selectedReconciliation.is_balanced ? 'passed' : 'warning-o'" />
-          {{ selectedReconciliation.is_balanced ? '数据已对平' : '存在待核对差额' }}
+        <div class="detail-status" :class="{ balanced: Math.abs(selectedReconciliation.inferred_position_flow) < 0.01 }">
+          <van-icon :name="Math.abs(selectedReconciliation.inferred_position_flow) < 0.01 ? 'passed' : 'info-o'" />
+          {{ Math.abs(selectedReconciliation.inferred_position_flow) < 0.01 ? '明细与快照完全匹配' : '已计入快照差额，等式已勾稽' }}
         </div>
+        <p v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="detail-note">
+          <strong>什么是快照差额？</strong>
+          它不是一笔真实交易，而是“期末市值变化”扣除已记录资金流和已确认收益后的差额。通常来自非每日净值基金、净值/份额精度、历史补录或手动校准。
+        </p>
         <div class="ledger-heading"><strong>明细流水</strong><span>交易归属日 · 收益确认日</span></div>
         <div v-if="selectedReconciliation.ledger_entries.length" class="ledger-list">
           <div v-for="entry in selectedReconciliation.ledger_entries" :key="entry.key" class="ledger-row">
@@ -322,9 +332,6 @@
           </div>
         </div>
         <van-empty v-else image-size="60" description="该周期暂无资金或收益流水" />
-        <p v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="detail-note">
-          资金/持仓变动中含 {{ formatSignedAmount(selectedReconciliation.inferred_position_flow) }} 未关联交易流水的持仓调整，可在上方明细中核对。
-        </p>
       </div>
     </van-popup>
 
@@ -1276,61 +1283,72 @@ onActivated(() => {
   box-shadow: 0 5px 16px rgba(37, 59, 91, .05);
 }
 
-.period-closing-value {
+.period-card-arrow {
   flex: none;
-  text-align: right;
+  color: #b1bac8;
+  font-size: 15px;
 }
 
-.period-closing-value span,
-.reconciliation-equation span {
+.period-metric-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.period-main-metric {
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: 11px;
+  background: #f5f8fc;
+}
+
+.period-main-metric.profit-metric {
+  background: #f7f8ff;
+}
+
+.period-main-metric span,
+.period-main-metric small {
   display: block;
   color: #8a94a3;
   font-size: 9px;
 }
 
-.period-closing-value strong {
+.period-main-metric strong {
   display: block;
-  margin-top: 2px;
+  margin-top: 4px;
+  overflow: hidden;
   color: #172033;
   font-family: 'Courier New', monospace;
-  font-size: 15px;
-}
-
-.reconciliation-equation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr) 10px minmax(0, 1fr) 10px minmax(0, 1fr);
-  align-items: center;
-  margin-top: 9px;
-  padding: 9px 7px;
-  border-radius: 10px;
-  background: #f6f9fd;
-}
-
-.reconciliation-equation > div {
-  min-width: 0;
-  text-align: center;
-}
-
-.reconciliation-equation > div:last-child {
-  grid-column: 7 / 8;
-}
-
-.reconciliation-equation i {
-  color: #a3adbb;
-  font-size: 11px;
-  font-style: normal;
-  text-align: center;
-}
-
-.reconciliation-equation strong {
-  display: block;
-  margin-top: 3px;
-  overflow: hidden;
-  color: #334155;
-  font-family: 'Courier New', monospace;
-  font-size: 10px;
+  font-size: clamp(14px, 4.2vw, 18px);
+  letter-spacing: -.3px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.period-main-metric small {
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.period-balance-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #a0aaba;
+  font-size: 9px;
+}
+
+.period-balance-line span {
+  min-width: 0;
+}
+
+.period-balance-line b {
+  color: #657187;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
 }
 
 .period-card .period-top {
@@ -1360,13 +1378,43 @@ onActivated(() => {
 .reconciliation-card .period-secondary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   text-align: left;
+}
+
+.reconciliation-meta {
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f7;
+}
+
+.flow-chip,
+.snapshot-gap-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #f2f5f9;
+  color: #788497;
+  font-size: 9px;
+}
+
+.snapshot-gap-chip {
+  background: #fff7e8;
+  color: #ad7414;
+}
+
+.flow-chip b,
+.snapshot-gap-chip b {
+  font-family: 'Courier New', monospace;
 }
 
 .reconciliation-link {
   display: inline-flex;
   align-items: center;
+  margin-left: auto;
   color: #1e80ff;
   font-weight: 600;
 }
@@ -1406,20 +1454,29 @@ onActivated(() => {
 .detail-header button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: #e8edf5; color: #64748b; }
 
 .detail-equation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 11px minmax(0, 1fr) 11px minmax(0, 1fr) 11px minmax(0, 1fr);
-  align-items: center;
-  padding: 13px 8px;
+  padding: 6px 13px;
   border: 1px solid #e2e9f3;
   border-radius: 15px;
   background: #fff;
 }
 
-.detail-equation > div { min-width: 0; text-align: center; }
-.detail-equation > div:last-child { grid-column: 7 / 8; }
-.detail-equation span { display: block; color: #8490a3; font-size: 9px; }
-.detail-equation b { display: block; margin-top: 4px; overflow: hidden; color: #253047; font-family: 'Courier New', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.detail-equation i { color: #9aa5b5; font-style: normal; text-align: center; }
+.detail-equation > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  border-bottom: 1px solid #f0f3f7;
+}
+
+.detail-equation > div:last-child { border-bottom: 0; }
+.detail-equation span { color: #8490a3; font-size: 11px; }
+.detail-equation b { flex: none; color: #253047; font-family: 'Courier New', monospace; font-size: 12px; }
+.detail-equation i { display: inline-block; width: 12px; color: #a6afbd; font-style: normal; text-align: center; }
+.detail-equation .snapshot-gap-row { margin: 0 -5px; padding: 0 5px; border-radius: 8px; background: #fffaf0; }
+.detail-equation .detail-total-row { min-height: 44px; }
+.detail-equation .detail-total-row span,
+.detail-equation .detail-total-row b { color: #172033; font-weight: 700; }
 
 .detail-status {
   display: flex;
@@ -1445,7 +1502,8 @@ onActivated(() => {
 .ledger-copy strong { color: #334155; font-size: 11px; }
 .ledger-copy small { margin-top: 2px; color: #98a2b3; font-size: 9px; }
 .ledger-row > b { font-family: 'Courier New', monospace; font-size: 11px; }
-.detail-note { margin-top: 9px; padding: 9px 10px; border-radius: 10px; background: #eef5ff; color: #6f7e94; font-size: 9px; line-height: 1.5; }
+.detail-note { margin: -4px 0 13px; padding: 10px 11px; border-radius: 10px; background: #fff7e8; color: #8a6b35; font-size: 10px; line-height: 1.55; }
+.detail-note strong { display: block; margin-bottom: 3px; color: #78520f; font-size: 11px; }
 
 .daily-history-card {
   background: #fafafa;
