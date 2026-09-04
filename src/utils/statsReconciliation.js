@@ -62,6 +62,56 @@ const getTradeCategory = type => {
 
 const isDividendTrade = trade => ['现金分红', '红利再投', '分红再投'].includes(String(trade?.trade_type || ''))
 
+const getDividendEventAmount = (event, snapshots, filters, effectiveDate) => {
+  const perShare = safeNumber(event?.detail?.dividend_per_share)
+  if (perShare <= 0) return 0
+
+  const snapshot = findSnapshot(snapshots, item => String(item.date) <= effectiveDate)
+  if (!snapshot) {
+    const isUnfiltered = (!filters?.memberId || filters.memberId === 'all')
+      && (!filters?.accountId || filters.accountId === 'all')
+      && (!filters?.fundType || filters.fundType === 'all')
+    return isUnfiltered ? round2(event?.detail?.estimated_amount) : 0
+  }
+  const shares = scopedPositions(snapshot, filters)
+    .filter(position => String(position?.fund_code || '') === String(event?.fund_code || ''))
+    .reduce((sum, position) => sum + safeNumber(position?.shares), 0)
+  return round2(shares * perShare)
+}
+
+const buildDividendSettlementEntries = ({ events, snapshots, filters, startDate, endDate }) => {
+  const entries = []
+  for (const event of events || []) {
+    if (event?.event_type !== 'dividend' || event?.source_type !== 'dividend_announcement') continue
+    const exDate = String(event?.detail?.ex_date || '')
+    const paymentDate = String(event?.detail?.payment_date || '')
+    const amount = getDividendEventAmount(event, snapshots, filters, exDate || paymentDate)
+    if (amount <= 0) continue
+
+    if (exDate >= startDate && exDate <= endDate) {
+      entries.push({
+        key: `dividend-receivable-${event.id || `${event.fund_code}-${exDate}`}`,
+        date: exDate,
+        category: '分红待入账',
+        title: event.fund_name || event.title || event.fund_code || '基金分红',
+        amount: -amount,
+        note: `除息后待到账 · 预计 ${paymentDate || '待确认'}`,
+      })
+    }
+    if (paymentDate >= startDate && paymentDate <= endDate) {
+      entries.push({
+        key: `dividend-settled-${event.id || `${event.fund_code}-${paymentDate}`}`,
+        date: paymentDate,
+        category: '分红到账',
+        title: event.fund_name || event.title || event.fund_code || '基金分红',
+        amount,
+        note: '释放除息日待入账分红',
+      })
+    }
+  }
+  return entries
+}
+
 const isTradeInWindow = (trade, { startDate, endDate, openingSnapshot, closingSnapshot, openingWithinPeriod }) => {
   const effectiveDate = String(trade?.trade_date || '')
   const recordedAt = getTradeRecordedAt(trade)
@@ -83,6 +133,7 @@ export const buildPeriodReconciliations = ({
   dailyRows = [],
   snapshots = [],
   trades = [],
+  dividendEvents = [],
   filters = {},
 } = {}) => {
   const orderedSnapshots = sortSnapshotsAsc(snapshots)
@@ -138,10 +189,19 @@ export const buildPeriodReconciliations = ({
         amount: round2(trade.amount),
         note: trade.trade_type,
       }))
-    const dividendProfit = round2(dividendEntries.reduce((sum, entry) => sum + entry.amount, 0))
-    const investmentProfit = round2(confirmedProfit + dividendProfit)
-    const inferredPositionFlow = round2(closingMarketValue - openingMarketValue - explicitCapitalFlow - investmentProfit)
-    const netCapitalFlow = round2(explicitCapitalFlow + inferredPositionFlow)
+    // 官方日涨跌幅已经包含分红回报，分红流水不能再次叠加到周期收益。
+    // 除息日至到账日之间，基金市值暂不包含这笔收益，因此单独列为“分红待入账”。
+    const investmentProfit = confirmedProfit
+    const dividendSettlementEntries = buildDividendSettlementEntries({
+      events: dividendEvents,
+      snapshots: orderedSnapshots,
+      filters,
+      startDate,
+      endDate,
+    })
+    const dividendSettlementFlow = round2(dividendSettlementEntries.reduce((sum, entry) => sum + entry.amount, 0))
+    const inferredPositionFlow = round2(closingMarketValue - openingMarketValue - explicitCapitalFlow - investmentProfit - dividendSettlementFlow)
+    const netCapitalFlow = round2(explicitCapitalFlow + dividendSettlementFlow + inferredPositionFlow)
     const balanceDifference = round2(closingMarketValue - openingMarketValue - netCapitalFlow - investmentProfit)
     const inferredPositionEntries = Math.abs(inferredPositionFlow) >= 0.01
       ? [{
@@ -173,6 +233,7 @@ export const buildPeriodReconciliations = ({
       opening_is_estimated: !priorSnapshot,
       closing_market_value: closingMarketValue,
       explicit_capital_flow: explicitCapitalFlow,
+      dividend_settlement_flow: dividendSettlementFlow,
       inferred_position_flow: inferredPositionFlow,
       net_capital_flow: netCapitalFlow,
       confirmed_profit: confirmedProfit,
@@ -181,7 +242,18 @@ export const buildPeriodReconciliations = ({
       confirmation_adjustment: confirmationAdjustment,
       balance_difference: balanceDifference,
       is_balanced: Math.abs(balanceDifference) < 0.01,
-      ledger_entries: [...tradeEntries, ...inferredPositionEntries, ...dividendEntries, ...profitEntries]
+      ledger_entries: [
+        ...tradeEntries,
+        ...inferredPositionEntries,
+        ...dividendSettlementEntries,
+        ...dividendEntries.map(entry => ({
+          ...entry,
+          reference_amount: entry.amount,
+          amount: 0,
+          note: `${entry.note} · 已含在当日确认收益`,
+        })),
+        ...profitEntries,
+      ]
         .sort((left, right) => String(right.date).localeCompare(String(left.date)) || String(left.key).localeCompare(String(right.key))),
     }
   })

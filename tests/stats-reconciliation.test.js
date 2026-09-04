@@ -41,7 +41,7 @@ test('周期对账按期初、资金变动、收益和期末生成可核验公�
   assert.equal(rows[0].ledger_entries.some(item => item.category === '资金流入'), true)
 })
 
-test('延迟录入的红利再投按实际入账时间进入当期对账', () => {
+test('延迟录入的红利再投通过到账调整进入当期对账且不重复计入收益', () => {
   const rows = buildPeriodReconciliations({
     periodRows,
     dailyRows: [{ date: '2026-08-20', daily_profit: 4.88 }],
@@ -54,13 +54,50 @@ test('延迟录入的红利再投按实际入账时间进入当期对账', () =>
         quantity: 15.93, amount: 17.8,
       },
     ],
+    dividendEvents: [{
+      id: 'event-d1', event_type: 'dividend', source_type: 'dividend_announcement', fund_code: 'A', fund_name: '基金A',
+      detail: { ex_date: '2026-08-10', payment_date: '2026-08-17', dividend_per_share: 0.0000356, estimated_amount: 17.8 },
+    }],
   })
 
   assert.equal(rows[0].ledger_entries.some(item => item.category === '分红收益'), true)
-  assert.equal(rows[0].net_capital_flow, 1000)
-  assert.equal(rows[0].investment_profit, 22.68)
+  assert.equal(rows[0].net_capital_flow, 1017.8)
+  assert.equal(rows[0].investment_profit, 4.88)
+  assert.equal(rows[0].dividend_settlement_flow, 17.8)
+  assert.equal(rows[0].inferred_position_flow, 0)
   assert.equal(rows[0].confirmation_adjustment, 0)
   assert.equal(rows[0].is_balanced, true)
+})
+
+test('除息日把待入账分红从快照差额中拆出', () => {
+  const rows = buildPeriodReconciliations({
+    periodRows: [{
+      period_key: '2026-08-31', period_label: '2026-08-31 周', start_date: '2026-08-31', end_date: '2026-09-04',
+      total_market_value: 560682, period_profit: 241.23,
+    }],
+    dailyRows: [{ date: '2026-09-04', daily_profit: 241.23 }],
+    snapshots: [
+      {
+        date: '2026-08-28', captured_at: Date.parse('2026-08-28T23:00:00+08:00'),
+        positions: [{ account_id: 'ali', fund_code: '008163', fund_name: '南方红利低波50ETF联接A', cost: 500000, current_profit: 59535.08, shares: 21966.7301 }],
+      },
+      {
+        date: '2026-09-04', captured_at: Date.parse('2026-09-04T23:00:00+08:00'),
+        positions: [{ account_id: 'ali', fund_code: '008163', fund_name: '南方红利低波50ETF联接A', cost: 501000, current_profit: 59682, shares: 21966.7301 }],
+      },
+    ],
+    trades: [{ id: 'buy', account_id: 'ali', fund_code: '008163', trade_type: '买入', trade_date: '2026-09-01', amount: 1000 }],
+    dividendEvents: [{
+      id: 'dividend-008163', event_type: 'dividend', source_type: 'dividend_announcement',
+      fund_code: '008163', fund_name: '南方红利低波50ETF联接A',
+      detail: { ex_date: '2026-09-04', payment_date: '2026-09-07', dividend_per_share: 0.004, estimated_amount: 87.87 },
+    }],
+  })
+
+  assert.equal(rows[0].investment_profit, 241.23)
+  assert.equal(rows[0].dividend_settlement_flow, -87.87)
+  assert.equal(rows[0].inferred_position_flow, -6.44)
+  assert.equal(rows[0].ledger_entries.some(item => item.category === '分红待入账' && item.amount === -87.87), true)
 })
 
 test('缺少周期期初快照时从首个可用快照起算', () => {

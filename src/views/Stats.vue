@@ -189,7 +189,7 @@
           <div class="period-metric-grid">
             <div class="period-main-metric">
               <span>期末基金市值</span>
-              <strong>¥{{ formatAmount(row.closing_market_value) }}</strong>
+              <strong :class="profitClass(row.closing_market_value)">¥{{ formatAmount(row.closing_market_value) }}</strong>
             </div>
             <div class="period-main-metric profit-metric">
               <span>本期投资收益</span>
@@ -198,12 +198,13 @@
             </div>
           </div>
           <div class="period-balance-line">
-            <span>期初 <b>¥{{ formatAmount(row.opening_market_value) }}</b></span>
+            <span>期初 <b :class="profitClass(row.opening_market_value)">¥{{ formatAmount(row.opening_market_value) }}</b></span>
             <van-icon name="arrow" />
-            <span>期末 <b>¥{{ formatAmount(row.closing_market_value) }}</b></span>
+            <span>期末 <b :class="profitClass(row.closing_market_value)">¥{{ formatAmount(row.closing_market_value) }}</b></span>
           </div>
           <div class="period-secondary reconciliation-meta">
             <span class="flow-chip">已记录资金 <b :class="profitClass(row.explicit_capital_flow)">{{ formatSignedAmount(row.explicit_capital_flow) }}</b></span>
+            <span v-if="Math.abs(row.dividend_settlement_flow) >= 0.01" class="dividend-settlement-chip">{{ row.dividend_settlement_flow < 0 ? '分红待入账' : '分红已到账' }} <b :class="profitClass(row.dividend_settlement_flow)">{{ formatSignedAmount(row.dividend_settlement_flow) }}</b></span>
             <span v-if="Math.abs(row.inferred_position_flow) >= 0.01" class="snapshot-gap-chip">快照差额 <b :class="profitClass(row.inferred_position_flow)">{{ formatSignedAmount(row.inferred_position_flow) }}</b></span>
             <span class="reconciliation-link">查看明细 <van-icon name="arrow" /></span>
           </div>
@@ -312,6 +313,7 @@
           <div><span>期初基金市值</span><b>¥{{ formatAmount(selectedReconciliation.opening_market_value) }}</b></div>
           <div><span><i>+</i> 已记录资金流</span><b :class="profitClass(selectedReconciliation.explicit_capital_flow)">{{ formatSignedAmount(selectedReconciliation.explicit_capital_flow) }}</b></div>
           <div><span><i>+</i> 本期投资收益</span><b :class="profitClass(selectedReconciliation.investment_profit)">{{ formatSignedAmount(selectedReconciliation.investment_profit) }}</b></div>
+          <div v-if="Math.abs(selectedReconciliation.dividend_settlement_flow) >= 0.01"><span><i>+</i> 分红结算调整</span><b :class="profitClass(selectedReconciliation.dividend_settlement_flow)">{{ formatSignedAmount(selectedReconciliation.dividend_settlement_flow) }}</b></div>
           <div v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="snapshot-gap-row"><span><i>+</i> 快照差额</span><b :class="profitClass(selectedReconciliation.inferred_position_flow)">{{ formatSignedAmount(selectedReconciliation.inferred_position_flow) }}</b></div>
           <div class="detail-total-row"><span><i>=</i> 期末基金市值</span><b>¥{{ formatAmount(selectedReconciliation.closing_market_value) }}</b></div>
         </div>
@@ -321,14 +323,14 @@
         </div>
         <p v-if="Math.abs(selectedReconciliation.inferred_position_flow) >= 0.01" class="detail-note">
           <strong>什么是快照差额？</strong>
-          它不是一笔真实交易，而是“期末市值变化”扣除已记录资金流和已确认收益后的差额。通常来自非每日净值基金、净值/份额精度、历史补录或手动校准。
+          它不是一笔真实交易，而是“期末市值变化”扣除已记录资金流、已确认收益和分红结算后的差额。通常来自非每日净值基金、净值/份额精度、历史补录或手动校准。
         </p>
         <div class="ledger-heading"><strong>明细流水</strong><span>交易归属日 · 收益确认日</span></div>
         <div v-if="selectedReconciliation.ledger_entries.length" class="ledger-list">
           <div v-for="entry in selectedReconciliation.ledger_entries" :key="entry.key" class="ledger-row">
             <div class="ledger-date">{{ shortMonthDay(entry.date) }}</div>
             <div class="ledger-copy"><span class="ledger-category">{{ entry.category }}</span><strong>{{ entry.title }}</strong><small>{{ entry.note }}</small></div>
-            <b :class="profitClass(entry.amount)">{{ formatSignedAmount(entry.amount) }}</b>
+            <b :class="profitClass(entry.reference_amount ?? entry.amount)">{{ formatSignedAmount(entry.reference_amount ?? entry.amount) }}</b>
           </div>
         </div>
         <van-empty v-else image-size="60" description="该周期暂无资金或收益流水" />
@@ -347,7 +349,7 @@ import { showToast } from 'vant'
 import AllocationBucketProfitCalendar from '../components/AllocationBucketProfitCalendar.vue'
 import PeriodProfitBarChart from '../components/PeriodProfitBarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
-import { familyFinanceApi, tradeApi } from '../api'
+import { eventApi, familyFinanceApi, tradeApi } from '../api'
 import { authIdentity, loadAuthIdentity } from '../utils/authIdentity'
 import { formatAmount, formatPercent, formatSignedAmount, profitClass } from '../utils/formatters'
 import { captureProfitSnapshotFromApis } from '../utils/profitSnapshotService'
@@ -375,6 +377,7 @@ const familyOverview = ref(cachedStats?.familyOverview || null)
 const activeStatsDomain = ref('family')
 const allSnapshots = ref(getProfitSnapshots())
 const allTrades = ref(cachedStats?.trades || [])
+const allDividendEvents = ref(cachedStats?.dividendEvents || [])
 const lastLoadedAt = ref(cachedStats?.savedAt || 0)
 const hasLoadedOnce = ref(Boolean(cachedStats?.overview))
 
@@ -466,6 +469,17 @@ const loadTrades = async () => {
   }
 }
 
+const loadDividendEvents = async () => {
+  try {
+    const eventData = await eventApi.list({ group: 'all', limit: 200 })
+    const groups = eventData?.groups || {}
+    allDividendEvents.value = [...(groups.pending || []), ...(groups.confirmed || [])]
+      .filter(event => event.event_type === 'dividend' && event.source_type === 'dividend_announcement')
+  } catch (error) {
+    console.warn('Failed to load dividend reconciliation events:', error)
+  }
+}
+
 const fetchData = async () => {
   loading.value = true
   try {
@@ -475,8 +489,8 @@ const fetchData = async () => {
     if (familyResult.status === 'fulfilled') familyOverview.value = familyResult.value
     else console.warn('Failed to fetch family stats:', familyResult.reason)
     refreshSnapshots()
-    await loadTrades()
-    writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value })
+    await Promise.all([loadTrades(), loadDividendEvents()])
+    writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value, dividendEvents: allDividendEvents.value })
     hasLoadedOnce.value = true
     lastLoadedAt.value = Date.now()
   } catch (error) {
@@ -497,7 +511,7 @@ const handleRefresh = async () => {
     loading.value = true
     try {
       familyOverview.value = await familyFinanceApi.overview()
-      writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value })
+      writePageCache('stats', { overview: overview.value, familyOverview: familyOverview.value, trades: allTrades.value, dividendEvents: allDividendEvents.value })
       showToast('家庭资产统计已刷新')
     } catch (error) {
       console.error('Failed to refresh family stats:', error)
@@ -561,6 +575,7 @@ const periodReconciliations = computed(() => buildPeriodReconciliations({
   dailyRows: allDailyHistoryRows.value,
   snapshots: allSnapshots.value,
   trades: allTrades.value,
+  dividendEvents: allDividendEvents.value,
   filters: {
     memberId: selectedMember.value,
     accountId: selectedAccount.value,
@@ -704,6 +719,7 @@ onMounted(() => {
   ensureFreshData({ force: true })
   syncSnapshots().catch(() => {})
   loadTrades().catch(() => {})
+  loadDividendEvents().catch(() => {})
 })
 
 onUnmounted(() => {
@@ -714,6 +730,7 @@ onActivated(() => {
   ensureFreshData()
   syncSnapshots().catch(() => {})
   loadTrades().catch(() => {})
+  loadDividendEvents().catch(() => {})
 })
 </script>
 
@@ -1326,6 +1343,16 @@ onActivated(() => {
   white-space: nowrap;
 }
 
+.period-main-metric strong.positive,
+.period-balance-line b.positive {
+  color: #f87171;
+}
+
+.period-main-metric strong.negative,
+.period-balance-line b.negative {
+  color: #4ade80;
+}
+
 .period-main-metric small {
   margin-top: 2px;
   font-weight: 600;
@@ -1390,6 +1417,7 @@ onActivated(() => {
 }
 
 .flow-chip,
+.dividend-settlement-chip,
 .snapshot-gap-chip {
   display: inline-flex;
   align-items: center;
@@ -1401,12 +1429,18 @@ onActivated(() => {
   font-size: 9px;
 }
 
+.dividend-settlement-chip {
+  background: #fff1f2;
+  color: #d95a66;
+}
+
 .snapshot-gap-chip {
   background: #fff7e8;
   color: #ad7414;
 }
 
 .flow-chip b,
+.dividend-settlement-chip b,
 .snapshot-gap-chip b {
   font-family: 'Courier New', monospace;
 }

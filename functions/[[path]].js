@@ -3406,7 +3406,7 @@ export async function onRequest(context) {
     if (path === '/api/events' && method === 'GET') {
       const requestedGroup = url.searchParams.get('group');
       const group = requestedGroup === 'confirmed' ? 'confirmed' : (requestedGroup === 'all' ? 'all' : 'pending');
-      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') || 5)));
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 5)));
       const statements = group === 'all'
         ? [
             env.DB.prepare("SELECT * FROM events WHERE household_id = ? AND status = 'pending' ORDER BY event_time DESC, created_at DESC LIMIT ?").bind(householdId, limit),
