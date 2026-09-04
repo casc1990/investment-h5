@@ -250,58 +250,6 @@
       <van-empty v-else description="当前筛选范围暂无收益贡献数据" />
     </div>
 
-    <div class="section">
-      <div class="section-header">
-        <div>
-          <div class="section-title">🗓️ 历史每日账户统计</div>
-          <div class="section-subtitle">当前筛选：{{ activeScopeName }}</div>
-        </div>
-      </div>
-
-      <template v-if="dailyHistoryRows.length">
-        <div class="daily-card-list">
-          <div v-for="row in visibleDailyHistoryRows" :key="`${row.date}-${row.account_id}`" class="daily-history-card">
-            <div class="daily-card-top">
-              <div>
-                <div class="period-title">{{ row.date }}</div>
-                <div class="period-date">{{ row.account_name }}</div>
-              </div>
-              <div class="period-amount">¥{{ formatAmount(row.total_market_value) }}</div>
-            </div>
-            <div class="period-grid">
-              <div>
-                <span class="small-label">当日收益</span>
-                <div class="small-value" :class="profitClass(row.daily_profit)">{{ formatSignedAmount(row.daily_profit) }}</div>
-              </div>
-              <div>
-                <span class="small-label">当日收益率</span>
-                <div class="small-value" :class="profitClass(row.daily_profit_rate)">{{ formatSignedPercent(row.daily_profit_rate) }}</div>
-              </div>
-            </div>
-            <div class="period-secondary">总收益 <span :class="profitClass(row.total_profit)">{{ formatSignedAmount(row.total_profit) }}</span> · 总收益率 <span :class="profitClass(row.total_profit_rate)">{{ formatSignedPercent(row.total_profit_rate) }}</span></div>
-          </div>
-        </div>
-
-        <div v-if="dailyHistoryRows.length > 2" class="more-actions">
-          <button
-            v-if="visibleDailyHistoryRows.length < dailyHistoryRows.length"
-            class="more-button"
-            @click="handleMoreDailyHistoryRows"
-          >
-            查询更多（已显示 {{ visibleDailyHistoryRows.length }}/{{ dailyHistoryRows.length }}）
-          </button>
-          <button
-            v-if="visibleDailyHistoryRows.length > 2"
-            class="more-button collapse-button"
-            @click="handleCollapseDailyHistoryRows"
-          >
-            收起
-          </button>
-        </div>
-      </template>
-      <van-empty v-else description="暂无历史快照，点一次刷新统计即可开始积累" />
-    </div>
-
     <van-popup v-model:show="showReconciliationDetail" position="bottom" round teleport="body" class="reconciliation-popup">
       <div v-if="selectedReconciliation" class="reconciliation-detail">
         <div class="detail-drag-handle"></div>
@@ -396,7 +344,6 @@ const periodVisibleCountMap = ref({
   halfyear: 2,
   year: 2,
 })
-const dailyHistoryVisibleCount = ref(2)
 const contributionRange = ref(30)
 const selectedReconciliation = ref(null)
 const showReconciliationDetail = ref(false)
@@ -562,8 +509,6 @@ const allDailyHistoryRows = computed(() => buildDailyHistoryRows(allSnapshots.va
   accountId: selectedAccount.value,
   fundType: selectedFundType.value,
 }))
-const dailyHistoryRows = computed(() => allDailyHistoryRows.value)
-const visibleDailyHistoryRows = computed(() => dailyHistoryRows.value.slice(0, dailyHistoryVisibleCount.value))
 const periodRows = computed(() => buildPeriodHistoryRows(allSnapshots.value, {
   memberId: selectedMember.value,
   accountId: selectedAccount.value,
@@ -651,37 +596,9 @@ const handleMorePeriodRows = () => {
   }
 }
 
-const handleMoreDailyHistoryRows = () => {
-  dailyHistoryVisibleCount.value = getNextLoopDisplayCount({
-    total: dailyHistoryRows.value.length,
-    current: dailyHistoryVisibleCount.value,
-  })
-}
-
-const handleCollapseDailyHistoryRows = () => {
-  dailyHistoryVisibleCount.value = Math.min(2, dailyHistoryRows.value.length)
-}
-
 watch(trendRows, (rows) => {
   selectedTrendRow.value = rows[0] || null
 }, { immediate: true })
-
-watch(dailyHistoryRows, (rows) => {
-  if (rows.length <= 2) {
-    dailyHistoryVisibleCount.value = rows.length
-    return
-  }
-  if (dailyHistoryVisibleCount.value > rows.length) {
-    dailyHistoryVisibleCount.value = rows.length
-  }
-  if (dailyHistoryVisibleCount.value < 2) {
-    dailyHistoryVisibleCount.value = 2
-  }
-}, { immediate: true })
-
-watch([selectedMember, selectedAccount, selectedFundType], () => {
-  dailyHistoryVisibleCount.value = 2
-})
 
 const resetFilters = () => {
   selectedMember.value = 'all'
@@ -829,8 +746,6 @@ onActivated(() => {
 .profit-label,
 .rate-label,
 .section-subtitle,
-.small-label,
-.daily-account,
 .period-date {
   font-size: 12px;
   opacity: 0.86;
@@ -869,8 +784,6 @@ onActivated(() => {
 .profit-value,
 .rate-value,
 .metric-value,
-.period-amount,
-.small-value,
 .value,
 .position-profit .profit,
 .position-profit .rate {
@@ -1137,13 +1050,11 @@ onActivated(() => {
   padding: 12px;
 }
 
-.metric-label,
-.small-label {
+.metric-label {
   color: #7b8794;
 }
 
 .metric-value,
-.small-value,
 .value,
 .table-value {
   display: block;
@@ -1159,7 +1070,6 @@ onActivated(() => {
 }
 
 .period-list,
-.daily-card-list,
 .position-list {
   display: flex;
   flex-direction: column;
@@ -1539,34 +1449,6 @@ onActivated(() => {
 .detail-note { margin: -4px 0 13px; padding: 10px 11px; border-radius: 10px; background: #fff7e8; color: #8a6b35; font-size: 10px; line-height: 1.55; }
 .detail-note strong { display: block; margin-bottom: 3px; color: #78520f; font-size: 11px; }
 
-.daily-history-card {
-  background: #fafafa;
-  border: 1px solid #f0f0f0;
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-
-.daily-card-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 0;
-}
-
-.daily-history-card .period-grid {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #edf0f3;
-}
-
-.daily-history-card .period-grid > div:last-child {
-  text-align: right;
-}
-
 .period-title,
 .fund-name {
   font-size: 14px;
@@ -1594,12 +1476,6 @@ onActivated(() => {
 
 .table-scope {
   white-space: nowrap;
-}
-
-.period-amount {
-  font-size: 16px;
-  font-weight: 700;
-  color: #222;
 }
 
 .daily-row,

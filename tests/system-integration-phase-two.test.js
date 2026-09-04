@@ -35,6 +35,8 @@ test('统计页整合家庭资产和基金收益且保留原基金统计', () =>
   assert.match(statsSource, /它不是一笔真实交易/)
   assert.match(statsSource, /期末基金市值/)
   assert.match(statsSource, /查看明细/)
+  assert.doesNotMatch(statsSource, /历史每日账户统计/)
+  assert.doesNotMatch(statsSource, /dailyHistoryVisibleCount|visibleDailyHistoryRows|handleMoreDailyHistoryRows/)
   assert.match(statsSource, /router\.push\('\/data-health'\)/)
 })
 
