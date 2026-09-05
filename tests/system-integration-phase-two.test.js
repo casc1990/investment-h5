@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const homeSource = readFileSync(new URL('../src/views/Home.vue', import.meta.url), 'utf8')
 const statsSource = readFileSync(new URL('../src/views/Stats.vue', import.meta.url), 'utf8')
+const functionSource = readFileSync(new URL('../functions/[[path]].js', import.meta.url), 'utf8')
 
 test('首页将家庭总览和基金资产合并为同一张主卡', () => {
   assert.match(homeSource, /class="portfolio-overview-card"/)
@@ -58,6 +59,8 @@ test('家庭净资产趋势读取快照净资产且资产结构按二级分类�
   assert.match(statsSource, /familyOverview\.value\?\.categories\?\.assets/)
   assert.match(statsSource, /asset\.category_code/)
   assert.doesNotMatch(statsSource, /label: '其他资产', value: summary\.manual_asset_value/)
+  assert.match(statsSource, /末点展示含基金收益的最新资产/)
+  assert.match(functionSource, /appendCurrentFamilySnapshot\(snapshots, data\.summary, todayDate\)/)
 })
 
 test('家庭统计加载失败不会阻断现有基金统计', () => {

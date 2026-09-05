@@ -9,6 +9,7 @@ import {
   FAMILY_ASSET_CATEGORY_MAP,
   FAMILY_LIABILITY_CATEGORIES,
   FAMILY_RECEIVABLE_CATEGORIES,
+  appendCurrentFamilySnapshot,
   buildFamilySummary,
   validateFamilyAsset,
 } from '../shared/familyFinance.js'
@@ -3005,7 +3006,9 @@ export async function onRequest(context) {
         overdue_amount: normalizeFamilyMoney(overdueReceivables.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0)),
         overdue_count: overdueReceivables.length,
       };
-      const snapshots = snapshotQuery.results || [];
+      const snapshots = (snapshotQuery.results || [])
+        .map(row => ({ date: row.snapshot_date, ...JSON.parse(row.summary_json) }))
+        .reverse();
       return jsonResponse({
         code: 0,
         data: {
@@ -3015,7 +3018,7 @@ export async function onRequest(context) {
             receivables: FAMILY_RECEIVABLE_CATEGORIES,
             liabilities: FAMILY_LIABILITY_CATEGORIES,
           },
-          snapshots: (snapshots || []).map(row => ({ date: row.snapshot_date, ...JSON.parse(row.summary_json) })).reverse(),
+          snapshots: appendCurrentFamilySnapshot(snapshots, data.summary, todayDate),
           asset_trend: assetTrend,
           receivable_trend: receivableTrend,
           receivable_summary: receivableSummary,

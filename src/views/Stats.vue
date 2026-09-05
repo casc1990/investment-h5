@@ -18,7 +18,7 @@
       </section>
 
       <section class="section family-trend-section">
-        <div class="section-header"><div><div class="section-title">📈 净资产趋势</div><div class="section-subtitle">家庭资产、应收和负债变化后自动记录</div></div></div>
+        <div class="section-header"><div><div class="section-title">📈 净资产趋势</div><div class="section-subtitle">历史变动自动记录，末点展示含基金收益的最新资产</div></div></div>
         <TrendChart :points="familyNetWorthPoints" summary-label="所选日期净资产" :formatter="familyMoney" :y-axis-formatter="compactFamilyMoney" />
       </section>
 

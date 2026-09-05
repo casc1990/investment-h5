@@ -36,6 +36,23 @@ export const FAMILY_LIABILITY_CATEGORIES = Object.freeze([
 
 const roundMoney = value => Number(Number(value || 0).toFixed(2))
 
+export function appendCurrentFamilySnapshot(snapshots = [], currentSummary = {}, currentDate = '') {
+  const rows = (Array.isArray(snapshots) ? snapshots : [])
+    .filter(row => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.date || '')))
+    .map(row => ({ ...row }))
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(currentDate || ''))) return rows
+
+  const currentRow = { date: currentDate, ...currentSummary, is_current: true }
+  const existingIndex = rows.findIndex(row => row.date === currentDate)
+  if (existingIndex >= 0) {
+    rows.splice(existingIndex, 1, { ...rows[existingIndex], ...currentRow })
+  } else if (!rows.length || String(rows.at(-1).date) < currentDate) {
+    rows.push(currentRow)
+  }
+  return rows
+}
+
 export function validateFamilyAsset(input = {}) {
   const errors = []
   if (!String(input.name || '').trim()) errors.push('资产名称不能为空')
